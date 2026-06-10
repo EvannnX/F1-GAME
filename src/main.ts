@@ -15,6 +15,7 @@ import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createIntro } from './ui/intro'
 import { createMinimap } from './ui/minimap'
+import { createTelemetryMap, type TelemetryMapRoadTriangle } from './ui/telemetryMap'
 import { createPersonalityCard } from './ui/personalityCard'
 import type { PlayerStats } from './racerPersonality'
 import { SFX, unlockAudio } from './audio/zzfx'
@@ -27,9 +28,676 @@ import {
   PLAYER_GRID_SLOT,
   updateOpponent,
   progress as raceProgress,
+  type OpponentProfile,
   type OpponentState,
 } from './game/opponents'
 import { createOpponentCars, type OpponentCarBundle } from './render/opponentCars'
+import {
+  addLowPolyShanghai,
+  createLowPolyShanghaiGroundGridSampler,
+  createLowPolyShanghaiGroundSampler,
+  createLowPolyShanghaiObstacleSampler,
+  createLowPolyShanghaiVisualOptimizer,
+  eraseLowPolyShanghaiTriangles,
+  optimizeLowPolyShanghaiRendering,
+  type LowPolyShanghaiBundle,
+  type LowPolyShanghaiGroundSampler,
+  type LowPolyShanghaiTriangleErase,
+} from './render/lowPolyShanghai'
+import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
+
+const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
+const GLB_START_HEADING = 0
+const GLB_THIRD_BACK_DISTANCE = 6.4
+const GLB_THIRD_UP_DISTANCE = 2.45
+const GLB_THIRD_LOOK_AHEAD = 8.2
+const GLB_THIRD_LOOK_UP = 0.75
+const GLB_THIRD_FOV = 42
+const GLB_PLAYER_BASE_VISUAL_SCALE = 0.58
+const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
+const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_MULTIPLIER
+const GLB_PLAYER_TARGET_LENGTH_M = 5.0 * GLB_PLAYER_VISUAL_SCALE
+const GLB_START_POSE_STORAGE_KEY = 'f1s_glb_drive_start_pose_v1'
+const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v2'
+const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v1'
+const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
+
+interface GlbGridPlacement {
+  id: 'player' | 'ferrari' | 'mercedes' | 'mclaren' | 'redbull' | string
+  x: number
+  z: number
+  headingDeg: number
+}
+
+const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
+  { id: 'ferrari', x: -148.66, z: -225.66, headingDeg: 161.58 },
+  { id: 'mercedes', x: -154.48, z: -210.01, headingDeg: 161.58 },
+  { id: 'mclaren', x: -143.94, z: -214.77, headingDeg: 161.58 },
+  { id: 'player', x: -137.84, z: -231.09, headingDeg: 161.58 },
+  { id: 'redbull', x: -142.11, z: -242.06, headingDeg: 161.58 },
+]
+
+const DEFAULT_GLB_SIGN_DELETIONS: LowPolyShanghaiTriangleErase[] = [
+  {
+    point: { x: -381.86, y: -0.45, z: 44.37 },
+    radius: 5,
+    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    verticalOnly: true,
+  },
+]
+
+interface SavedGlbStartPose {
+  x: number
+  z: number
+  y?: number
+  heading?: number
+  yawDeg?: number
+}
+
+function shouldBootMainGame(): boolean {
+  const params = new URLSearchParams(window.location.search)
+  return params.has('oldMainGame') || params.has('legacyMainGame') || params.has('originalMainGame')
+}
+
+function createStatusPanel(): HTMLDivElement {
+  const panel = document.createElement('div')
+  panel.style.cssText = `
+    position:fixed;left:16px;top:16px;z-index:20;
+    min-width:220px;max-width:min(420px,calc(100vw - 32px));
+    padding:12px 14px;border-radius:8px;
+    background:rgba(5,8,12,.74);color:#eaffff;
+    font:600 13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+    box-shadow:0 10px 28px rgba(0,0,0,.26);
+    pointer-events:none;white-space:pre-line;
+  `
+  document.body.appendChild(panel)
+  return panel
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeGlbGridPlacement(value: unknown): GlbGridPlacement | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const id = typeof record.id === 'string' ? record.id : null
+  const x = finiteNumber(record.x)
+  const z = finiteNumber(record.z)
+  const headingDeg = finiteNumber(record.headingDeg) ?? finiteNumber(record.yawDeg)
+  if (!id || x === null || z === null || headingDeg === null) return null
+  return { id, x, z, headingDeg }
+}
+
+function readSavedGlbGridPlacements(): GlbGridPlacement[] {
+  try {
+    const raw = localStorage.getItem(GLB_GRID_STORAGE_KEY)
+    if (!raw) return DEFAULT_GLB_GRID_PLACEMENTS.map((item) => ({ ...item }))
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return DEFAULT_GLB_GRID_PLACEMENTS.map((item) => ({ ...item }))
+    const placements = parsed
+      .map(normalizeGlbGridPlacement)
+      .filter((item): item is GlbGridPlacement => Boolean(item))
+    const merged = new Map<string, GlbGridPlacement>()
+    for (const item of DEFAULT_GLB_GRID_PLACEMENTS) merged.set(item.id, { ...item })
+    for (const item of placements) merged.set(item.id, item)
+    return Array.from(merged.values())
+  } catch {
+    return DEFAULT_GLB_GRID_PLACEMENTS.map((item) => ({ ...item }))
+  }
+}
+
+function findGlbGridPlacement(placements: GlbGridPlacement[], id: string): GlbGridPlacement | null {
+  return placements.find((item) => item.id === id) ?? null
+}
+
+function normalizeSavedGlbSignDeletion(value: unknown): LowPolyShanghaiTriangleErase | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const point = record.point && typeof record.point === 'object'
+    ? record.point as Record<string, unknown>
+    : record
+  const x = finiteNumber(point.x)
+  const y = finiteNumber(point.y)
+  const z = finiteNumber(point.z)
+  const radius = finiteNumber(record.radius)
+  if (x === null || y === null || z === null || radius === null) return null
+  return {
+    point: { x, y, z },
+    radius,
+    meshName: typeof record.meshName === 'string' ? record.meshName : null,
+    verticalOnly: typeof record.verticalOnly === 'boolean' ? record.verticalOnly : true,
+  }
+}
+
+function readSavedGlbSignDeletions(): LowPolyShanghaiTriangleErase[] {
+  try {
+    const raw = localStorage.getItem(GLB_SIGN_DELETIONS_STORAGE_KEY)
+    if (!raw) return DEFAULT_GLB_SIGN_DELETIONS
+    const parsed = JSON.parse(raw)
+    const source = Array.isArray(parsed) ? parsed : [parsed]
+    const deletions = source
+      .map(normalizeSavedGlbSignDeletion)
+      .filter((item): item is LowPolyShanghaiTriangleErase => Boolean(item))
+    return deletions.length ? deletions : DEFAULT_GLB_SIGN_DELETIONS
+  } catch {
+    return DEFAULT_GLB_SIGN_DELETIONS
+  }
+}
+
+function applySavedGlbSignDeletions(lowPolyShanghai: LowPolyShanghaiBundle): number {
+  let removed = 0
+  for (const deletion of readSavedGlbSignDeletions()) {
+    removed += eraseLowPolyShanghaiTriangles(lowPolyShanghai.group, deletion)
+  }
+  return removed
+}
+
+function readSavedLowPolyShanghaiPlacementForMain(): Record<string, number> | undefined {
+  try {
+    const raw = localStorage.getItem(LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY)
+    if (!raw) return undefined
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const x = finiteNumber(parsed.x)
+    const z = finiteNumber(parsed.z)
+    const y = finiteNumber(parsed.y)
+    const yawDeg = finiteNumber(parsed.yawDeg)
+    const scale = finiteNumber(parsed.scale)
+    if (x === null || z === null || y === null || yawDeg === null || scale === null) return undefined
+    return { x, z, y, yawDeg, scale }
+  } catch {
+    return undefined
+  }
+}
+
+function normalizeSavedGlbStartPose(value: unknown): SavedGlbStartPose | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const pos = record.pos && typeof record.pos === 'object'
+    ? record.pos as Record<string, unknown>
+    : record
+  const x = finiteNumber(pos.x)
+  const z = finiteNumber(pos.z)
+  if (x === null || z === null) return null
+  const y = finiteNumber(pos.y) ?? undefined
+  const heading = finiteNumber(record.heading) ?? finiteNumber(record.yaw) ?? undefined
+  const yawDeg = finiteNumber(record.headingDeg) ?? finiteNumber(record.yawDeg) ?? undefined
+  return { x, y, z, heading, yawDeg }
+}
+
+function readSavedGlbStartPose(): SavedGlbStartPose | null {
+  const priorityKeys = [
+    GLB_START_POSE_STORAGE_KEY,
+    'f1s_glb_drive_start_pose',
+    'f1s_direct_glb_start_pose',
+    'f1s_lowpoly_shanghai_start_pose',
+    'f1s_shanghai_glb_start_pose',
+    'f1s_glb_start_pose',
+    'f1s_start_pose',
+  ]
+  const checked = new Set<string>()
+  const readKey = (key: string): SavedGlbStartPose | null => {
+    if (checked.has(key)) return null
+    checked.add(key)
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      const normalized = normalizeSavedGlbStartPose(parsed)
+      if (normalized) return normalized
+      if (key === 'f1s_autosave_track_local_points' && Array.isArray(parsed) && Array.isArray(parsed[0])) {
+        const first = parsed[0] as unknown[]
+        const second = Array.isArray(parsed[1]) ? parsed[1] as unknown[] : first
+        const x = finiteNumber(first[0])
+        const z = finiteNumber(first[1])
+        const nx = finiteNumber(second[0])
+        const nz = finiteNumber(second[1])
+        if (x !== null && z !== null) {
+          return {
+            x,
+            z,
+            heading: nx !== null && nz !== null ? Math.atan2(nx - x, nz - z) : undefined,
+          }
+        }
+      }
+    } catch {
+      return null
+    }
+    return null
+  }
+
+  for (const key of priorityKeys) {
+    const pose = readKey(key)
+    if (pose) return pose
+  }
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (!key || !/(glb|shanghai|start|drive|起点|发车)/i.test(key)) continue
+    const pose = readKey(key)
+    if (pose) return pose
+  }
+  return readKey('f1s_autosave_track_local_points')
+}
+
+function writeSavedGlbStartPose(pos: THREE.Vector3, heading: number): void {
+  try {
+    localStorage.setItem(GLB_START_POSE_STORAGE_KEY, JSON.stringify({
+      x: Number(pos.x.toFixed(3)),
+      y: Number(pos.y.toFixed(3)),
+      z: Number(pos.z.toFixed(3)),
+      heading: Number(heading.toFixed(6)),
+      yawDeg: Number(THREE.MathUtils.radToDeg(heading).toFixed(2)),
+    }))
+  } catch {
+    /* noop */
+  }
+}
+
+function glbDrivePoseFromPlacement(
+  placement: GlbGridPlacement,
+  ground: LowPolyShanghaiGroundSampler,
+): { pos: THREE.Vector3; heading: number; normal: THREE.Vector3 } {
+  const heading = THREE.MathUtils.degToRad(placement.headingDeg)
+  const hit = ground.sampleGroundAt(placement.x, placement.z)
+  if (hit) {
+    return {
+      pos: hit.point.clone().addScaledVector(hit.normal, 0.09),
+      heading,
+      normal: hit.normal.clone(),
+    }
+  }
+  return {
+    pos: new THREE.Vector3(placement.x, GLB_START_FALLBACK.y, placement.z),
+    heading,
+    normal: new THREE.Vector3(0, 1, 0),
+  }
+}
+
+const GLB_GRID_OPPONENT_PROFILES: Record<string, OpponentProfile> = {
+  mercedes: {
+    name: 'Veteran',
+    color: '#ffd166',
+    baseSpeed: 0,
+    latGripG: 1,
+    driftAmplitude: 0,
+    driftFreq: 0,
+    startStagger: 0,
+    startLat: 0,
+    mistakeRate: 0,
+    mistakeMinS: 0,
+    mistakeMaxS: 0,
+  },
+  mclaren: {
+    name: 'Aggressor',
+    color: '#ef476f',
+    baseSpeed: 0,
+    latGripG: 1,
+    driftAmplitude: 0,
+    driftFreq: 0,
+    startStagger: 0,
+    startLat: 0,
+    mistakeRate: 0,
+    mistakeMinS: 0,
+    mistakeMaxS: 0,
+  },
+  ferrari: {
+    name: 'Rookie',
+    color: '#06d6a0',
+    baseSpeed: 0,
+    latGripG: 1,
+    driftAmplitude: 0,
+    driftFreq: 0,
+    startStagger: 0,
+    startLat: 0,
+    mistakeRate: 0,
+    mistakeMinS: 0,
+    mistakeMaxS: 0,
+  },
+  redbull: {
+    name: 'RedBull',
+    color: '#1e41ff',
+    baseSpeed: 0,
+    latGripG: 1,
+    driftAmplitude: 0,
+    driftFreq: 0,
+    startStagger: 0,
+    startLat: 0,
+    mistakeRate: 0,
+    mistakeMinS: 0,
+    mistakeMaxS: 0,
+  },
+}
+
+function createGlbGridOpponentStates(
+  placements: GlbGridPlacement[],
+  ground: LowPolyShanghaiGroundSampler,
+): OpponentState[] {
+  return placements
+    .filter((placement) => placement.id !== 'player')
+    .map((placement) => {
+      const profile = GLB_GRID_OPPONENT_PROFILES[placement.id] ?? GLB_GRID_OPPONENT_PROFILES.ferrari
+      const pose = glbDrivePoseFromPlacement(placement, ground)
+      return {
+        profile,
+        t: 0,
+        lap: 0,
+        speed: 0,
+        pos: pose.pos,
+        heading: pose.heading,
+        mistakeRemaining: 0,
+        mistakeJustTriggered: false,
+      }
+    })
+}
+
+function materialNamesForObject(obj: THREE.Mesh): string[] {
+  if (!obj.material) return []
+  const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+  return materials.map((mat) => mat.name ?? '')
+}
+
+function meshLooksLikeRoadForTelemetry(mesh: THREE.Mesh): boolean {
+  const name = `${mesh.name} ${materialNamesForObject(mesh).join(' ')}`.toLowerCase()
+  return name.includes('road') || name.includes('tarmac') || name.includes('line_white')
+}
+
+function createGlbTelemetryRoadMap(lowPolyShanghai: LowPolyShanghaiBundle): { roadTriangles: TelemetryMapRoadTriangle[] } {
+  const triangles: TelemetryMapRoadTriangle[] = []
+  const candidates: THREE.Mesh[] = []
+  lowPolyShanghai.group.updateMatrixWorld(true)
+  lowPolyShanghai.group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh && obj.geometry && meshLooksLikeRoadForTelemetry(obj)) {
+      candidates.push(obj)
+    }
+  })
+
+  let totalTriangles = 0
+  for (const mesh of candidates) {
+    const position = mesh.geometry.getAttribute('position')
+    if (position) totalTriangles += Math.floor(position.count / 3)
+  }
+  const stride = Math.max(1, Math.ceil(totalTriangles / 5200))
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  let triIndex = 0
+
+  for (const mesh of candidates) {
+    const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry
+    const position = source.getAttribute('position')
+    if (!position) continue
+    for (let i = 0; i < position.count; i += 3) {
+      if (triIndex++ % stride !== 0) continue
+      a.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
+      b.fromBufferAttribute(position, i + 1).applyMatrix4(mesh.matrixWorld)
+      c.fromBufferAttribute(position, i + 2).applyMatrix4(mesh.matrixWorld)
+      triangles.push({
+        ax: a.x,
+        az: a.z,
+        bx: b.x,
+        bz: b.z,
+        cx: c.x,
+        cz: c.z,
+      })
+    }
+    if (source !== mesh.geometry) source.dispose()
+  }
+
+  return { roadTriangles: triangles }
+}
+
+function findGlbStartPose(ground: LowPolyShanghaiGroundSampler): { pos: THREE.Vector3; heading: number; normal: THREE.Vector3 } {
+  const gridPlayer = findGlbGridPlacement(readSavedGlbGridPlacements(), 'player')
+  if (gridPlayer) return glbDrivePoseFromPlacement(gridPlayer, ground)
+
+  const saved = readSavedGlbStartPose()
+  if (saved) {
+    const hit = ground.sampleGroundAt(saved.x, saved.z)
+    const heading = saved.heading ?? (saved.yawDeg !== undefined ? THREE.MathUtils.degToRad(saved.yawDeg) : GLB_START_HEADING)
+    if (hit) {
+      return {
+        pos: hit.point.clone().addScaledVector(hit.normal, 0.09),
+        heading,
+        normal: hit.normal.clone(),
+      }
+    }
+    return {
+      pos: new THREE.Vector3(saved.x, saved.y ?? GLB_START_FALLBACK.y, saved.z),
+      heading,
+      normal: new THREE.Vector3(0, 1, 0),
+    }
+  }
+
+  const candidates: THREE.Vector3[] = []
+  for (let dz = -80; dz <= 80; dz += 10) {
+    for (let dx = -80; dx <= 80; dx += 10) {
+      candidates.push(new THREE.Vector3(GLB_START_FALLBACK.x + dx, 0, GLB_START_FALLBACK.z + dz))
+    }
+  }
+  candidates.sort((a, b) => a.distanceToSquared(GLB_START_FALLBACK) - b.distanceToSquared(GLB_START_FALLBACK))
+
+  let firstHit: ReturnType<LowPolyShanghaiGroundSampler['sampleGroundAt']> = null
+  let firstPoint: THREE.Vector3 | null = null
+  for (const p of candidates) {
+    const hit = ground.sampleGroundAt(p.x, p.z)
+    if (!hit) continue
+    firstHit = firstHit ?? hit
+    firstPoint = firstPoint ?? p
+    if (hit.isRoad) {
+      return {
+        pos: hit.point.clone().addScaledVector(hit.normal, 0.09),
+        heading: GLB_START_HEADING,
+        normal: hit.normal.clone(),
+      }
+    }
+  }
+
+  if (firstHit && firstPoint) {
+    return {
+      pos: firstHit.point.clone().addScaledVector(firstHit.normal, 0.09),
+      heading: GLB_START_HEADING,
+      normal: firstHit.normal.clone(),
+    }
+  }
+
+  return {
+    pos: GLB_START_FALLBACK.clone(),
+    heading: GLB_START_HEADING,
+    normal: new THREE.Vector3(0, 1, 0),
+  }
+}
+
+function setObjectOnGroundHeading(obj: THREE.Object3D, pos: THREE.Vector3, heading: number, normal: THREE.Vector3): void {
+  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
+  forward.addScaledVector(normal, -forward.dot(normal))
+  if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
+  forward.normalize()
+  const right = new THREE.Vector3().crossVectors(normal, forward).normalize()
+  const correctedForward = new THREE.Vector3().crossVectors(right, normal).normalize()
+  const basis = new THREE.Matrix4().makeBasis(right, normal, correctedForward)
+  obj.position.copy(pos)
+  obj.quaternion.setFromRotationMatrix(basis)
+}
+
+function updateGlbThirdPersonCamera(
+  camera: THREE.PerspectiveCamera,
+  pos: THREE.Vector3,
+  heading: number,
+): void {
+  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading)).normalize()
+  const back = forward.clone().negate()
+  camera.position
+    .copy(pos)
+    .addScaledVector(back, GLB_THIRD_BACK_DISTANCE)
+    .add(new THREE.Vector3(0, GLB_THIRD_UP_DISTANCE, 0))
+  camera.up.set(0, 1, 0)
+  camera.lookAt(
+    pos.x + forward.x * GLB_THIRD_LOOK_AHEAD,
+    pos.y + GLB_THIRD_LOOK_UP,
+    pos.z + forward.z * GLB_THIRD_LOOK_AHEAD,
+  )
+  camera.fov += (GLB_THIRD_FOV - camera.fov) * 0.16
+  camera.updateProjectionMatrix()
+}
+
+function bootstrapGlbVersion(): void {
+  installGlobalErrorHandlers()
+
+  const container = document.getElementById('app')
+  if (!container) {
+    console.warn('[F1S] #app missing')
+    return
+  }
+
+  let bundle: ReturnType<typeof createScene>
+  try {
+    bundle = createScene(container, { performanceMode: storage.getPerformanceMode() })
+  } catch (e) {
+    console.warn('[F1S] scene init failed:', e)
+    container.textContent = e instanceof Error ? e.message : String(e)
+    return
+  }
+
+  const status = createStatusPanel()
+  const setStatus = (text: string): void => {
+    status.textContent = text
+  }
+  setStatus('上海赛车场 GLB 主游戏\n正在加载地图...')
+
+  const weather = pickRandomWeather()
+  bundle.applyWeather(weather)
+  const lowPolyShanghai = addLowPolyShanghai(bundle.scene, readSavedLowPolyShanghaiPlacementForMain())
+  const car = createCar({ visualScale: GLB_PLAYER_VISUAL_SCALE })
+  bundle.scene.add(car.group)
+  bundle.scene.add(car.particles)
+
+  let input: InputController | null = null
+  let drive: ReturnType<typeof createGlbDrivePhysics> | null = null
+  const gridPlacements = readSavedGlbGridPlacements()
+  let glbOpponentStates: OpponentState[] = []
+  let glbOpponentCars: OpponentCarBundle | null = null
+  let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
+  let audio: AudioRig | null = null
+  let audioStarted = false
+  let started = false
+  let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
+  let telemetryUpdateTimer = 0
+
+  const startGlbAudio = (): void => {
+    if (!audio || audioStarted) return
+    audioStarted = true
+    unlockAudio()
+    audio.start()
+  }
+  window.addEventListener('pointerdown', startGlbAudio)
+  window.addEventListener('keydown', startGlbAudio)
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'p' || ev.key === 'P') {
+      if (!drive) return
+      writeSavedGlbStartPose(drive.state.pos, drive.state.heading)
+      showToast('已保存当前位置为 GLB 主游戏起点')
+      ev.preventDefault()
+    }
+  })
+
+  const loop = new GameLoop((dt) => {
+    if (!drive) {
+      bundle.render()
+      return
+    }
+    const rawInput = input?.getInput() ?? { steer: 0, throttle: 0, brake: 0, drs: false }
+    const manualThrottle = rawInput.throttle > 0.7 || rawInput.drs
+    const driveInput = {
+      ...rawInput,
+      throttle: manualThrottle ? rawInput.throttle : 0,
+      manualThrottle,
+    }
+    const gameInput = started ? driveInput : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
+    drive.update(dt, gameInput)
+    setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    const speed01 = drive.state.speed / GLB_DRIVE_MAX_SPEED
+    car.update(dt, speed01, rawInput.steer)
+    audio?.setEngine(gameInput.throttle, speed01)
+    glbOpponentCars?.update(glbOpponentStates)
+    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading)
+    visualOptimizer?.update(drive.state.pos)
+    bundle.updateShadowFollow(drive.state.pos)
+    telemetryUpdateTimer += dt
+    if (telemetryUpdateTimer >= 0.08) {
+      telemetryUpdateTimer = 0
+      telemetryMap?.update({
+        player: {
+          x: drive.state.pos.x,
+          z: drive.state.pos.z,
+          heading: drive.state.heading,
+          speedKmh: drive.state.speed * 3.6,
+          onRoad: drive.state.onRoad,
+        },
+        opponents: glbOpponentStates.map((opp) => ({
+          x: opp.pos.x,
+          z: opp.pos.z,
+          color: opp.profile.color,
+        })),
+      })
+    }
+    setStatus(
+      `上海赛车场 GLB 主游戏 · 第三视角\n` +
+      `${started ? '比赛中' : '等待发车倒数'}\n` +
+      `速度 ${Math.round(drive.state.speed * 3.6)} km/h\n` +
+      `P 保存起点\n` +
+      `WASD/方向键驾驶`,
+    )
+    bundle.render()
+  })
+  loop.start()
+
+  void lowPolyShanghai.ready.then(async () => {
+    const removedSigns = applySavedGlbSignDeletions(lowPolyShanghai)
+    if (removedSigns > 0) console.log(`[F1S] applied sign deletions: ${removedSigns}`)
+    optimizeLowPolyShanghaiRendering(lowPolyShanghai.group)
+    visualOptimizer = createLowPolyShanghaiVisualOptimizer(lowPolyShanghai.group)
+    setStatus('上海赛车场 GLB 主游戏\n正在准备地面采样...')
+    let ground: LowPolyShanghaiGroundSampler
+    try {
+      ground = await createLowPolyShanghaiGroundGridSampler(lowPolyShanghai, {
+        cellSize: 6,
+        timeBudgetMs: 2600,
+        onProgress: (progress) => setStatus(`上海赛车场 GLB 主游戏\n地面采样 ${Math.round(progress * 100)}%`),
+      })
+    } catch (e) {
+      console.warn('[F1S] GLB ground grid fallback:', e)
+      ground = createLowPolyShanghaiGroundSampler(lowPolyShanghai)
+    }
+    const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
+    const pose = findGlbStartPose(ground)
+    drive = createGlbDrivePhysics(ground, pose, obstacles)
+    setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
+    glbOpponentCars = createOpponentCars(glbOpponentStates, { targetLengthM: GLB_PLAYER_TARGET_LENGTH_M })
+    glbOpponentCars.update(glbOpponentStates)
+    bundle.scene.add(glbOpponentCars.group)
+    telemetryMap = createTelemetryMap(createGlbTelemetryRoadMap(lowPolyShanghai))
+    telemetryMap.resetTrail()
+    telemetryMap.show()
+    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading)
+    await glbOpponentCars.ready
+    glbOpponentCars.update(glbOpponentStates)
+    input = await initInput('keyboard')
+    try {
+      audio = await createAudioRig()
+      audio.setBgmVolume(0.55)
+    } catch (e) {
+      console.warn('[F1S] GLB audio rig init failed:', e)
+    }
+    started = true
+    startGlbAudio()
+    showToast('第三视角 GLB 主游戏已启动', 1800)
+  }).catch((e) => {
+    console.warn('[F1S] GLB version failed:', e)
+    setStatus(`上海赛车场 GLB 主游戏\n加载失败: ${e instanceof Error ? e.message : String(e)}`)
+  })
+}
 
 interface World {
   bundle: ReturnType<typeof createScene>
@@ -882,7 +1550,7 @@ function bootstrap(): void {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap, { once: true })
+  document.addEventListener('DOMContentLoaded', shouldBootMainGame() ? bootstrap : bootstrapGlbVersion, { once: true })
 } else {
-  bootstrap()
+  ;(shouldBootMainGame() ? bootstrap : bootstrapGlbVersion)()
 }

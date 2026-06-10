@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
-import carGlbUrl from '../assets/models/抖音F1压缩.glb?url'
+import carGlbUrl from '../assets/models/抖音车新版未定.glb?url'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
@@ -21,13 +21,42 @@ export interface CarBundle {
   setLivery: (team: TeamId) => void
   emitSpeedTrail: (intensity: number) => void
   emitSparks: (worldPos: THREE.Vector3, count: number) => void
-  update: (dt: number, speed01: number) => void
+  update: (dt: number, speed01: number, steer?: number) => void
   dispose: () => void
+}
+
+export interface CarOptions {
+  visualScale?: number
 }
 
 const PARTICLE_MAX = 256
 const PARTICLE_LIFE = 1.0
 const TARGET_LENGTH_M = 5.0 // real F1 ≈ 5.5 m; pick 5 to feel right against 16 m wide road
+const FRONT_STEER_MAX_RAD = THREE.MathUtils.degToRad(18)
+const WHEEL_SPIN_RATE = 42
+const WHEEL_SPIN_AXIS = new THREE.Vector3(0, 0, 1)
+const WHEEL_STEER_AXIS = new THREE.Vector3(0, 1, 0)
+const FRONT_WHEEL_ROLL_SHELL_RATIO = 0.76
+const FRONT_WHEEL_INNER_SIDE_MARGIN = 0.04
+const REAR_WHEEL_ROLL_SHELL_RATIO = 0.42
+const REAR_WHEEL_INNER_SIDE_MARGIN = 1
+
+const PLAYER_WHEEL_PARTS = [
+  { name: 'left-rear', steerParts: [0], spinParts: [0], steerable: false, sharedSpinCenter: false },
+  { name: 'right-rear', steerParts: [5], spinParts: [5], steerable: false, sharedSpinCenter: false },
+  { name: 'left-front', steerParts: [4, 43, 20], spinParts: [4], steerable: true, sharedSpinCenter: true },
+  { name: 'right-front', steerParts: [1], spinParts: [1], steerable: true, sharedSpinCenter: true },
+] as const
+
+const PLAYER_STATIC_WHEEL_LINK_PARTS = [15] as const
+
+const PLAYER_STEER_ONLY_PARTS = [
+  { name: 'left-front-aero', parts: [55] },
+  { name: 'right-front-aero', parts: [58] },
+] as const
+
+const FRONT_WHEEL_SPLIT_PARTS = [1, 4] as const
+const REAR_WHEEL_SPLIT_PARTS = [5] as const
 
 let dracoLoader: DRACOLoader | null = null
 
@@ -53,6 +82,24 @@ interface PlaceholderRefs {
   accentMat: THREE.MeshPhysicalMaterial
   tireMat: THREE.MeshStandardMaterial
   geos: THREE.BufferGeometry[]
+}
+
+interface PivotRef {
+  pivot: THREE.Group
+  baseQuaternion: THREE.Quaternion
+}
+
+interface WheelRig {
+  name: string
+  steerable: boolean
+  steerPivot: PivotRef
+  spinPivots: PivotRef[]
+  spin: number
+}
+
+interface SteerOnlyRig {
+  name: string
+  steerPivot: PivotRef
 }
 
 function buildPlaceholder(): PlaceholderRefs {
@@ -124,6 +171,378 @@ function disposePlaceholder(refs: PlaceholderRefs): void {
   refs.tireMat.dispose()
 }
 
+function partNumberFromName(name: string): number | null {
+  const match = name.toLowerCase().match(/(?:^|[_\-\s])(?:tripo_)?part_?(\d+)(?:$|[_\-\s])/)
+  if (!match) return null
+  const n = Number(match[1])
+  return Number.isFinite(n) ? n : null
+}
+
+function collectPartObjects(root: THREE.Object3D, partNumbers: readonly number[]): THREE.Object3D[] {
+  const wanted = new Set(partNumbers)
+  const raw: THREE.Object3D[] = []
+  root.traverse((obj) => {
+    const part = partNumberFromName(obj.name)
+    if (part !== null && wanted.has(part)) raw.push(obj)
+  })
+
+  const rawSet = new Set(raw)
+  return raw.filter((obj) => {
+    let parent = obj.parent
+    while (parent) {
+      if (rawSet.has(parent)) return false
+      parent = parent.parent
+    }
+    return true
+  })
+}
+
+function collectFrontWheelStaticObjects(root: THREE.Object3D, partNumbers: readonly number[]): THREE.Object3D[] {
+  const wanted = new Set(partNumbers)
+  const objects: THREE.Object3D[] = []
+  root.traverse((obj) => {
+    const part = typeof obj.userData.frontWheelStaticPart === 'number'
+      ? obj.userData.frontWheelStaticPart as number
+      : null
+    if (part !== null && wanted.has(part)) objects.push(obj)
+  })
+  return objects
+}
+
+function expandRenderedGeometryBox(box: THREE.Box3, mesh: THREE.Mesh): boolean {
+  const position = mesh.geometry.getAttribute('position')
+  if (!position) return false
+
+  const index = mesh.geometry.index
+  const total = index ? index.count : position.count
+  const start = Math.max(0, mesh.geometry.drawRange.start || 0)
+  const drawCount = Number.isFinite(mesh.geometry.drawRange.count)
+    ? mesh.geometry.drawRange.count
+    : total
+  const end = Math.min(total, start + drawCount)
+  const point = new THREE.Vector3()
+  for (let i = start; i < end; i++) {
+    const vertexIndex = index ? index.getX(i) : i
+    point.fromBufferAttribute(position, vertexIndex).applyMatrix4(mesh.matrixWorld)
+    box.expandByPoint(point)
+  }
+  return true
+}
+
+function renderedBoxForObjects(objects: THREE.Object3D[]): THREE.Box3 {
+  const box = new THREE.Box3()
+  for (const obj of objects) {
+    obj.updateMatrixWorld(true)
+    obj.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (mesh.isMesh) expandRenderedGeometryBox(box, mesh)
+    })
+  }
+  return box
+}
+
+function renderedLocalBoxForMesh(mesh: THREE.Mesh): THREE.Box3 {
+  const box = new THREE.Box3()
+  const position = mesh.geometry.getAttribute('position')
+  if (!position) return box
+  const index = mesh.geometry.index
+  const total = index ? index.count : position.count
+  const point = new THREE.Vector3()
+  for (let i = 0; i < total; i++) {
+    point.fromBufferAttribute(position, index ? index.getX(i) : i)
+    box.expandByPoint(point)
+  }
+  return box
+}
+
+function buildTriangleSubsetGeometry(
+  source: THREE.BufferGeometry,
+  triangleStarts: number[],
+): THREE.BufferGeometry | null {
+  const index = source.index
+  const position = source.getAttribute('position')
+  if (!position || triangleStarts.length === 0) return null
+
+  const attrNames = Object.keys(source.attributes)
+  const buffers = new Map<string, number[]>()
+  for (const name of attrNames) buffers.set(name, [])
+
+  const pushVertex = (vertexIndex: number): void => {
+    for (const name of attrNames) {
+      const attr = source.getAttribute(name) as THREE.BufferAttribute
+      const target = buffers.get(name)
+      if (!target) continue
+      for (let k = 0; k < attr.itemSize; k++) target.push(attr.getComponent(vertexIndex, k))
+    }
+  }
+
+  for (const triStart of triangleStarts) {
+    for (let j = 0; j < 3; j++) {
+      pushVertex(index ? index.getX(triStart + j) : triStart + j)
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  for (const name of attrNames) {
+    const sourceAttr = source.getAttribute(name) as THREE.BufferAttribute
+    const values = buffers.get(name)
+    if (!values) continue
+    geometry.setAttribute(name, new THREE.Float32BufferAttribute(values, sourceAttr.itemSize, sourceAttr.normalized))
+  }
+  geometry.computeBoundingBox()
+  geometry.computeBoundingSphere()
+  return geometry
+}
+
+interface WheelMeshSplitOptions {
+  partNumbers: readonly number[]
+  shellRatio: number
+  innerSideMargin: number
+  staticNamePrefix: string
+  staticUserDataKey?: string
+  minRollingComponentTriangles?: number
+  excludeOuterFaceCover?: boolean
+}
+
+function triangleVertexKey(
+  position: THREE.BufferAttribute | THREE.InterleavedBufferAttribute,
+  vertexIndex: number,
+  target: THREE.Vector3,
+): string {
+  target.fromBufferAttribute(position, vertexIndex)
+  return `${Math.round(target.x * 100000)}:${Math.round(target.y * 100000)}:${Math.round(target.z * 100000)}`
+}
+
+function triangleComponentSizes(geometry: THREE.BufferGeometry): number[] {
+  const position = geometry.getAttribute('position')
+  if (!position) return []
+  const index = geometry.index
+  const total = index ? index.count : position.count
+  const triCount = Math.floor(total / 3)
+  const vertexToTriangles = new Map<string | number, number[]>()
+  const triangleKeys: Array<Array<string | number>> = []
+  const point = new THREE.Vector3()
+
+  for (let tri = 0; tri < triCount; tri++) {
+    const keys: Array<string | number> = []
+    for (let j = 0; j < 3; j++) {
+      const rawVertex = tri * 3 + j
+      const vertexIndex = index ? index.getX(rawVertex) : rawVertex
+      const key = index ? vertexIndex : triangleVertexKey(position, vertexIndex, point)
+      keys.push(key)
+      const bucket = vertexToTriangles.get(key)
+      if (bucket) bucket.push(tri)
+      else vertexToTriangles.set(key, [tri])
+    }
+    triangleKeys[tri] = keys
+  }
+
+  const seen = new Uint8Array(triCount)
+  const sizes = new Array<number>(triCount).fill(0)
+  for (let tri = 0; tri < triCount; tri++) {
+    if (seen[tri]) continue
+    const stack = [tri]
+    const component: number[] = []
+    seen[tri] = 1
+    while (stack.length) {
+      const current = stack.pop()
+      if (current === undefined) continue
+      component.push(current)
+      for (const key of triangleKeys[current]) {
+        const neighbors = vertexToTriangles.get(key)
+        if (!neighbors) continue
+        for (const next of neighbors) {
+          if (seen[next]) continue
+          seen[next] = 1
+          stack.push(next)
+        }
+      }
+    }
+    for (const item of component) sizes[item] = component.length
+  }
+  return sizes
+}
+
+function splitWheelRollingMeshes(root: THREE.Object3D, options: WheelMeshSplitOptions): void {
+  const parts = collectPartObjects(root, options.partNumbers)
+  for (const obj of parts) {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry) continue
+    const position = mesh.geometry.getAttribute('position')
+    if (!position) continue
+
+    const localBox = renderedLocalBoxForMesh(mesh)
+    if (localBox.isEmpty()) continue
+    const partNumber = partNumberFromName(mesh.name)
+    const center = localBox.getCenter(new THREE.Vector3())
+    const size = localBox.getSize(new THREE.Vector3())
+    const radius = Math.max(size.x, size.y) * 0.5
+    const shellThreshold = radius * options.shellRatio
+    const lateralSign = Math.sign(center.z) || 1
+    const innerSideLimit = -size.z * options.innerSideMargin
+    const index = mesh.geometry.index
+    const total = index ? index.count : position.count
+    const rollingTriangles: number[] = []
+    const staticTriangles: number[] = []
+    const componentSizes = options.minRollingComponentTriangles
+      ? triangleComponentSizes(mesh.geometry)
+      : []
+    const v = new THREE.Vector3()
+
+    for (let i = 0; i + 2 < total; i += 3) {
+      let radial = 0
+      let lateral = 0
+      for (let j = 0; j < 3; j++) {
+        v.fromBufferAttribute(position, index ? index.getX(i + j) : i + j)
+        radial += Math.hypot(v.x - center.x, v.y - center.y)
+        lateral += v.z
+      }
+      radial /= 3
+      lateral /= 3
+      const triangleIndex = Math.floor(i / 3)
+      const componentCanRoll = !options.minRollingComponentTriangles ||
+        (componentSizes[triangleIndex] ?? 0) >= options.minRollingComponentTriangles
+      const outerOrCenter = lateralSign * (lateral - center.z) >= innerSideLimit
+      const outerFaceCover = options.excludeOuterFaceCover === true &&
+        lateralSign * (lateral - center.z) > size.z * 0.32 &&
+        radial < radius * 0.76
+      if (componentCanRoll && radial >= shellThreshold && outerOrCenter && !outerFaceCover) rollingTriangles.push(i)
+      else staticTriangles.push(i)
+    }
+
+    const rollingGeometry = buildTriangleSubsetGeometry(mesh.geometry, rollingTriangles)
+    const staticGeometry = buildTriangleSubsetGeometry(mesh.geometry, staticTriangles)
+    if (!rollingGeometry || !staticGeometry || !mesh.parent) {
+      rollingGeometry?.dispose()
+      staticGeometry?.dispose()
+      continue
+    }
+
+    const rollingMesh = new THREE.Mesh(rollingGeometry, mesh.material)
+    rollingMesh.name = `${mesh.name}_rolling`
+    rollingMesh.position.copy(mesh.position)
+    rollingMesh.quaternion.copy(mesh.quaternion)
+    rollingMesh.scale.copy(mesh.scale)
+    rollingMesh.castShadow = mesh.castShadow
+    rollingMesh.receiveShadow = mesh.receiveShadow
+    rollingMesh.frustumCulled = mesh.frustumCulled
+
+    const staticMesh = new THREE.Mesh(staticGeometry, mesh.material)
+    staticMesh.name = `${options.staticNamePrefix}-${mesh.id}`
+    if (options.staticUserDataKey && partNumber !== null) {
+      staticMesh.userData[options.staticUserDataKey] = partNumber
+    }
+    staticMesh.position.copy(mesh.position)
+    staticMesh.quaternion.copy(mesh.quaternion)
+    staticMesh.scale.copy(mesh.scale)
+    staticMesh.castShadow = mesh.castShadow
+    staticMesh.receiveShadow = mesh.receiveShadow
+    staticMesh.frustumCulled = mesh.frustumCulled
+
+    const parent = mesh.parent
+    parent.add(staticMesh)
+    parent.add(rollingMesh)
+    parent.remove(mesh)
+    mesh.geometry.dispose()
+  }
+}
+
+function splitFrontWheelRollingMeshes(root: THREE.Object3D): void {
+  splitWheelRollingMeshes(root, {
+    partNumbers: FRONT_WHEEL_SPLIT_PARTS,
+    shellRatio: FRONT_WHEEL_ROLL_SHELL_RATIO,
+    innerSideMargin: FRONT_WHEEL_INNER_SIDE_MARGIN,
+    staticNamePrefix: 'front-wheel-static',
+    staticUserDataKey: 'frontWheelStaticPart',
+    minRollingComponentTriangles: 256,
+    excludeOuterFaceCover: true,
+  })
+}
+
+function splitRearWheelRollingMeshes(root: THREE.Object3D): void {
+  splitWheelRollingMeshes(root, {
+    partNumbers: REAR_WHEEL_SPLIT_PARTS,
+    shellRatio: REAR_WHEEL_ROLL_SHELL_RATIO,
+    innerSideMargin: REAR_WHEEL_INNER_SIDE_MARGIN,
+    staticNamePrefix: 'rear-wheel-static',
+  })
+}
+
+function createPivotForObjects(
+  root: THREE.Object3D,
+  objects: THREE.Object3D[],
+  name: string,
+  centerWorldOverride?: THREE.Vector3,
+): PivotRef | null {
+  if (!objects.length) return null
+  root.updateMatrixWorld(true)
+  const box = renderedBoxForObjects(objects)
+  if (box.isEmpty()) return null
+
+  const centerWorld = centerWorldOverride ?? box.getCenter(new THREE.Vector3())
+  const pivot = new THREE.Group()
+  pivot.name = name
+  pivot.position.copy(root.worldToLocal(centerWorld.clone()))
+  root.add(pivot)
+  root.updateMatrixWorld(true)
+  for (const obj of objects) pivot.attach(obj)
+  pivot.updateMatrixWorld(true)
+  return { pivot, baseQuaternion: pivot.quaternion.clone() }
+}
+
+function createWheelRig(
+  root: THREE.Object3D,
+  name: string,
+  steerPartNumbers: readonly number[],
+  spinPartNumbers: readonly number[],
+  steerable: boolean,
+  sharedSpinCenter: boolean,
+): WheelRig | null {
+  const steerParts = [
+    ...collectPartObjects(root, steerPartNumbers),
+    ...collectFrontWheelStaticObjects(root, steerPartNumbers),
+  ]
+  const spinParts = collectPartObjects(root, spinPartNumbers)
+  const centerBox = renderedBoxForObjects(spinParts.length ? spinParts : steerParts)
+  if (centerBox.isEmpty()) return null
+  const wheelCenterWorld = centerBox.getCenter(new THREE.Vector3())
+  const steerPivot = createPivotForObjects(root, steerParts, `player-${name}-steer-pivot`, wheelCenterWorld)
+  if (!steerPivot) return null
+
+  const spinPivots = sharedSpinCenter
+    ? [
+        createPivotForObjects(
+          steerPivot.pivot,
+          spinParts,
+          `player-${name}-spin-pivot`,
+          wheelCenterWorld,
+        ),
+      ].filter((item): item is PivotRef => Boolean(item))
+    : spinParts
+        .map((part, index) => createPivotForObjects(steerPivot.pivot, [part], `player-${name}-spin-pivot-${index}`))
+        .filter((item): item is PivotRef => Boolean(item))
+  if (!spinPivots.length) return null
+
+  return {
+    name,
+    steerable,
+    steerPivot,
+    spinPivots,
+    spin: 0,
+  }
+}
+
+function createSteerOnlyRig(
+  root: THREE.Object3D,
+  name: string,
+  partNumbers: readonly number[],
+): SteerOnlyRig | null {
+  const parts = collectPartObjects(root, partNumbers)
+  const steerPivot = createPivotForObjects(root, parts, `player-${name}-steer-only-pivot`)
+  if (!steerPivot) return null
+  return { name, steerPivot }
+}
+
 /** Auto-orient & scale a freshly loaded GLB so wheels touch y=0 and nose points +Z. */
 function fitGltfToTrack(model: THREE.Object3D): void {
   // Initial bbox at native scale & orientation.
@@ -162,9 +581,10 @@ function fitGltfToTrack(model: THREE.Object3D): void {
   }
 }
 
-export function createCar(): CarBundle {
+export function createCar(options: CarOptions = {}): CarBundle {
   const group = new THREE.Group()
   group.name = 'car'
+  group.scale.setScalar(options.visualScale ?? 1)
 
   // ---- Placeholder shown immediately, replaced when GLB resolves.
   const placeholder = buildPlaceholder()
@@ -172,6 +592,9 @@ export function createCar(): CarBundle {
   let placeholderActive = true
   let activeModel: THREE.Object3D = placeholder.group
   let activeWheels: THREE.Mesh[] = placeholder.wheels
+  let wheelRigs: WheelRig[] = []
+  let steerOnlyRigs: SteerOnlyRig[] = []
+  let smoothSteer = 0
 
   // ---- Particle effects in WORLD space (parented to `particles`, not the
   // car group, so they don't drag along when the car moves/turns).
@@ -267,6 +690,8 @@ export function createCar(): CarBundle {
           mesh.frustumCulled = true
         }
       })
+      splitFrontWheelRollingMeshes(model)
+      splitRearWheelRollingMeshes(model)
 
       // Swap placeholder out.
       group.remove(placeholder.group)
@@ -275,18 +700,23 @@ export function createCar(): CarBundle {
       group.add(model)
       activeModel = model
       activeWheels = []
-      model.traverse((obj) => {
-        const mesh = obj as THREE.Mesh
-        if (!mesh.isMesh) return
-        const name = mesh.name.toLowerCase()
-        if (name.includes('wheel') || name.includes('tire') || name.includes('tyre')) {
-          activeWheels.push(mesh)
-        }
-      })
+      wheelRigs = PLAYER_WHEEL_PARTS
+        .map((item) => createWheelRig(
+          model,
+          item.name,
+          item.steerParts,
+          item.spinParts,
+          item.steerable,
+          item.sharedSpinCenter,
+        ))
+        .filter((item): item is WheelRig => Boolean(item))
+      steerOnlyRigs = PLAYER_STEER_ONLY_PARTS
+        .map((item) => createSteerOnlyRig(model, item.name, item.parts))
+        .filter((item): item is SteerOnlyRig => Boolean(item))
       const bbox = new THREE.Box3().setFromObject(model)
       const sz = bbox.getSize(new THREE.Vector3())
       log(
-        `LOADED ✓\nmeshes=${meshCount} wheels=${activeWheels.length}\nsize ${sz.x.toFixed(1)}×${sz.y.toFixed(1)}×${sz.z.toFixed(1)}m`,
+        `LOADED ✓\nmeshes=${meshCount} wheel-rigs=${wheelRigs.length}\nsize ${sz.x.toFixed(1)}×${sz.y.toFixed(1)}×${sz.z.toFixed(1)}m`,
         '#0f0',
       )
       // (debug panel removed)
@@ -345,9 +775,27 @@ export function createCar(): CarBundle {
     sparkGeo.attributes.position.needsUpdate = true
   }
 
-  const update = (dt: number, speed01: number): void => {
-    const spin = speed01 * 30 * dt
+  const update = (dt: number, speed01: number, steer = 0): void => {
+    const spin = -speed01 * WHEEL_SPIN_RATE * dt
     for (const w of activeWheels) w.rotation.x += spin
+    smoothSteer += (THREE.MathUtils.clamp(steer, -1, 1) - smoothSteer) * Math.min(1, dt * 14)
+
+    const steerQuat = new THREE.Quaternion().setFromAxisAngle(
+      WHEEL_STEER_AXIS,
+      -smoothSteer * FRONT_STEER_MAX_RAD,
+    )
+    for (const rig of wheelRigs) {
+      rig.spin += spin
+      if (rig.steerable) rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerQuat)
+      else rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion)
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(WHEEL_SPIN_AXIS, rig.spin)
+      for (const spinPivot of rig.spinPivots) {
+        spinPivot.pivot.quaternion.copy(spinPivot.baseQuaternion).multiply(spinQuat)
+      }
+    }
+    for (const rig of steerOnlyRigs) {
+      rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerQuat)
+    }
 
     // Trails: tick down life; on death move to sentinel so they vanish.
     for (let i = 0; i < PARTICLE_MAX; i++) {

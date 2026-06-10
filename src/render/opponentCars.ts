@@ -16,6 +16,11 @@ export interface OpponentCarBundle {
   dispose: () => void
 }
 
+export interface OpponentCarOptions {
+  targetLengthM?: number
+  targetHeightM?: number
+}
+
 interface ShellRefs {
   group: THREE.Group
   geos: THREE.BufferGeometry[]
@@ -119,11 +124,18 @@ function disposePlaceholder(shell: ShellRefs): void {
  *  cars visually "as tall as" the player car, which the eye reads as the
  *  same overall size; planar length follows proportionally and the nose
  *  ends up along +Z (the game's forward axis). */
-function fitGltfToTrack(model: THREE.Object3D): void {
-  // Pass 1: scale by height.
+function fitGltfToTrack(model: THREE.Object3D, options: OpponentCarOptions = {}): void {
+  // Pass 1: scale by requested visual length for GLB-map play, otherwise
+  // keep the older height-based sizing used by the legacy track.
   let bbox = new THREE.Box3().setFromObject(model)
   let size = bbox.getSize(new THREE.Vector3())
-  if (size.y > 0) model.scale.setScalar(NPC_TARGET_HEIGHT_M / size.y)
+  const targetLength = options.targetLengthM
+  if (targetLength && targetLength > 0) {
+    const planarLongest = Math.max(size.x, size.z)
+    if (planarLongest > 0) model.scale.setScalar(targetLength / planarLongest)
+  } else if (size.y > 0) {
+    model.scale.setScalar((options.targetHeightM ?? NPC_TARGET_HEIGHT_M) / size.y)
+  }
 
   // Recompute after scale, then center horizontally and float to y=0.
   bbox = new THREE.Box3().setFromObject(model)
@@ -148,9 +160,10 @@ function fitGltfToTrack(model: THREE.Object3D): void {
 /** Singleton per-URL loader cache so multiple opponents that share a model
  *  decode it once. */
 const sceneCache = new Map<string, Promise<THREE.Group>>()
-function loadScene(model: NpcModel): Promise<THREE.Group> {
+function loadScene(model: NpcModel, options: OpponentCarOptions = {}): Promise<THREE.Group> {
   const { url, reverse } = model
-  let p = sceneCache.get(url)
+  const cacheKey = `${url}|len=${options.targetLengthM ?? ''}|h=${options.targetHeightM ?? ''}`
+  let p = sceneCache.get(cacheKey)
   if (!p) {
     p = (async () => {
       const loader = new GLTFLoader()
@@ -170,7 +183,7 @@ function loadScene(model: NpcModel): Promise<THREE.Group> {
           mesh.frustumCulled = true
         }
       })
-      fitGltfToTrack(scene)
+      fitGltfToTrack(scene, options)
       if (reverse) {
         // Wrap in an outer group rotated 180° so the existing pos/rot from
         // fitGltfToTrack is preserved and the visual nose now points -Z (in
@@ -193,15 +206,15 @@ function loadScene(model: NpcModel): Promise<THREE.Group> {
       return scene
     })().catch((e) => {
       console.warn('[F1S] NPC GLB load failed:', url, e)
-      sceneCache.delete(url)
+      sceneCache.delete(cacheKey)
       throw e
     })
-    sceneCache.set(url, p)
+    sceneCache.set(cacheKey, p)
   }
   return p
 }
 
-export function createOpponentCars(opps: OpponentState[]): OpponentCarBundle {
+export function createOpponentCars(opps: OpponentState[], options: OpponentCarOptions = {}): OpponentCarBundle {
   const root = new THREE.Group()
   root.name = 'opponents'
   const shells: ShellRefs[] = []
@@ -215,7 +228,7 @@ export function createOpponentCars(opps: OpponentState[]): OpponentCarBundle {
 
     const npcModel = NPC_MODELS[opp.profile.name]
     if (npcModel) {
-      const load = loadScene(npcModel).then((scene) => {
+      const load = loadScene(npcModel, options).then((scene) => {
         if (!shell.placeholderActive) return
         disposePlaceholder(shell)
         const cloned = scene.clone(true)

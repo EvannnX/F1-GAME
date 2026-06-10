@@ -14,6 +14,7 @@ export interface GameInput {
   throttle: number // 0..1 (auto-cruise baseline + DRS)
   brake: number // 0..1
   drs: boolean
+  manualThrottle?: boolean
 }
 
 export type InputMode = 'gyro' | 'touch' | 'keyboard'

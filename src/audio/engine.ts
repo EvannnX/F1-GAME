@@ -1,5 +1,5 @@
 import engineUrl from '../assets/audio/engine.mp3?url'
-import bgmUrl from '../assets/audio/bgm.mp3?url'
+import bgmUrl from '../assets/audio/Don Toliver - Lose My Mind (feat. Doja Cat) [From F1® The Movie] [Official Audio].mp3?url'
 
 /** Looping engine sample whose volume + playback rate scale with throttle/speed,
  *  plus a constant-volume BGM track. Both decoded once at boot, no streaming. */
