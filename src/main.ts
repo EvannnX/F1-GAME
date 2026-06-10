@@ -58,7 +58,7 @@ const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
 const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_MULTIPLIER
 const GLB_PLAYER_TARGET_LENGTH_M = 5.0 * GLB_PLAYER_VISUAL_SCALE
 const GLB_START_POSE_STORAGE_KEY = 'f1s_glb_drive_start_pose_v1'
-const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v2'
+const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v3'
 const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v1'
 const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
 
