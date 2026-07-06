@@ -17,6 +17,13 @@ import { createIntro } from './ui/intro'
 import { createMinimap } from './ui/minimap'
 import { createTelemetryMap, type TelemetryMapRoadTriangle } from './ui/telemetryMap'
 import { createPersonalityCard } from './ui/personalityCard'
+import { installGlbGridPlacementGui, isGlbGridPlacementGuiEnabled } from './ui/glbGridPlacement'
+import {
+  applyCarVisualTuning,
+  installCarVisualTuningGui,
+  isCarVisualTuningGuiEnabled,
+  readSavedCarVisualTuning,
+} from './ui/carVisualTuning'
 import type { PlayerStats } from './racerPersonality'
 import { SFX, unlockAudio } from './audio/zzfx'
 import { createAudioRig, type AudioRig } from './audio/engine'
@@ -48,11 +55,11 @@ import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysi
 
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
-const GLB_THIRD_BACK_DISTANCE = 6.4
-const GLB_THIRD_UP_DISTANCE = 2.45
-const GLB_THIRD_LOOK_AHEAD = 8.2
-const GLB_THIRD_LOOK_UP = 0.75
-const GLB_THIRD_FOV = 42
+const GLB_THIRD_BACK_DISTANCE = 3.25
+const GLB_THIRD_UP_DISTANCE = 1.5
+const GLB_THIRD_LOOK_AHEAD = 19.5
+const GLB_THIRD_LOOK_UP = 1.2
+const GLB_THIRD_FOV = 78
 const GLB_PLAYER_BASE_VISUAL_SCALE = 0.58
 const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
 const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_MULTIPLIER
@@ -61,6 +68,30 @@ const GLB_START_POSE_STORAGE_KEY = 'f1s_glb_drive_start_pose_v1'
 const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v3'
 const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v1'
 const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
+const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v1'
+const SCENE_CACHE_RESET_PARAMS = ['resetSceneCache', 'clearSceneCache', 'resetMapCache']
+const SCENE_CACHE_STORAGE_KEYS = [
+  GLB_START_POSE_STORAGE_KEY,
+  GLB_GRID_STORAGE_KEY,
+  GLB_SIGN_DELETIONS_STORAGE_KEY,
+  LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY,
+  'f1s_glb_drive_start_pose',
+  'f1s_direct_glb_start_pose',
+  'f1s_lowpoly_shanghai_start_pose',
+  'f1s_shanghai_glb_start_pose',
+  'f1s_glb_start_pose',
+  'f1s_start_pose',
+  'f1s_autosave_track_local_points',
+  'f1s_autosave_map_placement',
+  'f1s_start_grandstand_placement',
+  'f1s_env_texture_placement',
+  'f1s_track_point_editor',
+  'f1s_track_outline_trace',
+  'f1s_first_person_cockpit_placement_v7',
+  'f1s_first_person_cockpit_placement_v2',
+  'f1s_first_person_cockpit_placement_v1',
+  CAR_VISUAL_TUNING_STORAGE_KEY,
+]
 
 interface GlbGridPlacement {
   id: 'player' | 'ferrari' | 'mercedes' | 'mclaren' | 'redbull' | string
@@ -70,17 +101,29 @@ interface GlbGridPlacement {
 }
 
 const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
-  { id: 'ferrari', x: -148.66, z: -225.66, headingDeg: 161.58 },
-  { id: 'mercedes', x: -154.48, z: -210.01, headingDeg: 161.58 },
-  { id: 'mclaren', x: -143.94, z: -214.77, headingDeg: 161.58 },
-  { id: 'player', x: -137.84, z: -231.09, headingDeg: 161.58 },
-  { id: 'redbull', x: -142.11, z: -242.06, headingDeg: 161.58 },
+  { id: 'ferrari', x: -122.67, z: 116.35, headingDeg: 270.8 },
+  { id: 'mercedes', x: -155.09, z: 116.62, headingDeg: 270.1 },
+  { id: 'mclaren', x: -131.19, z: 109.09, headingDeg: 271.5 },
+  { id: 'player', x: -147.24, z: 109.34, headingDeg: 270.6 },
+  { id: 'redbull', x: -139.35, z: 116.66, headingDeg: -89.6 },
 ]
 
 const DEFAULT_GLB_SIGN_DELETIONS: LowPolyShanghaiTriangleErase[] = [
   {
     point: { x: -381.86, y: -0.45, z: 44.37 },
     radius: 5,
+    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    verticalOnly: true,
+  },
+  {
+    point: { x: -381.86, y: 5.5, z: 44.37 },
+    radius: 7.5,
+    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    verticalOnly: true,
+  },
+  {
+    point: { x: -381.86, y: 12, z: 44.37 },
+    radius: 7.5,
     meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
     verticalOnly: true,
   },
@@ -97,6 +140,28 @@ interface SavedGlbStartPose {
 function shouldBootMainGame(): boolean {
   const params = new URLSearchParams(window.location.search)
   return params.has('oldMainGame') || params.has('legacyMainGame') || params.has('originalMainGame')
+}
+
+function resetSceneCacheFromUrl(): boolean {
+  const params = new URLSearchParams(window.location.search)
+  if (!SCENE_CACHE_RESET_PARAMS.some((param) => params.has(param))) return false
+
+  try {
+    for (const key of SCENE_CACHE_STORAGE_KEYS) localStorage.removeItem(key)
+  } catch (e) {
+    console.warn('[F1S] scene cache reset failed:', e)
+  }
+
+  for (const param of SCENE_CACHE_RESET_PARAMS) params.delete(param)
+  const query = params.toString()
+  window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`)
+  return true
+}
+
+function bootApp(): void {
+  const sceneCacheWasReset = resetSceneCacheFromUrl()
+  ;(shouldBootMainGame() ? bootstrap : bootstrapGlbVersion)()
+  if (sceneCacheWasReset) showToast('已清除地图/起点缓存，使用代码默认场景', 3600)
 }
 
 function createStatusPanel(): HTMLDivElement {
@@ -173,15 +238,18 @@ function normalizeSavedGlbSignDeletion(value: unknown): LowPolyShanghaiTriangleE
 function readSavedGlbSignDeletions(): LowPolyShanghaiTriangleErase[] {
   try {
     const raw = localStorage.getItem(GLB_SIGN_DELETIONS_STORAGE_KEY)
-    if (!raw) return DEFAULT_GLB_SIGN_DELETIONS
+    if (!raw) return DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } }))
     const parsed = JSON.parse(raw)
     const source = Array.isArray(parsed) ? parsed : [parsed]
     const deletions = source
       .map(normalizeSavedGlbSignDeletion)
       .filter((item): item is LowPolyShanghaiTriangleErase => Boolean(item))
-    return deletions.length ? deletions : DEFAULT_GLB_SIGN_DELETIONS
+    return [
+      ...DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } })),
+      ...deletions,
+    ]
   } catch {
-    return DEFAULT_GLB_SIGN_DELETIONS
+    return DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } }))
   }
 }
 
@@ -523,20 +591,25 @@ function updateGlbThirdPersonCamera(
   camera: THREE.PerspectiveCamera,
   pos: THREE.Vector3,
   heading: number,
+  normal: THREE.Vector3,
 ): void {
-  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading)).normalize()
+  const up = normal.clone().normalize()
+  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
+  forward.addScaledVector(up, -forward.dot(up))
+  if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
+  forward.normalize()
   const back = forward.clone().negate()
   camera.position
     .copy(pos)
     .addScaledVector(back, GLB_THIRD_BACK_DISTANCE)
-    .add(new THREE.Vector3(0, GLB_THIRD_UP_DISTANCE, 0))
-  camera.up.set(0, 1, 0)
-  camera.lookAt(
-    pos.x + forward.x * GLB_THIRD_LOOK_AHEAD,
-    pos.y + GLB_THIRD_LOOK_UP,
-    pos.z + forward.z * GLB_THIRD_LOOK_AHEAD,
-  )
-  camera.fov += (GLB_THIRD_FOV - camera.fov) * 0.16
+    .addScaledVector(up, GLB_THIRD_UP_DISTANCE)
+  camera.up.copy(up)
+  const lookTarget = pos
+    .clone()
+    .addScaledVector(forward, GLB_THIRD_LOOK_AHEAD)
+    .addScaledVector(up, GLB_THIRD_LOOK_UP)
+  camera.lookAt(lookTarget)
+  camera.fov += (GLB_THIRD_FOV - camera.fov) * 0.22
   camera.updateProjectionMatrix()
 }
 
@@ -568,13 +641,19 @@ function bootstrapGlbVersion(): void {
   bundle.applyWeather(weather)
   const lowPolyShanghai = addLowPolyShanghai(bundle.scene, readSavedLowPolyShanghaiPlacementForMain())
   const car = createCar({ visualScale: GLB_PLAYER_VISUAL_SCALE })
+  const carBaseScale = car.group.scale.clone()
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
 
   let input: InputController | null = null
   let drive: ReturnType<typeof createGlbDrivePhysics> | null = null
   const gridPlacements = readSavedGlbGridPlacements()
+  const gridPlacementGuiRequested = isGlbGridPlacementGuiEnabled()
+  let gridPlacementGuiActive = gridPlacementGuiRequested
+  const carVisualTuningGuiRequested = isCarVisualTuningGuiEnabled()
+  let carVisualTuningGuiActive = carVisualTuningGuiRequested
   let glbOpponentStates: OpponentState[] = []
+  let glbOpponentStateById = new Map<string, OpponentState>()
   let glbOpponentCars: OpponentCarBundle | null = null
   let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
   let audio: AudioRig | null = null
@@ -613,14 +692,18 @@ function bootstrapGlbVersion(): void {
       throttle: manualThrottle ? rawInput.throttle : 0,
       manualThrottle,
     }
-    const gameInput = started ? driveInput : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
+    const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive
+      ? driveInput
+      : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
     drive.update(dt, gameInput)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     const speed01 = drive.state.speed / GLB_DRIVE_MAX_SPEED
     car.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
     glbOpponentCars?.update(glbOpponentStates)
-    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading)
+    if (!gridPlacementGuiActive && !carVisualTuningGuiActive) {
+      updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal)
+    }
     visualOptimizer?.update(drive.state.pos)
     bundle.updateShadowFollow(drive.state.pos)
     telemetryUpdateTimer += dt
@@ -643,9 +726,9 @@ function bootstrapGlbVersion(): void {
     }
     setStatus(
       `上海赛车场 GLB 主游戏 · 第三视角\n` +
-      `${started ? '比赛中' : '等待发车倒数'}\n` +
+      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : started ? '比赛中' : '等待发车倒数'}\n` +
       `速度 ${Math.round(drive.state.speed * 3.6)} km/h\n` +
-      `P 保存起点\n` +
+      `${gridPlacementGuiActive ? '拖动车上标记调整发车位' : carVisualTuningGuiActive ? '调整宽度/高度/长度' : 'P 保存起点'}\n` +
       `WASD/方向键驾驶`,
     )
     bundle.render()
@@ -673,15 +756,46 @@ function bootstrapGlbVersion(): void {
     const pose = findGlbStartPose(ground)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    const applyGridPlacementToWorld = (placement: GlbGridPlacement): void => {
+      const nextPose = glbDrivePoseFromPlacement(placement, ground)
+      if (placement.id === 'player') {
+        drive?.reset(nextPose)
+        setObjectOnGroundHeading(car.group, nextPose.pos, nextPose.heading, nextPose.normal)
+        bundle.updateShadowFollow(nextPose.pos)
+        return
+      }
+      const opp = glbOpponentStateById.get(placement.id)
+      if (!opp) return
+      opp.pos.copy(nextPose.pos)
+      opp.heading = nextPose.heading
+      opp.speed = 0
+      opp.lap = 0
+      opp.t = 0
+      glbOpponentCars?.update(glbOpponentStates)
+    }
     glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
+    glbOpponentStateById = new Map(
+      gridPlacements
+        .filter((placement) => placement.id !== 'player')
+        .map((placement, index) => [placement.id, glbOpponentStates[index]]),
+    )
     glbOpponentCars = createOpponentCars(glbOpponentStates, { targetLengthM: GLB_PLAYER_TARGET_LENGTH_M })
     glbOpponentCars.update(glbOpponentStates)
     bundle.scene.add(glbOpponentCars.group)
+    const applySavedCarVisualTuning = (): void => {
+      applyCarVisualTuning(readSavedCarVisualTuning(CAR_VISUAL_TUNING_STORAGE_KEY), {
+        playerGroup: car.group,
+        playerBaseScale: carBaseScale,
+        opponentRoot: glbOpponentCars?.group ?? null,
+      })
+    }
+    applySavedCarVisualTuning()
     telemetryMap = createTelemetryMap(createGlbTelemetryRoadMap(lowPolyShanghai))
     telemetryMap.resetTrail()
     telemetryMap.show()
-    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading)
+    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal)
     await glbOpponentCars.ready
+    applySavedCarVisualTuning()
     glbOpponentCars.update(glbOpponentStates)
     input = await initInput('keyboard')
     try {
@@ -690,9 +804,51 @@ function bootstrapGlbVersion(): void {
     } catch (e) {
       console.warn('[F1S] GLB audio rig init failed:', e)
     }
-    started = true
-    startGlbAudio()
-    showToast('第三视角 GLB 主游戏已启动', 1800)
+    if (gridPlacementGuiRequested || carVisualTuningGuiRequested) {
+      started = false
+    }
+    if (gridPlacementGuiRequested) {
+      gridPlacementGuiActive = true
+      installGlbGridPlacementGui({
+        scene: bundle.scene,
+        camera: bundle.camera,
+        renderer: bundle.renderer,
+        ground,
+        placements: gridPlacements,
+        defaultPlacements: DEFAULT_GLB_GRID_PLACEMENTS,
+        storageKey: GLB_GRID_STORAGE_KEY,
+        onPlacementChange: applyGridPlacementToWorld,
+        onStartDriving: () => {
+          gridPlacementGuiActive = false
+          started = !carVisualTuningGuiActive
+          startGlbAudio()
+          showToast('已进入驾驶预览', 1400)
+        },
+      })
+      showToast('发车格编辑器已打开', 1800)
+    }
+    if (carVisualTuningGuiRequested) {
+      carVisualTuningGuiActive = true
+      installCarVisualTuningGui({
+        camera: bundle.camera,
+        playerGroup: car.group,
+        playerBaseScale: carBaseScale,
+        opponentRoot: glbOpponentCars?.group ?? null,
+        storageKey: CAR_VISUAL_TUNING_STORAGE_KEY,
+        onClose: () => {
+          carVisualTuningGuiActive = false
+          started = !gridPlacementGuiActive
+          startGlbAudio()
+          showToast('已进入驾驶预览', 1400)
+        },
+      })
+      showToast('赛车尺寸调参已打开', 1800)
+    }
+    if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested) {
+      started = true
+      startGlbAudio()
+      showToast('第三视角 GLB 主游戏已启动', 1800)
+    }
   }).catch((e) => {
     console.warn('[F1S] GLB version failed:', e)
     setStatus(`上海赛车场 GLB 主游戏\n加载失败: ${e instanceof Error ? e.message : String(e)}`)
@@ -1550,7 +1706,7 @@ function bootstrap(): void {
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', shouldBootMainGame() ? bootstrap : bootstrapGlbVersion, { once: true })
+  document.addEventListener('DOMContentLoaded', bootApp, { once: true })
 } else {
-  ;(shouldBootMainGame() ? bootstrap : bootstrapGlbVersion)()
+  bootApp()
 }

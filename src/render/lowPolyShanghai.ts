@@ -459,6 +459,7 @@ export function addLowPolyShanghai(
           obj.receiveShadow = meshHasRoadSurfaceHint(obj)
           obj.visible = true
           obj.frustumCulled = true
+          stripLowRoadsideBannerTriangles(obj)
           const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
           for (const mat of materials) {
             mat.needsUpdate = true
