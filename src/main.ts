@@ -112,20 +112,22 @@ const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
 const DEFAULT_GLB_SIGN_DELETIONS: LowPolyShanghaiTriangleErase[] = [
   {
     point: { x: -381.86, y: -0.45, z: 44.37 },
-    radius: 5,
-    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    radius: 8,
     verticalOnly: true,
   },
   {
     point: { x: -381.86, y: 5.5, z: 44.37 },
-    radius: 7.5,
-    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    radius: 9,
     verticalOnly: true,
   },
   {
     point: { x: -381.86, y: 12, z: 44.37 },
-    radius: 7.5,
-    meshName: 'TERRAIN_ORANGE_BUMP001_SHANGHAI_0',
+    radius: 9,
+    verticalOnly: true,
+  },
+  {
+    point: { x: -381.86, y: 18, z: 44.37 },
+    radius: 8,
     verticalOnly: true,
   },
 ]
