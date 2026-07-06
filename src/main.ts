@@ -60,6 +60,7 @@ const GLB_THIRD_UP_DISTANCE = 1.5
 const GLB_THIRD_LOOK_AHEAD = 19.5
 const GLB_THIRD_LOOK_UP = 1.2
 const GLB_THIRD_FOV = 78
+const GLB_VISUAL_GROUND_SINK = 0.12
 const GLB_PLAYER_BASE_VISUAL_SCALE = 0.58
 const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
 const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_MULTIPLIER
@@ -177,6 +178,35 @@ function createStatusPanel(): HTMLDivElement {
   `
   document.body.appendChild(panel)
   return panel
+}
+
+function createGlbCountdownOverlay(): { flash: (text: string, color?: string, ms?: number) => void; hide: () => void } {
+  const el = document.createElement('div')
+  el.style.cssText = `
+    position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+    pointer-events:none;color:#fff;font:900 clamp(52px,14vw,160px)/1 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    text-shadow:0 10px 36px rgba(0,0,0,.55);opacity:0;transform:scale(.92);
+    transition:opacity .18s ease,transform .18s ease;
+  `
+  document.body.appendChild(el)
+  let timer: number | null = null
+  return {
+    flash: (text: string, color = '#ff3b30', ms = 520): void => {
+      if (timer !== null) window.clearTimeout(timer)
+      el.textContent = text
+      el.style.color = color
+      el.style.opacity = '1'
+      el.style.transform = 'scale(1)'
+      timer = window.setTimeout(() => {
+        el.style.opacity = '0'
+        el.style.transform = 'scale(.92)'
+      }, ms)
+    },
+    hide: (): void => {
+      if (timer !== null) window.clearTimeout(timer)
+      el.style.opacity = '0'
+    },
+  }
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -583,7 +613,7 @@ function setObjectOnGroundHeading(obj: THREE.Object3D, pos: THREE.Vector3, headi
   const right = new THREE.Vector3().crossVectors(normal, forward).normalize()
   const correctedForward = new THREE.Vector3().crossVectors(right, normal).normalize()
   const basis = new THREE.Matrix4().makeBasis(right, normal, correctedForward)
-  obj.position.copy(pos)
+  obj.position.copy(pos).addScaledVector(normal, -GLB_VISUAL_GROUND_SINK)
   obj.quaternion.setFromRotationMatrix(basis)
 }
 
@@ -632,6 +662,8 @@ function bootstrapGlbVersion(): void {
   }
 
   const status = createStatusPanel()
+  const menu = createMenu()
+  const countdownOverlay = createGlbCountdownOverlay()
   const setStatus = (text: string): void => {
     status.textContent = text
   }
@@ -657,8 +689,10 @@ function bootstrapGlbVersion(): void {
   let glbOpponentCars: OpponentCarBundle | null = null
   let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
   let audio: AudioRig | null = null
+  let countdown: ReturnType<typeof createCountdown> | null = null
   let audioStarted = false
   let started = false
+  let countdownActive = false
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
   let telemetryUpdateTimer = 0
 
@@ -686,6 +720,10 @@ function bootstrapGlbVersion(): void {
       return
     }
     const rawInput = input?.getInput() ?? { steer: 0, throttle: 0, brake: 0, drs: false }
+    if (countdownActive && countdown) {
+      countdown.update(dt)
+      countdown.setThrottlePressed(rawInput.throttle > 0.7 || rawInput.drs)
+    }
     const manualThrottle = rawInput.throttle > 0.7 || rawInput.drs
     const driveInput = {
       ...rawInput,
@@ -726,7 +764,7 @@ function bootstrapGlbVersion(): void {
     }
     setStatus(
       `上海赛车场 GLB 主游戏 · 第三视角\n` +
-      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : started ? '比赛中' : '等待发车倒数'}\n` +
+      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : countdownActive ? '红灯倒计时' : started ? '比赛中' : '等待开始'}\n` +
       `速度 ${Math.round(drive.state.speed * 3.6)} km/h\n` +
       `${gridPlacementGuiActive ? '拖动车上标记调整发车位' : carVisualTuningGuiActive ? '调整宽度/高度/长度' : 'P 保存起点'}\n` +
       `WASD/方向键驾驶`,
@@ -756,6 +794,94 @@ function bootstrapGlbVersion(): void {
     const pose = findGlbStartPose(ground)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    const resetGlbRaceGrid = (): void => {
+      if (!drive) return
+      drive.reset(pose)
+      setObjectOnGroundHeading(car.group, pose.pos, pose.heading, pose.normal)
+      glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
+      glbOpponentStateById = new Map(
+        gridPlacements
+          .filter((placement) => placement.id !== 'player')
+          .map((placement, index) => [placement.id, glbOpponentStates[index]]),
+      )
+      glbOpponentCars?.update(glbOpponentStates)
+      telemetryMap?.resetTrail()
+      bundle.updateShadowFollow(pose.pos)
+      updateGlbThirdPersonCamera(bundle.camera, pose.pos, pose.heading, pose.normal)
+    }
+    const clearGlbCountdown = (): void => {
+      if (countdown) {
+        countdown.destroy()
+        countdown = null
+      }
+    }
+    const startGlbCountdown = (): void => {
+      if (!drive) return
+      clearGlbCountdown()
+      started = false
+      countdownActive = true
+      const silentCountdownRig = {
+        group: new THREE.Group(),
+        setLitCount: (_n: number): void => { /* screen-only countdown */ },
+        setAllOff: (): void => { /* screen-only countdown */ },
+        dispose: (): void => { /* screen-only countdown */ },
+      }
+      countdownOverlay.flash('READY', '#ffffff', 650)
+      countdown = createCountdown(
+        silentCountdownRig,
+        (n) => {
+          SFX.countdownBeep()
+          if (navigator.vibrate) navigator.vibrate(60 + n * 20)
+          countdownOverlay.flash(`${6 - n}`, '#ff3b30', 430)
+        },
+        () => {
+          SFX.lightsOut()
+          if (navigator.vibrate) navigator.vibrate([0, 200, 50, 100, 30, 150])
+          countdownActive = false
+          started = true
+          countdownOverlay.flash('GO!', '#00d2be', 820)
+          input?.recenter()
+          showToast('比赛开始', 1000)
+        },
+        () => {
+          SFX.jumpStart()
+          countdownActive = false
+          started = false
+          countdownOverlay.flash('抢跑', '#ff1801', 900)
+          showToast('抢跑，重新倒计时', 1200)
+          if (countdown) {
+            countdown.destroy()
+            countdown = null
+          }
+          window.setTimeout(() => {
+            if (gridPlacementGuiActive || carVisualTuningGuiActive || started) return
+            startGlbCountdown()
+          }, 900)
+        },
+      )
+    }
+    const showGlbStartMenu = (): void => {
+      setStatus('上海赛车场 GLB 主游戏\n选择画质和操作方式')
+      menu.show((cfg) => {
+        menu.hide()
+        bundle.setPerformanceMode(cfg.performanceMode)
+        storage.setPerformanceMode(cfg.performanceMode)
+        resetGlbRaceGrid()
+        startGlbAudio()
+        void initInput(cfg.inputMode).then((controller) => {
+          input?.destroy()
+          input = controller
+          startGlbCountdown()
+        }).catch((e) => {
+          console.warn('[F1S] GLB input init failed:', e)
+          void initInput('keyboard').then((controller) => {
+            input?.destroy()
+            input = controller
+            startGlbCountdown()
+          })
+        })
+      })
+    }
     const applyGridPlacementToWorld = (placement: GlbGridPlacement): void => {
       const nextPose = glbDrivePoseFromPlacement(placement, ground)
       if (placement.id === 'player') {
@@ -779,7 +905,10 @@ function bootstrapGlbVersion(): void {
         .filter((placement) => placement.id !== 'player')
         .map((placement, index) => [placement.id, glbOpponentStates[index]]),
     )
-    glbOpponentCars = createOpponentCars(glbOpponentStates, { targetLengthM: GLB_PLAYER_TARGET_LENGTH_M })
+    glbOpponentCars = createOpponentCars(glbOpponentStates, {
+      targetLengthM: GLB_PLAYER_TARGET_LENGTH_M,
+      groundSinkM: GLB_VISUAL_GROUND_SINK,
+    })
     glbOpponentCars.update(glbOpponentStates)
     bundle.scene.add(glbOpponentCars.group)
     const applySavedCarVisualTuning = (): void => {
@@ -845,9 +974,9 @@ function bootstrapGlbVersion(): void {
       showToast('赛车尺寸调参已打开', 1800)
     }
     if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested) {
-      started = true
-      startGlbAudio()
-      showToast('第三视角 GLB 主游戏已启动', 1800)
+      started = false
+      showGlbStartMenu()
+      showToast('第三视角 GLB 主游戏已就绪', 1600)
     }
   }).catch((e) => {
     console.warn('[F1S] GLB version failed:', e)

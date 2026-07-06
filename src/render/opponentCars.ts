@@ -19,6 +19,7 @@ export interface OpponentCarBundle {
 export interface OpponentCarOptions {
   targetLengthM?: number
   targetHeightM?: number
+  groundSinkM?: number
 }
 
 interface ShellRefs {
@@ -246,6 +247,7 @@ export function createOpponentCars(opps: OpponentState[], options: OpponentCarOp
   const update = (s: OpponentState[]): void => {
     for (let i = 0; i < shells.length && i < s.length; i++) {
       shells[i].group.position.copy(s[i].pos)
+      shells[i].group.position.y -= options.groundSinkM ?? 0
       shells[i].group.rotation.y = s[i].heading
       // Wheel spin only on the procedural placeholder; GLB wheels aren't
       // tagged, and AI cars are rarely close enough for it to matter.
