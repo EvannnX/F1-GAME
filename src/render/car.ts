@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
-import carGlbUrl from '../assets/models/抖音车新版未定.glb?url'
+import carGlbUrl from '../assets/models/简约版车-optimized.glb?url'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
@@ -42,10 +42,10 @@ const REAR_WHEEL_ROLL_SHELL_RATIO = 0.42
 const REAR_WHEEL_INNER_SIDE_MARGIN = 1
 
 const PLAYER_WHEEL_PARTS = [
-  { name: 'left-rear', steerParts: [0], spinParts: [0], steerable: false, sharedSpinCenter: false },
-  { name: 'right-rear', steerParts: [5], spinParts: [5], steerable: false, sharedSpinCenter: false },
-  { name: 'left-front', steerParts: [4, 43, 20], spinParts: [4], steerable: true, sharedSpinCenter: true },
-  { name: 'right-front', steerParts: [1], spinParts: [1], steerable: true, sharedSpinCenter: true },
+  { name: 'left-front', steerParts: [3], spinParts: [3], steerable: true, sharedSpinCenter: true },
+  { name: 'right-front', steerParts: [4], spinParts: [4], steerable: true, sharedSpinCenter: true },
+  { name: 'left-rear', steerParts: [1], spinParts: [1], steerable: false, sharedSpinCenter: false },
+  { name: 'right-rear', steerParts: [2], spinParts: [2], steerable: false, sharedSpinCenter: false },
 ] as const
 
 const PLAYER_STATIC_WHEEL_LINK_PARTS = [15] as const
@@ -59,6 +59,21 @@ const FRONT_WHEEL_SPLIT_PARTS = [1, 4] as const
 const REAR_WHEEL_SPLIT_PARTS = [5] as const
 
 let dracoLoader: DRACOLoader | null = null
+
+function makeMaterialInteriorVisible(material: THREE.Material): void {
+  if (material.side !== THREE.DoubleSide) {
+    material.side = THREE.DoubleSide
+    material.needsUpdate = true
+  }
+}
+
+function prepareMeshForInteriorCamera(mesh: THREE.Mesh): void {
+  mesh.frustumCulled = false
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+  for (const material of materials) {
+    if (material) makeMaterialInteriorVisible(material)
+  }
+}
 
 function getDracoLoader(): DRACOLoader {
   if (!dracoLoader) {
@@ -132,6 +147,7 @@ function buildPlaceholder(): PlaceholderRefs {
     m.position.set(...pos)
     if (rot) m.rotation.set(...rot)
     m.castShadow = true
+    prepareMeshForInteriorCamera(m)
     group.add(m)
     return m
   }
@@ -157,6 +173,7 @@ function buildPlaceholder(): PlaceholderRefs {
     w.rotation.z = Math.PI / 2
     w.position.set(x, 0.45, z)
     w.castShadow = true
+    prepareMeshForInteriorCamera(w)
     wheels.push(w)
     group.add(w)
   }
@@ -490,6 +507,22 @@ function createPivotForObjects(
   return { pivot, baseQuaternion: pivot.quaternion.clone() }
 }
 
+function wheelCenterForParts(parts: THREE.Object3D[]): THREE.Vector3 {
+  const box = renderedBoxForObjects(parts)
+  const boxCenter = box.getCenter(new THREE.Vector3())
+  if (parts.length !== 1) return boxCenter
+
+  // The simplified GLB keeps the wheel pivot on each part node. Prefer that
+  // authored origin when it sits inside the wheel geometry; a few exported
+  // parts have their origin at the model root, so keep the bbox fallback for
+  // those malformed nodes.
+  const authoredCenter = parts[0].getWorldPosition(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const tolerance = Math.max(size.x, size.y) * 0.9 + 0.02
+  if (authoredCenter.distanceTo(boxCenter) <= tolerance) return authoredCenter
+  return boxCenter
+}
+
 function createWheelRig(
   root: THREE.Object3D,
   name: string,
@@ -503,9 +536,10 @@ function createWheelRig(
     ...collectFrontWheelStaticObjects(root, steerPartNumbers),
   ]
   const spinParts = collectPartObjects(root, spinPartNumbers)
-  const centerBox = renderedBoxForObjects(spinParts.length ? spinParts : steerParts)
+  const centerParts = spinParts.length ? spinParts : steerParts
+  const centerBox = renderedBoxForObjects(centerParts)
   if (centerBox.isEmpty()) return null
-  const wheelCenterWorld = centerBox.getCenter(new THREE.Vector3())
+  const wheelCenterWorld = wheelCenterForParts(centerParts)
   const steerPivot = createPivotForObjects(root, steerParts, `player-${name}-steer-pivot`, wheelCenterWorld)
   if (!steerPivot) return null
 
@@ -687,12 +721,9 @@ export function createCar(options: CarOptions = {}): CarBundle {
         if (mesh.isMesh) {
           mesh.castShadow = true
           mesh.receiveShadow = false
-          mesh.frustumCulled = true
+          prepareMeshForInteriorCamera(mesh)
         }
       })
-      splitFrontWheelRollingMeshes(model)
-      splitRearWheelRollingMeshes(model)
-
       // Swap placeholder out.
       group.remove(placeholder.group)
       disposePlaceholder(placeholder)

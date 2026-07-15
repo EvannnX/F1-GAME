@@ -4,11 +4,13 @@ import type { Difficulty } from '../game/opponents'
 import type { InputMode } from '../input'
 
 export type CommentaryMode = 'off' | 'commentary' | 'coach'
+export type CameraMode = 'first' | 'third'
 
 export interface MenuStartConfig {
   difficulty: Difficulty
   inputMode: InputMode
   performanceMode: boolean
+  cameraMode: CameraMode
   /** Audio guidance during the race:
    *   - 'commentary' = pre-recorded race-announcer clips
    *   - 'coach'      = TTS driving-coach cues (turn / brake / push)
@@ -42,6 +44,11 @@ const COMMENTARY_LABELS: Record<CommentaryMode, { label: string; tag: string }> 
 const QUALITY_LABELS: Record<'performance' | 'quality', { label: string; tag: string }> = {
   performance: { label: '流 畅', tag: '低负载' },
   quality: { label: '高 质', tag: '完整光影' },
+}
+
+const CAMERA_LABELS: Record<CameraMode, { label: string; tag: string }> = {
+  first: { label: '第一视角', tag: '座舱内' },
+  third: { label: '第三视角', tag: '追车镜头' },
 }
 
 const isCoarsePointer = (): boolean => {
@@ -134,6 +141,7 @@ export function createMenu(): MenuController {
     let chosenCommentary: CommentaryMode = 'commentary'
     let chosenQuality: 'performance' | 'quality' =
       storage.getPerformanceMode() || isCoarsePointer() ? 'performance' : 'quality'
+    let chosenCamera: CameraMode = 'third'
 
     const diffRow = makeRow(
       '难  度',
@@ -168,6 +176,14 @@ export function createMenu(): MenuController {
         chosenQuality = k as 'performance' | 'quality'
         storage.setPerformanceMode(chosenQuality === 'performance')
       },
+    )
+
+    const cameraRow = makeRow(
+      '视  角',
+      ['first', 'third'],
+      CAMERA_LABELS,
+      chosenCamera,
+      (k) => { chosenCamera = k as CameraMode },
     )
 
     const btn = document.createElement('button')
@@ -210,6 +226,7 @@ export function createMenu(): MenuController {
         difficulty: chosenDiff,
         inputMode: chosenInput,
         performanceMode: chosenQuality === 'performance',
+        cameraMode: chosenCamera,
         commentaryMode: chosenCommentary,
       })
     }, { once: true })
@@ -229,6 +246,7 @@ export function createMenu(): MenuController {
     host.appendChild(inputRow)
     host.appendChild(commentaryRow)
     host.appendChild(qualityRow)
+    host.appendChild(cameraRow)
     host.appendChild(btn)
     host.appendChild(note)
     host.appendChild(bestEl)

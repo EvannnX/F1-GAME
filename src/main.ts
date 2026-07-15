@@ -10,14 +10,21 @@ import { createPhysics, PHYS_MAX_SPEED, type PhysicsBundle } from './game/physic
 import { initInput, type InputController } from './input'
 import { GameLoop } from './game/loop'
 import { StateMachine, GameState, createInitialContext } from './game/state'
-import { createMenu } from './ui/menu'
+import { createMenu, type CameraMode } from './ui/menu'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createIntro } from './ui/intro'
 import { createMinimap } from './ui/minimap'
 import { createTelemetryMap, type TelemetryMapRoadTriangle } from './ui/telemetryMap'
 import { createPersonalityCard } from './ui/personalityCard'
+import { installF1tiApi } from './f1ti/api'
 import { installGlbGridPlacementGui, isGlbGridPlacementGuiEnabled } from './ui/glbGridPlacement'
+import {
+  installGlbCameraTuningGui,
+  isGlbCameraTuningGuiEnabled,
+  readSavedGlbCameraTuning,
+  type GlbCameraTuning,
+} from './ui/glbCameraTuning'
 import {
   applyCarVisualTuning,
   installCarVisualTuningGui,
@@ -40,6 +47,11 @@ import {
 } from './game/opponents'
 import { createOpponentCars, type OpponentCarBundle } from './render/opponentCars'
 import {
+  createFirstPersonCockpit,
+  isCockpitPlacementGuiEnabled,
+  type FirstPersonCockpitBundle,
+} from './render/firstPersonCockpit'
+import {
   addLowPolyShanghai,
   createLowPolyShanghaiGroundGridSampler,
   createLowPolyShanghaiGroundSampler,
@@ -55,11 +67,18 @@ import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysi
 
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
-const GLB_THIRD_BACK_DISTANCE = 3.25
-const GLB_THIRD_UP_DISTANCE = 1.2
-const GLB_THIRD_LOOK_AHEAD = 19.5
-const GLB_THIRD_LOOK_UP = 1.2
-const GLB_THIRD_FOV = 60
+const GLB_THIRD_BACK_DISTANCE = 4.6
+const GLB_THIRD_UP_DISTANCE = 1.75
+const GLB_THIRD_LOOK_AHEAD = 8.8
+const GLB_THIRD_LOOK_UP = -0.55
+const GLB_THIRD_FOV = 43
+const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
+  backDistance: GLB_THIRD_BACK_DISTANCE,
+  upDistance: GLB_THIRD_UP_DISTANCE,
+  lookAhead: GLB_THIRD_LOOK_AHEAD,
+  lookUp: GLB_THIRD_LOOK_UP,
+  fov: GLB_THIRD_FOV,
+}
 const GLB_VISUAL_GROUND_SINK = 0.12
 const GLB_PLAYER_BASE_VISUAL_SCALE = 0.58
 const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
@@ -70,6 +89,7 @@ const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v3'
 const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v1'
 const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
 const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v1'
+const GLB_CAMERA_TUNING_STORAGE_KEY = 'f1s_glb_camera_tuning_v1'
 const SCENE_CACHE_RESET_PARAMS = ['resetSceneCache', 'clearSceneCache', 'resetMapCache']
 const SCENE_CACHE_STORAGE_KEYS = [
   GLB_START_POSE_STORAGE_KEY,
@@ -92,6 +112,7 @@ const SCENE_CACHE_STORAGE_KEYS = [
   'f1s_first_person_cockpit_placement_v2',
   'f1s_first_person_cockpit_placement_v1',
   CAR_VISUAL_TUNING_STORAGE_KEY,
+  GLB_CAMERA_TUNING_STORAGE_KEY,
 ]
 
 interface GlbGridPlacement {
@@ -624,7 +645,9 @@ function updateGlbThirdPersonCamera(
   pos: THREE.Vector3,
   heading: number,
   normal: THREE.Vector3,
+  tuning: GlbCameraTuning,
 ): void {
+  if (camera.near !== 1) camera.near = 1
   const up = normal.clone().normalize()
   const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
   forward.addScaledVector(up, -forward.dot(up))
@@ -633,15 +656,51 @@ function updateGlbThirdPersonCamera(
   const back = forward.clone().negate()
   camera.position
     .copy(pos)
-    .addScaledVector(back, GLB_THIRD_BACK_DISTANCE)
-    .addScaledVector(up, GLB_THIRD_UP_DISTANCE)
+    .addScaledVector(back, tuning.backDistance)
+    .addScaledVector(up, tuning.upDistance)
   camera.up.copy(up)
   const lookTarget = pos
     .clone()
-    .addScaledVector(forward, GLB_THIRD_LOOK_AHEAD)
-    .addScaledVector(up, GLB_THIRD_LOOK_UP)
+    .addScaledVector(forward, tuning.lookAhead)
+    .addScaledVector(up, tuning.lookUp)
   camera.lookAt(lookTarget)
-  camera.fov += (GLB_THIRD_FOV - camera.fov) * 0.22
+  camera.fov += (tuning.fov - camera.fov) * 0.22
+  camera.updateProjectionMatrix()
+}
+
+function updateGlbFirstPersonCamera(
+  camera: THREE.PerspectiveCamera,
+  pos: THREE.Vector3,
+  heading: number,
+  normal: THREE.Vector3,
+  cockpit: FirstPersonCockpitBundle,
+): void {
+  if (camera.near !== 0.03) camera.near = 0.03
+  const up = normal.clone().normalize()
+  const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
+  forward.addScaledVector(up, -forward.dot(up))
+  if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
+  forward.normalize()
+  const right = new THREE.Vector3().crossVectors(up, forward).normalize()
+  const correctedForward = new THREE.Vector3().crossVectors(right, up).normalize()
+  const cameraOffset = cockpit.getCameraOffset()
+  const viewOffset = cockpit.getViewRotationOffset()
+  const localDirection = new THREE.Vector3(0, 0, 1)
+    .applyEuler(new THREE.Euler(viewOffset.x, viewOffset.y, viewOffset.z, 'YXZ'))
+    .normalize()
+  const worldDirection = right.clone()
+    .multiplyScalar(localDirection.x)
+    .addScaledVector(up, localDirection.y)
+    .addScaledVector(correctedForward, localDirection.z)
+    .normalize()
+  camera.position
+    .copy(pos)
+    .addScaledVector(right, cameraOffset.x)
+    .addScaledVector(up, cameraOffset.y)
+    .addScaledVector(correctedForward, cameraOffset.z)
+  camera.up.copy(up)
+  camera.lookAt(camera.position.clone().addScaledVector(worldDirection, 10))
+  camera.fov += (58 - camera.fov) * 0.22
   camera.updateProjectionMatrix()
 }
 
@@ -666,6 +725,8 @@ function bootstrapGlbVersion(): void {
   const status = createStatusPanel()
   const menu = createMenu()
   const countdownOverlay = createGlbCountdownOverlay()
+  const result = createResult()
+  const personalityCard = createPersonalityCard()
   const setStatus = (text: string): void => {
     status.textContent = text
   }
@@ -678,14 +739,26 @@ function bootstrapGlbVersion(): void {
   const carBaseScale = car.group.scale.clone()
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
+  const firstPersonRig = new THREE.Group()
+  firstPersonRig.name = 'glb-first-person-rig'
+  firstPersonRig.visible = false
+  const firstPersonCockpit = createFirstPersonCockpit()
+  firstPersonRig.add(firstPersonCockpit.group)
+  bundle.scene.add(firstPersonRig)
 
   let input: InputController | null = null
   let drive: ReturnType<typeof createGlbDrivePhysics> | null = null
+  let cameraMode: CameraMode = 'third'
   const gridPlacements = readSavedGlbGridPlacements()
   const gridPlacementGuiRequested = isGlbGridPlacementGuiEnabled()
   let gridPlacementGuiActive = gridPlacementGuiRequested
   const carVisualTuningGuiRequested = isCarVisualTuningGuiEnabled()
   let carVisualTuningGuiActive = carVisualTuningGuiRequested
+  const cameraTuningGuiRequested = isGlbCameraTuningGuiEnabled()
+  let cameraTuningGuiActive = cameraTuningGuiRequested
+  const firstPersonGuiRequested = isCockpitPlacementGuiEnabled()
+  let firstPersonGuiActive = firstPersonGuiRequested
+  let glbCameraTuning = readSavedGlbCameraTuning(GLB_CAMERA_TUNING_STORAGE_KEY, DEFAULT_GLB_CAMERA_TUNING)
   let glbOpponentStates: OpponentState[] = []
   let glbOpponentStateById = new Map<string, OpponentState>()
   let glbOpponentCars: OpponentCarBundle | null = null
@@ -695,8 +768,23 @@ function bootstrapGlbVersion(): void {
   let audioStarted = false
   let started = false
   let countdownActive = false
+  let glbRaceStartTime = 0
+  let glbRaceStartPose: THREE.Vector3 | null = null
+  let glbRaceDistance = 0
+  let glbRaceArmed = false
+  let glbPreviousGateCoordinate = 0
+  let glbFinishing = false
+  let glbResultVisible = false
+  let finishGlbRace: () => void = () => { /* GLB race is not ready yet. */ }
+  let updateGlbRaceProgress: (dt: number) => void = () => { /* GLB race is not ready yet. */ }
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
   let telemetryUpdateTimer = 0
+
+  const applyCameraModeVisibility = (): void => {
+    firstPersonRig.visible = cameraMode === 'first'
+    firstPersonCockpit.group.visible = cameraMode === 'first'
+    car.group.visible = true
+  }
 
   const startGlbAudio = (): void => {
     if (!audio || audioStarted) return
@@ -732,22 +820,32 @@ function bootstrapGlbVersion(): void {
       throttle: manualThrottle ? rawInput.throttle : 0,
       manualThrottle,
     }
-    const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive
+    const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive
       ? driveInput
       : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
     drive.update(dt, gameInput)
+    if (started && !glbFinishing) {
+      updateGlbRaceProgress(dt)
+    }
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
+    applyCameraModeVisibility()
     const speed01 = drive.state.speed / GLB_DRIVE_MAX_SPEED
     car.update(dt, speed01, rawInput.steer)
+    firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
-    glbOpponentCars?.update(glbOpponentStates)
+    if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
     if (!gridPlacementGuiActive && !carVisualTuningGuiActive) {
-      updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal)
+      if (cameraMode === 'first') {
+        updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
+      } else {
+        updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+      }
     }
-    visualOptimizer?.update(drive.state.pos)
+    if (!countdownActive) visualOptimizer?.update(drive.state.pos)
     bundle.updateShadowFollow(drive.state.pos)
     telemetryUpdateTimer += dt
-    if (telemetryUpdateTimer >= 0.08) {
+    if (!countdownActive && telemetryUpdateTimer >= 0.08) {
       telemetryUpdateTimer = 0
       telemetryMap?.update({
         player: {
@@ -765,10 +863,10 @@ function bootstrapGlbVersion(): void {
       })
     }
     setStatus(
-      `上海赛车场 GLB 主游戏 · 第三视角\n` +
-      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : countdownActive ? '红灯倒计时' : started ? '比赛中' : '等待开始'}\n` +
+      `上海赛车场 GLB 主游戏 · ${cameraMode === 'first' ? '第一视角' : '第三视角'}\n` +
+      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : cameraTuningGuiActive ? '第三视角相机调参中' : firstPersonGuiActive ? '第一视角调参中' : countdownActive ? '红灯倒计时' : glbFinishing ? '已冲线，正在结算' : started ? '比赛中' : '等待开始'}\n` +
       `速度 ${Math.round(drive.state.speed * 3.6)} km/h\n` +
-      `${gridPlacementGuiActive ? '拖动车上标记调整发车位' : carVisualTuningGuiActive ? '调整宽度/高度/长度' : 'P 保存起点'}\n` +
+      `${gridPlacementGuiActive ? '拖动车上标记调整发车位' : carVisualTuningGuiActive ? '调整宽度/高度/长度' : cameraTuningGuiActive ? 'WASD/方向键调整相机' : firstPersonGuiActive ? '右侧面板调整 Eye / Pitch / Yaw / Roll' : 'P 保存起点'}\n` +
       `WASD/方向键驾驶`,
     )
     bundle.render()
@@ -778,7 +876,11 @@ function bootstrapGlbVersion(): void {
   void lowPolyShanghai.ready.then(async () => {
     const removedSigns = applySavedGlbSignDeletions(lowPolyShanghai)
     if (removedSigns > 0) console.log(`[F1S] applied sign deletions: ${removedSigns}`)
-    optimizeLowPolyShanghaiRendering(lowPolyShanghai.group)
+    const renderOptimization = optimizeLowPolyShanghaiRendering(lowPolyShanghai.group)
+    console.log(
+      `[F1S] Shanghai render optimization: ${renderOptimization.chunkCount} chunks, ` +
+      `${renderOptimization.hiddenOriginals} originals hidden`,
+    )
     visualOptimizer = createLowPolyShanghaiVisualOptimizer(lowPolyShanghai.group)
     setStatus('上海赛车场 GLB 主游戏\n正在准备地面采样...')
     let ground: LowPolyShanghaiGroundSampler
@@ -796,10 +898,20 @@ function bootstrapGlbVersion(): void {
     const pose = findGlbStartPose(ground)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+    setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
+    applyCameraModeVisibility()
     const resetGlbRaceGrid = (): void => {
       if (!drive) return
       drive.reset(pose)
+      glbRaceStartPose = pose.pos.clone()
+      glbRaceDistance = 0
+      glbRaceArmed = false
+      glbPreviousGateCoordinate = 0
+      glbFinishing = false
+      glbResultVisible = false
       setObjectOnGroundHeading(car.group, pose.pos, pose.heading, pose.normal)
+      setObjectOnGroundHeading(firstPersonRig, pose.pos, pose.heading, pose.normal)
+      applyCameraModeVisibility()
       glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
       glbOpponentStateById = new Map(
         gridPlacements
@@ -809,7 +921,7 @@ function bootstrapGlbVersion(): void {
       glbOpponentCars?.update(glbOpponentStates)
       telemetryMap?.resetTrail()
       bundle.updateShadowFollow(pose.pos)
-      updateGlbThirdPersonCamera(bundle.camera, pose.pos, pose.heading, pose.normal)
+      updateGlbThirdPersonCamera(bundle.camera, pose.pos, pose.heading, pose.normal, glbCameraTuning)
     }
     const clearGlbCountdown = (): void => {
       if (countdown) {
@@ -822,6 +934,10 @@ function bootstrapGlbVersion(): void {
       clearGlbCountdown()
       started = false
       countdownActive = true
+      // Countdown is a presentation phase. Temporarily use the low-cost
+      // render path so the overlay and light sequence stay responsive on
+      // large GLB scenes; the selected quality returns at lights-out.
+      bundle.setPerformanceMode(true)
       const silentCountdownRig = {
         group: new THREE.Group(),
         setLitCount: (_n: number): void => { /* screen-only countdown */ },
@@ -841,6 +957,13 @@ function bootstrapGlbVersion(): void {
           if (navigator.vibrate) navigator.vibrate([0, 200, 50, 100, 30, 150])
           countdownActive = false
           started = true
+          bundle.setPerformanceMode(storage.getPerformanceMode())
+          glbRaceStartTime = performance.now()
+          glbRaceDistance = 0
+          glbRaceArmed = false
+          glbPreviousGateCoordinate = 0
+          glbFinishing = false
+          glbResultVisible = false
           countdownOverlay.flash('GO!', '#00d2be', 820)
           input?.recenter()
           showToast('比赛开始', 1000)
@@ -856,21 +979,103 @@ function bootstrapGlbVersion(): void {
             countdown = null
           }
           window.setTimeout(() => {
-            if (gridPlacementGuiActive || carVisualTuningGuiActive || started) return
+            if (gridPlacementGuiActive || carVisualTuningGuiActive || cameraTuningGuiActive || firstPersonGuiActive || started) return
             startGlbCountdown()
           }, 900)
         },
       )
     }
+    finishGlbRace = (): void => {
+      if (!drive || glbFinishing || glbResultVisible) return
+      glbFinishing = true
+      started = false
+      countdownActive = false
+      const lapMs = Math.max(0, performance.now() - glbRaceStartTime)
+      const topSpeedKmh = drive.state.topSpeed * 3.6
+      countdownOverlay.flash('FINISH!', '#00d2be', 1400)
+      showToast('冲线完成，正在生成比赛结果', 1800)
+      const telemetry = {
+        bestLapMs: lapMs,
+        topSpeedKmh,
+        wallHits: drive.state.onRoad ? 0 : 1,
+        carHits: 0,
+        finalPosition: 1,
+        fieldSize: Math.max(1, glbOpponentStates.length + 1),
+      }
+      const stats: Partial<PlayerStats> = {
+        pace: Math.round(Math.min(100, Math.max(0, (topSpeedKmh - 100) * 0.45 + (Math.max(0, 110 - lapMs / 1000) * 0.5)))),
+        consistency: drive.state.onRoad ? 82 : 58,
+        clean: drive.state.onRoad ? 92 : 65,
+        cornering: 70,
+        braking: 68,
+        racingLine: drive.state.onRoad ? 82 : 58,
+        attack: 76,
+        defense: 62,
+        risk: Math.round(Math.min(100, Math.max(20, topSpeedKmh * 0.22))),
+        comeback: 62,
+        pressure: 72,
+        management: drive.state.onRoad ? 80 : 58,
+      }
+      void (async () => {
+        await personalityCard.show(stats, telemetry)
+        if (glbResultVisible) return
+        glbResultVisible = true
+        result.show({
+          lapMs,
+          topSpeedKmh,
+          crashes: telemetry.wallHits,
+          opponentHits: telemetry.carHits,
+          position: telemetry.finalPosition,
+          fieldSize: telemetry.fieldSize,
+          isPB: false,
+          onRestart: () => {
+            result.hide()
+            glbResultVisible = false
+            resetGlbRaceGrid()
+            startGlbCountdown()
+          },
+          onMenu: () => {
+            result.hide()
+            glbResultVisible = false
+            resetGlbRaceGrid()
+            showGlbStartMenu()
+          },
+        })
+      })()
+    }
+    updateGlbRaceProgress = (dt: number): void => {
+      if (!drive || !glbRaceStartPose) return
+      glbRaceDistance += drive.state.speed * dt
+      const dx = drive.state.pos.x - glbRaceStartPose.x
+      const dz = drive.state.pos.z - glbRaceStartPose.z
+      const forwardX = Math.sin(drive.state.heading)
+      const forwardZ = Math.cos(drive.state.heading)
+      const gateCoordinate = dx * forwardX + dz * forwardZ
+      const lateralCoordinate = Math.abs(dx * forwardZ - dz * forwardX)
+      if (!glbRaceArmed && glbRaceDistance >= 35) glbRaceArmed = true
+      const crossedGate = glbRaceArmed
+        && glbPreviousGateCoordinate < -1
+        && gateCoordinate >= 0
+        && lateralCoordinate <= 12
+      glbPreviousGateCoordinate = gateCoordinate
+      if (crossedGate) finishGlbRace()
+    }
     const showGlbStartMenu = (): void => {
       setStatus('上海赛车场 GLB 主游戏\n选择画质和操作方式')
       menu.show((cfg) => {
         menu.hide()
+        cameraMode = cfg.cameraMode
+        applyCameraModeVisibility()
         bundle.setPerformanceMode(cfg.performanceMode)
         storage.setPerformanceMode(cfg.performanceMode)
         resetGlbRaceGrid()
         startGlbAudio()
-        void initInput(cfg.inputMode).then((controller) => {
+        void Promise.all([
+          initInput(cfg.inputMode),
+          firstPersonCockpit.ready.catch((e) => {
+            console.warn('[F1S] first person cockpit failed:', e)
+          }),
+        ]).then(([controller]) => {
           input?.destroy()
           input = controller
           startGlbCountdown()
@@ -889,6 +1094,8 @@ function bootstrapGlbVersion(): void {
       if (placement.id === 'player') {
         drive?.reset(nextPose)
         setObjectOnGroundHeading(car.group, nextPose.pos, nextPose.heading, nextPose.normal)
+        setObjectOnGroundHeading(firstPersonRig, nextPose.pos, nextPose.heading, nextPose.normal)
+        applyCameraModeVisibility()
         bundle.updateShadowFollow(nextPose.pos)
         return
       }
@@ -924,7 +1131,7 @@ function bootstrapGlbVersion(): void {
     telemetryMap = createTelemetryMap(createGlbTelemetryRoadMap(lowPolyShanghai))
     telemetryMap.resetTrail()
     telemetryMap.show()
-    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal)
+    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
     await glbOpponentCars.ready
     applySavedCarVisualTuning()
     glbOpponentCars.update(glbOpponentStates)
@@ -935,8 +1142,21 @@ function bootstrapGlbVersion(): void {
     } catch (e) {
       console.warn('[F1S] GLB audio rig init failed:', e)
     }
-    if (gridPlacementGuiRequested || carVisualTuningGuiRequested) {
+    if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested) {
       started = false
+    }
+    if (firstPersonGuiRequested) {
+      cameraMode = 'first'
+      firstPersonGuiActive = true
+      started = false
+      clearGlbCountdown()
+      resetGlbRaceGrid()
+      applyCameraModeVisibility()
+      await firstPersonCockpit.ready.catch((e) => {
+        console.warn('[F1S] first person cockpit failed:', e)
+      })
+      updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
+      showToast('第一视角调参已打开', 1800)
     }
     if (gridPlacementGuiRequested) {
       gridPlacementGuiActive = true
@@ -975,7 +1195,26 @@ function bootstrapGlbVersion(): void {
       })
       showToast('赛车尺寸调参已打开', 1800)
     }
-    if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested) {
+    if (cameraTuningGuiRequested) {
+      cameraTuningGuiActive = true
+      installGlbCameraTuningGui({
+        tuning: glbCameraTuning,
+        defaults: DEFAULT_GLB_CAMERA_TUNING,
+        storageKey: GLB_CAMERA_TUNING_STORAGE_KEY,
+        onChange: (next) => {
+          glbCameraTuning = next
+          if (drive) updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+        },
+        onClose: () => {
+          cameraTuningGuiActive = false
+          started = !gridPlacementGuiActive && !carVisualTuningGuiActive
+          startGlbAudio()
+          showToast('已进入驾驶预览', 1400)
+        },
+      })
+      showToast('相机调参已打开', 1800)
+    }
+    if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested) {
       started = false
       showGlbStartMenu()
       showToast('第三视角 GLB 主游戏已就绪', 1600)
@@ -1837,7 +2076,9 @@ function bootstrap(): void {
 }
 
 if (document.readyState === 'loading') {
+  installF1tiApi()
   document.addEventListener('DOMContentLoaded', bootApp, { once: true })
 } else {
+  installF1tiApi()
   bootApp()
 }

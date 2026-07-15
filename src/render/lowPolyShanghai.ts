@@ -141,6 +141,11 @@ function meshHasBannerMaterial(mesh: THREE.Mesh): boolean {
   return name.includes('banners_shanghai')
 }
 
+function meshIsColliderOnly(mesh: THREE.Mesh): boolean {
+  const name = `${mesh.name} ${materialNamesForMesh(mesh).join(' ')}`.toLowerCase()
+  return name.includes('collider')
+}
+
 function mainShanghaiTextureForMesh(mesh: THREE.Mesh): THREE.Texture | null {
   if (!mesh.material) return null
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
@@ -322,14 +327,10 @@ function chunkShanghaiVisualMesh(mesh: THREE.Mesh, gridSize = 120): THREE.Mesh[]
 export function optimizeLowPolyShanghaiRendering(
   root: THREE.Object3D,
 ): LowPolyShanghaiRenderOptimization {
-  // Keep the imported Shanghai GLB visually intact. Earlier builds split large
-  // meshes into distance-culled chunks and hid originals; that helped FPS but
-  // could make start-area assets or trackside props disappear. We still allow
-  // normal camera frustum culling so off-screen objects do not cost every frame.
   root.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
-    obj.visible = true
     obj.frustumCulled = true
+    if (meshIsColliderOnly(obj)) obj.visible = false
   })
   return { chunkCount: 0, hiddenOriginals: 0 }
 }
@@ -342,6 +343,7 @@ export function createLowPolyShanghaiVisualOptimizer(
     void force
   }
 
+  void root
   return { update }
 }
 
@@ -591,8 +593,8 @@ export function addLowPolyShanghai(
           if (!(obj instanceof THREE.Mesh)) return
           obj.castShadow = false
           obj.receiveShadow = meshHasRoadSurfaceHint(obj)
-          obj.visible = true
           obj.frustumCulled = true
+          obj.visible = !meshIsColliderOnly(obj)
           stripLowRoadsideBannerTriangles(obj)
           stripShanghai50MarkerTriangles(obj)
           const materials = Array.isArray(obj.material) ? obj.material : [obj.material]

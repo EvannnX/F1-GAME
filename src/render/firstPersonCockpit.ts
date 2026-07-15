@@ -1,8 +1,4 @@
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
-import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
-import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
 export interface FirstPersonCockpitBundle {
   group: THREE.Group
@@ -87,23 +83,24 @@ interface CockpitForwardFaceOption {
   yawDeg: number
 }
 
-const COCKPIT_PLACEMENT_STORAGE_KEY = 'f1s_first_person_cockpit_placement_v7'
+const COCKPIT_PLACEMENT_STORAGE_KEY = 'f1s_first_person_cockpit_placement_v8'
 const LEGACY_COCKPIT_PLACEMENT_STORAGE_KEYS = [
+  'f1s_first_person_cockpit_placement_v7',
   'f1s_first_person_cockpit_placement_v2',
   'f1s_first_person_cockpit_placement_v1',
 ]
 const DEFAULT_COCKPIT_PLACEMENT: CockpitPlacement = {
-  x: 0,
-  y: -0.24,
+  x: -0.31,
+  y: -1.89,
   z: -1.58,
   yawDeg: 180,
   cameraX: 0,
-  cameraY: 0.59,
-  cameraZ: 0.38,
-  forwardYawDeg: 90,
-  viewPitchDeg: 0,
-  viewYawDeg: -21.8,
-  viewRollDeg: 0,
+  cameraY: 0.44,
+  cameraZ: 0.08,
+  forwardYawDeg: 0,
+  viewPitchDeg: -1.1,
+  viewYawDeg: -2,
+  viewRollDeg: -1.4,
   scale: 2.35,
 }
 const COCKPIT_FORWARD_FACE_OPTIONS: CockpitForwardFaceOption[] = [
@@ -112,7 +109,6 @@ const COCKPIT_FORWARD_FACE_OPTIONS: CockpitForwardFaceOption[] = [
   { label: '背面', yawDeg: 180 },
   { label: '左侧', yawDeg: -90 },
 ]
-const COCKPIT_GLB_URL = 'assets/第一人称用/第一人称新版.glb'
 const WHEEL_STEER_MAX_RAD = THREE.MathUtils.degToRad(18)
 const STEERING_WHEEL_MAX_RAD = THREE.MathUtils.degToRad(42)
 const WHEEL_SPIN_AXIS = new THREE.Vector3(0, 0, 1)
@@ -125,23 +121,6 @@ const FIRST_PERSON_STEERING_WHEEL_PARTS = ['tripo_part_3', 'part3']
 const FIRST_PERSON_LEFT_HAND_PARTS = ['tripo_part_5', 'part5', 'tripo_part_7', 'part7']
 const FIRST_PERSON_RIGHT_HAND_PARTS = ['tripo_part_4', 'part4', 'tripo_part_10', 'part10']
 
-let dracoLoader: DRACOLoader | null = null
-
-function getDracoLoader(): DRACOLoader {
-  if (!dracoLoader) {
-    dracoLoader = new DRACOLoader()
-    dracoLoader.setDecoderConfig({ type: 'js' })
-    dracoLoader.setWorkerLimit(1)
-    ;(dracoLoader as unknown as {
-      _loadLibrary: (url: string, responseType: string) => Promise<string | ArrayBuffer>
-    })._loadLibrary = async (url: string) => {
-      if (url.endsWith('draco_decoder.js')) return dracoDecoderJs
-      throw new Error(`Unsupported Draco decoder asset: ${url}`)
-    }
-  }
-  return dracoLoader
-}
-
 function partKeyFromName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
@@ -150,17 +129,36 @@ function buildPartLookup(root: THREE.Object3D): Map<string, THREE.Object3D> {
   const lookup = new Map<string, THREE.Object3D>()
   root.traverse((obj) => {
     if (!obj.name) return
-    lookup.set(obj.name.toLowerCase(), obj)
-    lookup.set(partKeyFromName(obj.name), obj)
+    const lower = obj.name.toLowerCase()
+    const key = partKeyFromName(obj.name)
+    if (!lookup.has(lower)) lookup.set(lower, obj)
+    if (!lookup.has(key)) lookup.set(key, obj)
   })
   return lookup
+}
+
+function resolvePartRoot(obj: THREE.Object3D, aliases: string[]): THREE.Object3D {
+  const aliasKeys = new Set(aliases.flatMap((alias) => [alias.toLowerCase(), partKeyFromName(alias)]))
+  let current: THREE.Object3D | null = obj
+  let root = obj
+  while (current) {
+    if (
+      current.name &&
+      (aliasKeys.has(current.name.toLowerCase()) || aliasKeys.has(partKeyFromName(current.name)))
+    ) {
+      root = current
+    }
+    current = current.parent
+  }
+  return root
 }
 
 function findParts(lookup: Map<string, THREE.Object3D>, names: string[]): THREE.Object3D[] {
   const parts: THREE.Object3D[] = []
   const seen = new Set<string>()
   for (const name of names) {
-    const part = lookup.get(name.toLowerCase()) ?? lookup.get(partKeyFromName(name))
+    const found = lookup.get(name.toLowerCase()) ?? lookup.get(partKeyFromName(name))
+    const part = found ? resolvePartRoot(found, names) : null
     if (!part || seen.has(part.uuid)) continue
     seen.add(part.uuid)
     parts.push(part)
@@ -231,7 +229,7 @@ function writeCockpitPlacement(value: CockpitPlacement): void {
   }
 }
 
-function isCockpitPlacementGuiEnabled(): boolean {
+export function isCockpitPlacementGuiEnabled(): boolean {
   const params = new URLSearchParams(window.location.search)
   return params.has('firstPersonGui') || params.has('cockpitGui') || params.has('fpGui')
 }
@@ -259,6 +257,56 @@ function boxForObjects(objects: THREE.Object3D[]): THREE.Box3 | null {
     hasBox = true
   }
   return hasBox ? box : null
+}
+
+function objectIsDescendantOf(obj: THREE.Object3D, possibleParent: THREE.Object3D): boolean {
+  let parent = obj.parent
+  while (parent) {
+    if (parent === possibleParent) return true
+    parent = parent.parent
+  }
+  return false
+}
+
+function dedupeTopLevelObjects(objects: THREE.Object3D[]): THREE.Object3D[] {
+  const unique = Array.from(new Map(objects.map((obj) => [obj.uuid, obj])).values())
+  return unique.filter((obj) => !unique.some((other) => other !== obj && objectIsDescendantOf(obj, other)))
+}
+
+function expandWheelParts(model: THREE.Object3D, seedParts: THREE.Object3D[]): THREE.Object3D[] {
+  const topLevelSeeds = dedupeTopLevelObjects(seedParts)
+  if (topLevelSeeds.some((part) => part.children.length > 0)) return topLevelSeeds
+  const seedBox = boxForObjects(seedParts)
+  if (!seedBox) return topLevelSeeds
+  const seedCenter = seedBox.getCenter(new THREE.Vector3())
+  const seedSize = seedBox.getSize(new THREE.Vector3())
+  const seedMax = Math.max(seedSize.x, seedSize.y, seedSize.z, 1e-5)
+  const seedRadius = Math.max(seedSize.x, seedSize.y) * 0.5
+  const searchBox = seedBox.clone().expandByScalar(seedMax * 0.42)
+  const expanded = [...topLevelSeeds]
+  const candidateBox = new THREE.Box3()
+  const candidateCenter = new THREE.Vector3()
+  const candidateSize = new THREE.Vector3()
+
+  model.updateMatrixWorld(true)
+  model.traverse((obj) => {
+    if (!(obj as THREE.Mesh).isMesh) return
+    if (topLevelSeeds.some((part) => part === obj || objectIsDescendantOf(obj, part) || objectIsDescendantOf(part, obj))) return
+    candidateBox.setFromObject(obj)
+    if (candidateBox.isEmpty()) return
+    candidateBox.getCenter(candidateCenter)
+    candidateBox.getSize(candidateSize)
+    const candidateMax = Math.max(candidateSize.x, candidateSize.y, candidateSize.z)
+    const candidateMin = Math.min(candidateSize.x, candidateSize.y, candidateSize.z)
+    if (candidateMax > seedMax * 1.45) return
+    if (candidateMax < seedMax * 0.08) return
+    if (candidateMin / Math.max(candidateMax, 1e-5) < 0.025) return
+    const distance = candidateCenter.distanceTo(seedCenter)
+    const intersectsWheelArea = searchBox.intersectsBox(candidateBox) || distance <= Math.max(seedRadius * 1.2, seedMax * 0.55)
+    if (!intersectsWheelArea) return
+    expanded.push(obj)
+  })
+  return dedupeTopLevelObjects(expanded)
 }
 
 function objectCandidate(obj: THREE.Object3D, whole: THREE.Box3): CandidatePart | null {
@@ -507,7 +555,7 @@ function installCockpitPlacementGui(
   }
 
   const hint = document.createElement('div')
-  hint.textContent = '黄色方块就是第一视角相机。Eye X/Y/Z 调位置，Camera Pitch/Yaw/Roll 调它和第一人称新版GLB之间的角度。'
+  hint.textContent = '黄色方块就是第一视角相机。Eye X/Y/Z 调整相机位置，Camera Pitch/Yaw/Roll 调整视角角度。'
   hint.style.cssText = 'color:rgba(234,255,255,.72);font-size:11px;margin-bottom:8px'
   panel.appendChild(hint)
 
@@ -517,7 +565,7 @@ function installCockpitPlacementGui(
     Object.assign(placement, normalized)
   }
   const forwardFaceHeading = document.createElement('div')
-  forwardFaceHeading.textContent = '第一人称新版GLB正面选择'
+  forwardFaceHeading.textContent = '第一视角方向选择'
   forwardFaceHeading.style.cssText = 'margin:10px 0 5px;color:#67f8ff;font-weight:700'
   panel.appendChild(forwardFaceHeading)
 
@@ -551,7 +599,7 @@ function installCockpitPlacementGui(
     {
       id: 'eyeX',
       label: 'Eye X',
-      section: '相机相对第一人称新版GLB',
+      section: '第一视角相机',
       min: -2,
       max: 2,
       step: 0.01,
@@ -561,7 +609,7 @@ function installCockpitPlacementGui(
     {
       id: 'eyeY',
       label: 'Eye Y',
-      section: '相机相对第一人称新版GLB',
+      section: '第一视角相机',
       min: -0.5,
       max: 3,
       step: 0.01,
@@ -571,7 +619,7 @@ function installCockpitPlacementGui(
     {
       id: 'eyeZ',
       label: 'Eye Z',
-      section: '相机相对第一人称新版GLB',
+      section: '第一视角相机',
       min: 0,
       max: 6,
       step: 0.01,
@@ -581,7 +629,7 @@ function installCockpitPlacementGui(
     {
       id: 'eyeYaw',
       label: 'Eye Yaw',
-      section: '相机相对第一人称新版GLB',
+      section: '第一视角相机',
       min: -360,
       max: 360,
       step: 0.1,
@@ -591,7 +639,7 @@ function installCockpitPlacementGui(
     {
       id: 'scale',
       label: 'Scale',
-      section: '相机相对第一人称新版GLB',
+      section: '第一视角相机',
       min: 0.5,
       max: 4.5,
       step: 0.01,
@@ -702,7 +750,7 @@ function installCockpitPlacementGui(
       `  scale: ${placement.scale.toFixed(2)},`,
       '}',
       '',
-      '// GUI 视角读数:相机相对第一人称新版GLB',
+      '// GUI 视角读数:第一视角相机',
       `Eye X ${(-placement.x).toFixed(2)}  Eye Y ${(-placement.y).toFixed(2)}  Eye Z ${(-placement.z).toFixed(2)}`,
       `Eye Yaw ${(-placement.yawDeg).toFixed(1)}°`,
       `GLB Front ${getForwardFaceLabel()} (${placement.forwardYawDeg.toFixed(0)}°)`,
@@ -774,25 +822,6 @@ function installCockpitPlacementGui(
   }
 }
 
-function prepareCockpitModel(model: THREE.Object3D): void {
-  const box = new THREE.Box3().setFromObject(model)
-  const center = box.getCenter(new THREE.Vector3())
-  model.position.sub(center)
-  model.traverse((obj) => {
-    if ((obj as THREE.Mesh).isMesh) {
-      const mesh = obj as THREE.Mesh
-      mesh.castShadow = false
-      mesh.receiveShadow = false
-      mesh.frustumCulled = false
-      if (Array.isArray(mesh.material)) {
-        for (const mat of mesh.material) mat.depthWrite = true
-      } else if (mesh.material) {
-        mesh.material.depthWrite = true
-      }
-    }
-  })
-}
-
 export function createFirstPersonCockpit(options: FirstPersonCockpitOptions = {}): FirstPersonCockpitBundle {
   const group = new THREE.Group()
   group.name = 'first-person-cockpit'
@@ -812,80 +841,26 @@ export function createFirstPersonCockpit(options: FirstPersonCockpitOptions = {}
   const spinQuat = new THREE.Quaternion()
   const steeringWheelQuat = new THREE.Quaternion()
 
-  const loader = new GLTFLoader()
-  loader.setDRACOLoader(getDracoLoader())
-  loader.setMeshoptDecoder(MeshoptDecoder)
-
-  const ready = new Promise<void>((resolve, reject) => {
-    loader.load(
-      COCKPIT_GLB_URL,
-      (gltf) => {
-        const model = gltf.scene
-        cockpitModel = model
-        model.name = 'first-person-cockpit-model'
-        prepareCockpitModel(model)
-        applyCockpitPlacement(group, model, placement)
-        group.add(model)
-        model.updateMatrixWorld(true)
-
-        const lookup = buildPartLookup(model)
-        const wheelPartObjects = FIRST_PERSON_WHEEL_GROUPS.flatMap((config) => findParts(lookup, config.parts))
-        const wheelSet = new Set(wheelPartObjects)
-        for (const config of FIRST_PERSON_WHEEL_GROUPS) {
-          const parts = findParts(lookup, config.parts)
-          const rig = createWheelRig(model, parts, `first-person-${config.name}-wheel`)
-          if (rig) wheels.push(rig)
-        }
-
-        let steeringWheelParts = findParts(lookup, FIRST_PERSON_STEERING_WHEEL_PARTS)
-        let handParts = [
-          ...findParts(lookup, FIRST_PERSON_LEFT_HAND_PARTS),
-          ...findParts(lookup, FIRST_PERSON_RIGHT_HAND_PARTS),
-        ]
-        let steeringWheelName: string | null = steeringWheelParts.map((obj) => obj.name).join(', ') || null
-        let handNames = handParts.map((obj) => obj.name)
-        if (steeringWheelParts.length === 0) {
-          const steeringWheel = chooseSteeringWheel(model, wheelSet)
-          const hands = chooseHandCandidates(model, wheelSet, steeringWheel)
-          steeringWheelParts = steeringWheel ? [steeringWheel.obj] : []
-          handParts = hands.map((hand) => hand.obj)
-          steeringWheelName = steeringWheel?.name ?? null
-          handNames = hands.map((hand) => hand.name)
-        }
-        steeringRig = createSteeringRig(model, steeringWheelParts, handParts)
-        console.log('[F1S][first-person] cockpit rig', {
-          model: COCKPIT_GLB_URL,
-          tires: wheelPartObjects.map((obj) => obj.name),
-          steeringWheel: steeringWheelName,
-          hands: handNames,
-          wheelRigCount: wheels.length,
-        })
-        if (isCockpitPlacementGuiEnabled()) {
-          cockpitGui = installCockpitPlacementGui(
-            group,
-            () => cockpitModel,
-            placement,
-            () => editorViewMode,
-            (mode) => {
-              editorViewMode = mode
-            },
-            () => dragTarget,
-            (target) => {
-              dragTarget = target
-            },
-            options.onSnapModelToGround,
-            () => {
-              placementRevision++
-            },
-          )
-        }
-        group.visible = true
-        resolve()
+  const ready = Promise.resolve()
+  if (isCockpitPlacementGuiEnabled()) {
+    cockpitGui = installCockpitPlacementGui(
+      group,
+      () => cockpitModel,
+      placement,
+      () => editorViewMode,
+      (mode) => {
+        editorViewMode = mode
       },
-      undefined,
-      reject,
+      () => dragTarget,
+      (target) => {
+        dragTarget = target
+      },
+      options.onSnapModelToGround,
+      () => {
+        placementRevision++
+      },
     )
-  })
+  }
 
   const update = (dt: number, speed01: number, steer = 0): void => {
     currentSteer += (THREE.MathUtils.clamp(steer, -1, 1) - currentSteer) * 0.28

@@ -11,7 +11,8 @@
  */
 
 import { generateRacerPersonalityResult } from '../racerPersonality'
-import type { PlayerStats } from '../racerPersonality'
+import type { RaceData } from '../racerPersonality'
+import type { PlayerStats, RacerPersonalityResult } from '../racerPersonality'
 // Anime portraits inlined as data URLs by Vite (assetsInlineLimit=100MB)
 // so the bundle is fully self-contained — no extra files to ship in the
 // ZIP and no relative path lookups.
@@ -32,7 +33,8 @@ export interface RaceTelemetry {
 
 export interface PersonalityCardController {
   /** Render the card. Resolves once the user dismisses it. */
-  show: (stats: Partial<PlayerStats>, telemetry?: RaceTelemetry) => Promise<void>
+  show: (stats: Partial<PlayerStats> | RaceData, telemetry?: RaceTelemetry) => Promise<void>
+  showResult: (result: RacerPersonalityResult, telemetry?: RaceTelemetry) => Promise<void>
   hide: () => void
 }
 
@@ -131,12 +133,11 @@ export function createPersonalityCard(): PersonalityCardController {
     }
   }
 
-  const show = (
-    stats: Partial<PlayerStats>,
+  const showResult = (
+    data: RacerPersonalityResult,
     telemetry?: RaceTelemetry,
   ): Promise<void> => {
     hide()
-    const data = generateRacerPersonalityResult(stats)
     const personality = data['你的赛车人格']
     const tags = data['核心标签']
     // Telemetry-grounded reasons replace the generic ones when a race
@@ -481,5 +482,10 @@ export function createPersonalityCard(): PersonalityCardController {
     })
   }
 
-  return { show, hide }
+  const show = (
+    stats: Partial<PlayerStats> | RaceData,
+    telemetry?: RaceTelemetry,
+  ): Promise<void> => showResult(generateRacerPersonalityResult(stats), telemetry)
+
+  return { show, showResult, hide }
 }
