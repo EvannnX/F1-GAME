@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
-import carGlbUrl from '../assets/models/简约版车-optimized.glb?url'
+import carGlbUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
@@ -58,6 +58,36 @@ const PLAYER_STEER_ONLY_PARTS = [
 const FRONT_WHEEL_SPLIT_PARTS = [1, 4] as const
 const REAR_WHEEL_SPLIT_PARTS = [5] as const
 
+const RED_BULL_WHEEL_MATERIALS = new Set([
+  'front_rims',
+  'rear_rims',
+  'material_105',
+  'material_97',
+  'material_102',
+  'flasks',
+  'brakes_in',
+  'baked_fix_roue',
+])
+
+const RED_BULL_AXLE_REFERENCE_MATERIALS = new Set([
+  'front_rims',
+  'rear_rims',
+  'material_105',
+  'material_97',
+  'material_102',
+])
+
+const RED_BULL_WHEEL_AERO_SOURCE_MATERIALS = new Set([
+  'suspensions',
+])
+
+type RedBullWheelSlot = 'left-front' | 'right-front' | 'left-rear' | 'right-rear'
+
+interface RedBullWheelComponents {
+  rolling: Map<RedBullWheelSlot, THREE.Object3D[]>
+  steering: Map<RedBullWheelSlot, THREE.Object3D[]>
+}
+
 let dracoLoader: DRACOLoader | null = null
 
 function makeMaterialInteriorVisible(material: THREE.Material): void {
@@ -109,6 +139,7 @@ interface WheelRig {
   steerable: boolean
   steerPivot: PivotRef
   spinPivots: PivotRef[]
+  spinAxis: THREE.Vector3
   spin: number
 }
 
@@ -258,6 +289,96 @@ function renderedBoxForObjects(objects: THREE.Object3D[]): THREE.Box3 {
   return box
 }
 
+function smallestPrincipalAxisForObjects(objects: THREE.Object3D[]): THREE.Vector3 {
+  const points: THREE.Vector3[] = []
+  const point = new THREE.Vector3()
+  for (const obj of objects) {
+    obj.updateMatrixWorld(true)
+    obj.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      if (!position) return
+      const stride = Math.max(1, Math.ceil(position.count / 6000))
+      for (let index = 0; index < position.count; index += stride) {
+        points.push(point.fromBufferAttribute(position, index).applyMatrix4(mesh.matrixWorld).clone())
+      }
+    })
+  }
+  if (points.length < 3) return new THREE.Vector3(1, 0, 0)
+
+  const mean = new THREE.Vector3()
+  for (const sample of points) mean.add(sample)
+  mean.multiplyScalar(1 / points.length)
+  const covariance = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  for (const sample of points) {
+    const x = sample.x - mean.x
+    const y = sample.y - mean.y
+    const z = sample.z - mean.z
+    covariance[0][0] += x * x
+    covariance[0][1] += x * y
+    covariance[0][2] += x * z
+    covariance[1][1] += y * y
+    covariance[1][2] += y * z
+    covariance[2][2] += z * z
+  }
+  covariance[1][0] = covariance[0][1]
+  covariance[2][0] = covariance[0][2]
+  covariance[2][1] = covariance[1][2]
+
+  const eigenvectors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  for (let iteration = 0; iteration < 18; iteration++) {
+    let p = 0
+    let q = 1
+    let largest = Math.abs(covariance[0][1])
+    for (const [row, col] of [[0, 2], [1, 2]] as const) {
+      const value = Math.abs(covariance[row][col])
+      if (value > largest) {
+        largest = value
+        p = row
+        q = col
+      }
+    }
+    if (largest < 1e-10) break
+    const angle = 0.5 * Math.atan2(
+      2 * covariance[p][q],
+      covariance[q][q] - covariance[p][p],
+    )
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const app = covariance[p][p]
+    const aqq = covariance[q][q]
+    const apq = covariance[p][q]
+    covariance[p][p] = cos * cos * app - 2 * sin * cos * apq + sin * sin * aqq
+    covariance[q][q] = sin * sin * app + 2 * sin * cos * apq + cos * cos * aqq
+    covariance[p][q] = 0
+    covariance[q][p] = 0
+    for (let index = 0; index < 3; index++) {
+      if (index === p || index === q) continue
+      const aip = covariance[index][p]
+      const aiq = covariance[index][q]
+      covariance[index][p] = covariance[p][index] = cos * aip - sin * aiq
+      covariance[index][q] = covariance[q][index] = sin * aip + cos * aiq
+    }
+    for (let row = 0; row < 3; row++) {
+      const vip = eigenvectors[row][p]
+      const viq = eigenvectors[row][q]
+      eigenvectors[row][p] = cos * vip - sin * viq
+      eigenvectors[row][q] = sin * vip + cos * viq
+    }
+  }
+  let smallest = 0
+  if (covariance[1][1] < covariance[smallest][smallest]) smallest = 1
+  if (covariance[2][2] < covariance[smallest][smallest]) smallest = 2
+  const axis = new THREE.Vector3(
+    eigenvectors[0][smallest],
+    eigenvectors[1][smallest],
+    eigenvectors[2][smallest],
+  ).normalize()
+  if (axis.x < 0) axis.negate()
+  return Math.abs(axis.x) >= 0.55 ? axis : new THREE.Vector3(1, 0, 0)
+}
+
 function renderedLocalBoxForMesh(mesh: THREE.Mesh): THREE.Box3 {
   const box = new THREE.Box3()
   const position = mesh.geometry.getAttribute('position')
@@ -309,6 +430,118 @@ function buildTriangleSubsetGeometry(
   geometry.computeBoundingBox()
   geometry.computeBoundingSphere()
   return geometry
+}
+
+function splitRedBullWheelComponents(root: THREE.Object3D): RedBullWheelComponents {
+  const rolling = new Map<RedBullWheelSlot, THREE.Object3D[]>([
+    ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
+  ])
+  const steering = new Map<RedBullWheelSlot, THREE.Object3D[]>([
+    ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
+  ])
+  root.updateMatrixWorld(true)
+  const candidates: THREE.Mesh[] = []
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry || !mesh.parent) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    if (materials.some((material) => {
+      const name = (material?.name ?? '').toLowerCase()
+      return RED_BULL_WHEEL_MATERIALS.has(name) || RED_BULL_WHEEL_AERO_SOURCE_MATERIALS.has(name)
+    })) candidates.push(mesh)
+  })
+
+  const point = new THREE.Vector3()
+  for (const mesh of candidates) {
+    const position = mesh.geometry.getAttribute('position')
+    const parent = mesh.parent
+    if (!position || !parent) continue
+    const index = mesh.geometry.index
+    const total = index?.count ?? position.count
+    const materialNames = (Array.isArray(mesh.material) ? mesh.material : [mesh.material])
+      .map((material) => (material?.name ?? '').toLowerCase())
+    const extractWholeMesh = materialNames.some((name) => RED_BULL_WHEEL_MATERIALS.has(name))
+    const triangleStarts = new Map<RedBullWheelSlot, number[]>([
+      ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
+    ])
+    const staticTriangles: number[] = []
+
+    if (extractWholeMesh) {
+      for (let offset = 0; offset + 2 < total; offset += 3) {
+        let x = 0
+        let z = 0
+        for (let vertex = 0; vertex < 3; vertex++) {
+          point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+            .applyMatrix4(mesh.matrixWorld)
+          x += point.x
+          z += point.z
+        }
+        const side = x / 3 < 0 ? 'left' : 'right'
+        const axle = z / 3 > -0.3 ? 'front' : 'rear'
+        triangleStarts.get(`${side}-${axle}`)?.push(offset)
+      }
+    } else {
+      for (const component of triangleComponents(mesh.geometry)) {
+        const box = new THREE.Box3()
+        for (const offset of component) {
+          for (let vertex = 0; vertex < 3; vertex++) {
+            point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+              .applyMatrix4(mesh.matrixWorld)
+            box.expandByPoint(point)
+          }
+        }
+        const center = box.getCenter(new THREE.Vector3())
+        const size = box.getSize(new THREE.Vector3())
+        const axle: 'front' | 'rear' = Math.abs(center.z - 1.289) < Math.abs(center.z + 1.921)
+          ? 'front'
+          : 'rear'
+        const nearWheel = axle === 'front'
+          && Math.abs(Math.abs(center.x) - 0.584) < 0.055
+          && Math.abs(center.y - 0.476) < 0.06
+          && Math.abs(center.z - 1.274) < 0.06
+          && size.x > 0.12
+          && size.x < 0.21
+          && size.y > 0.55
+          && size.y < 0.7
+          && size.z > 0.55
+          && size.z < 0.7
+        if (nearWheel) {
+          const side = center.x < 0 ? 'left' : 'right'
+          triangleStarts.get(`${side}-${axle}`)?.push(...component)
+        } else staticTriangles.push(...component)
+      }
+    }
+
+    for (const [slot, starts] of triangleStarts) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, starts)
+      if (!geometry) continue
+      const component = new THREE.Mesh(geometry, mesh.material)
+      component.name = `redbull-wheel-${slot}-${mesh.name}`
+      component.position.copy(mesh.position)
+      component.quaternion.copy(mesh.quaternion)
+      component.scale.copy(mesh.scale)
+      component.castShadow = mesh.castShadow
+      component.receiveShadow = mesh.receiveShadow
+      component.frustumCulled = mesh.frustumCulled
+      component.userData.redBullWheelSlot = slot
+      component.userData.redBullWheelMaterials = materialNames
+      parent.add(component)
+      ;(extractWholeMesh ? rolling : steering).get(slot)?.push(component)
+    }
+    if (extractWholeMesh) {
+      parent.remove(mesh)
+      mesh.geometry.dispose()
+    } else {
+      const staticGeometry = buildTriangleSubsetGeometry(mesh.geometry, staticTriangles)
+      if (staticGeometry) {
+        const previousGeometry = mesh.geometry
+        mesh.geometry = staticGeometry
+        previousGeometry.dispose()
+      }
+    }
+  }
+  root.updateMatrixWorld(true)
+  return { rolling, steering }
 }
 
 interface WheelMeshSplitOptions {
@@ -378,6 +611,52 @@ function triangleComponentSizes(geometry: THREE.BufferGeometry): number[] {
     for (const item of component) sizes[item] = component.length
   }
   return sizes
+}
+
+function triangleComponents(geometry: THREE.BufferGeometry): number[][] {
+  const position = geometry.getAttribute('position')
+  if (!position) return []
+  const index = geometry.index
+  const total = index?.count ?? position.count
+  const triangleCount = Math.floor(total / 3)
+  const vertexToTriangles = new Map<string | number, number[]>()
+  const triangleKeys: Array<Array<string | number>> = []
+  const point = new THREE.Vector3()
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    const keys: Array<string | number> = []
+    for (let vertex = 0; vertex < 3; vertex++) {
+      const rawVertex = triangle * 3 + vertex
+      const vertexIndex = index ? index.getX(rawVertex) : rawVertex
+      const key = index ? vertexIndex : triangleVertexKey(position, vertexIndex, point)
+      keys.push(key)
+      const bucket = vertexToTriangles.get(key)
+      if (bucket) bucket.push(triangle)
+      else vertexToTriangles.set(key, [triangle])
+    }
+    triangleKeys.push(keys)
+  }
+  const seen = new Uint8Array(triangleCount)
+  const components: number[][] = []
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    if (seen[triangle]) continue
+    const stack = [triangle]
+    const component: number[] = []
+    seen[triangle] = 1
+    while (stack.length) {
+      const current = stack.pop()
+      if (current === undefined) continue
+      component.push(current * 3)
+      for (const key of triangleKeys[current]) {
+        for (const next of vertexToTriangles.get(key) ?? []) {
+          if (seen[next]) continue
+          seen[next] = 1
+          stack.push(next)
+        }
+      }
+    }
+    components.push(component)
+  }
+  return components
 }
 
 function splitWheelRollingMeshes(root: THREE.Object3D, options: WheelMeshSplitOptions): void {
@@ -530,6 +809,7 @@ function createWheelRig(
   spinPartNumbers: readonly number[],
   steerable: boolean,
   sharedSpinCenter: boolean,
+  spinAxis = WHEEL_SPIN_AXIS,
 ): WheelRig | null {
   const steerParts = [
     ...collectPartObjects(root, steerPartNumbers),
@@ -562,8 +842,52 @@ function createWheelRig(
     steerable,
     steerPivot,
     spinPivots,
+    spinAxis: spinAxis.clone(),
     spin: 0,
   }
+}
+
+function createRedBullWheelRigs(root: THREE.Object3D): WheelRig[] {
+  const wheelParts = splitRedBullWheelComponents(root)
+  const rigs: WheelRig[] = []
+  for (const [name, rollingParts] of wheelParts.rolling) {
+    if (!rollingParts.length) continue
+    const steeringParts = wheelParts.steering.get(name) ?? []
+    const referenceParts = rollingParts.filter((part) => {
+      const materials = part.userData.redBullWheelMaterials as string[] | undefined
+      return materials?.some((material) => RED_BULL_AXLE_REFERENCE_MATERIALS.has(material)) === true
+    })
+    const axleParts = referenceParts.length ? referenceParts : rollingParts
+    const axleWorld = smallestPrincipalAxisForObjects(axleParts)
+    const wheelCenter = renderedBoxForObjects(axleParts).getCenter(new THREE.Vector3())
+    const steerPivot = createPivotForObjects(
+      root,
+      [...rollingParts, ...steeringParts],
+      `player-${name}-steer-pivot`,
+      wheelCenter,
+    )
+    if (!steerPivot) continue
+    const spinPivot = createPivotForObjects(
+      steerPivot.pivot,
+      rollingParts,
+      `player-${name}-spin-pivot`,
+      wheelCenter,
+    )
+    if (!spinPivot) continue
+    const pivotWorldQuaternion = spinPivot.pivot.getWorldQuaternion(new THREE.Quaternion())
+    const axleLocal = axleWorld.clone().applyQuaternion(pivotWorldQuaternion.invert()).normalize()
+    rigs.push({
+      name,
+      // Steering and rolling use separate nested pivots, so the detected
+      // axle remains stable while the two front wheel assemblies yaw.
+      steerable: name.endsWith('-front'),
+      steerPivot,
+      spinPivots: [spinPivot],
+      spinAxis: axleLocal,
+      spin: 0,
+    })
+  }
+  return rigs
 }
 
 function createSteerOnlyRig(
@@ -731,19 +1055,8 @@ export function createCar(options: CarOptions = {}): CarBundle {
       group.add(model)
       activeModel = model
       activeWheels = []
-      wheelRigs = PLAYER_WHEEL_PARTS
-        .map((item) => createWheelRig(
-          model,
-          item.name,
-          item.steerParts,
-          item.spinParts,
-          item.steerable,
-          item.sharedSpinCenter,
-        ))
-        .filter((item): item is WheelRig => Boolean(item))
-      steerOnlyRigs = PLAYER_STEER_ONLY_PARTS
-        .map((item) => createSteerOnlyRig(model, item.name, item.parts))
-        .filter((item): item is SteerOnlyRig => Boolean(item))
+      wheelRigs = createRedBullWheelRigs(model)
+      steerOnlyRigs = []
       const bbox = new THREE.Box3().setFromObject(model)
       const sz = bbox.getSize(new THREE.Vector3())
       log(
@@ -807,7 +1120,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
   }
 
   const update = (dt: number, speed01: number, steer = 0): void => {
-    const spin = -speed01 * WHEEL_SPIN_RATE * dt
+    const spin = speed01 * WHEEL_SPIN_RATE * dt
     for (const w of activeWheels) w.rotation.x += spin
     smoothSteer += (THREE.MathUtils.clamp(steer, -1, 1) - smoothSteer) * Math.min(1, dt * 14)
 
@@ -819,7 +1132,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
       rig.spin += spin
       if (rig.steerable) rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerQuat)
       else rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion)
-      const spinQuat = new THREE.Quaternion().setFromAxisAngle(WHEEL_SPIN_AXIS, rig.spin)
+      const spinQuat = new THREE.Quaternion().setFromAxisAngle(rig.spinAxis, rig.spin)
       for (const spinPivot of rig.spinPivots) {
         spinPivot.pivot.quaternion.copy(spinPivot.baseQuaternion).multiply(spinQuat)
       }

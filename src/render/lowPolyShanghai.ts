@@ -110,7 +110,6 @@ export const LOW_POLY_SHANGHAI_PLACEMENT: LowPolyShanghaiPlacement = {
 }
 
 let dracoLoader: DRACOLoader | null = null
-const textureSamplerCache = new WeakMap<THREE.Texture, ((u: number, v: number) => [number, number, number, number]) | null>()
 
 function materialNamesForMesh(mesh: THREE.Mesh): string[] {
   if (!mesh.material) return []
@@ -136,76 +135,9 @@ function meshHasObstacleSurfaceHint(mesh: THREE.Mesh): boolean {
   return OBSTACLE_SURFACE_HINTS.some((hint) => name.includes(hint))
 }
 
-function meshHasBannerMaterial(mesh: THREE.Mesh): boolean {
-  const name = `${mesh.name} ${materialNamesForMesh(mesh).join(' ')}`.toLowerCase()
-  return name.includes('banners_shanghai')
-}
-
 function meshIsColliderOnly(mesh: THREE.Mesh): boolean {
   const name = `${mesh.name} ${materialNamesForMesh(mesh).join(' ')}`.toLowerCase()
   return name.includes('collider')
-}
-
-function mainShanghaiTextureForMesh(mesh: THREE.Mesh): THREE.Texture | null {
-  if (!mesh.material) return null
-  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-  for (const mat of materials) {
-    if (mat.name !== 'SHANGHAI') continue
-    const texture = (mat as THREE.MeshStandardMaterial).map
-    if (texture) return texture
-  }
-  return null
-}
-
-function samplerForTexture(texture: THREE.Texture): ((u: number, v: number) => [number, number, number, number]) | null {
-  if (textureSamplerCache.has(texture)) return textureSamplerCache.get(texture) ?? null
-
-  const image = texture.image as CanvasImageSource | undefined
-  if (!image) {
-    textureSamplerCache.set(texture, null)
-    return null
-  }
-
-  const width = 'width' in image ? Number(image.width) : 0
-  const height = 'height' in image ? Number(image.height) : 0
-  if (!width || !height) {
-    textureSamplerCache.set(texture, null)
-    return null
-  }
-
-  try {
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d', { willReadFrequently: true })
-    if (!ctx) {
-      textureSamplerCache.set(texture, null)
-      return null
-    }
-    ctx.drawImage(image, 0, 0, width, height)
-    const pixels = ctx.getImageData(0, 0, width, height).data
-    const sampler = (u: number, v: number): [number, number, number, number] => {
-      const wrappedU = ((u % 1) + 1) % 1
-      const wrappedV = ((v % 1) + 1) % 1
-      const x = Math.min(width - 1, Math.max(0, Math.floor(wrappedU * width)))
-      const y = Math.min(height - 1, Math.max(0, Math.floor((1 - wrappedV) * height)))
-      const idx = (y * width + x) * 4
-      return [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
-    }
-    textureSamplerCache.set(texture, sampler)
-    return sampler
-  } catch {
-    textureSamplerCache.set(texture, null)
-    return null
-  }
-}
-
-function isShanghai50MarkerWhiteSample(sample: [number, number, number, number]): boolean {
-  const [r, g, b, a] = sample
-  if (a < 160) return false
-  const max = Math.max(r, g, b)
-  const min = Math.min(r, g, b)
-  return r > 185 && g > 185 && b > 185 && max - min < 55
 }
 
 function meshSearchName(mesh: THREE.Mesh): string {
@@ -347,132 +279,12 @@ export function createLowPolyShanghaiVisualOptimizer(
   return { update }
 }
 
-function stripLowRoadsideBannerTriangles(mesh: THREE.Mesh): void {
-  if (!meshHasBannerMaterial(mesh)) return
-  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()
-  const position = source.getAttribute('position')
-  if (!position || position.count < 3) return
-
-  const matrixWorld = mesh.matrixWorld.clone()
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const c = new THREE.Vector3()
-  const center = new THREE.Vector3()
-  const keep: number[] = []
-
-  for (let i = 0; i < position.count; i += 3) {
-    a.fromBufferAttribute(position, i).applyMatrix4(matrixWorld)
-    b.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld)
-    c.fromBufferAttribute(position, i + 2).applyMatrix4(matrixWorld)
-    center.copy(a).add(b).add(c).multiplyScalar(1 / 3)
-
-    const isLowRoadsideBanner = center.y > -14 && center.y < 38
-    if (!isLowRoadsideBanner) {
-      keep.push(i, i + 1, i + 2)
-    }
-  }
-
-  if (keep.length === position.count) return
-  if (keep.length === 0) {
-    mesh.visible = false
-    return
-  }
-
-  const next = new THREE.BufferGeometry()
-  for (const name of Object.keys(source.attributes)) {
-    const attr = source.getAttribute(name)
-    const values: number[] = []
-    for (const vertexIndex of keep) {
-      for (let component = 0; component < attr.itemSize; component++) {
-        values.push(attributeValue(attr, vertexIndex, component))
-      }
-    }
-    next.setAttribute(
-      name,
-      new THREE.BufferAttribute(new Float32Array(values), attr.itemSize, attr.normalized),
-    )
-  }
-  next.computeBoundingBox()
-  next.computeBoundingSphere()
-  mesh.geometry = next
-}
-
-function stripShanghai50MarkerTriangles(mesh: THREE.Mesh): void {
-  const texture = mainShanghaiTextureForMesh(mesh)
-  if (!texture) return
-  const sampleTexture = samplerForTexture(texture)
-  if (!sampleTexture) return
-
-  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()
-  const position = source.getAttribute('position')
-  const uv = source.getAttribute('uv')
-  if (!position || !uv || position.count < 3) return
-
-  const matrixWorld = mesh.matrixWorld.clone()
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const c = new THREE.Vector3()
-  const center = new THREE.Vector3()
-  const normal = new THREE.Vector3()
-  const keep: number[] = []
-
-  const sampleUv = (i0: number, i1: number, i2: number, wa: number, wb: number, wc: number): [number, number, number, number] => {
-    const u = attributeValue(uv, i0, 0) * wa + attributeValue(uv, i1, 0) * wb + attributeValue(uv, i2, 0) * wc
-    const v = attributeValue(uv, i0, 1) * wa + attributeValue(uv, i1, 1) * wb + attributeValue(uv, i2, 1) * wc
-    return sampleTexture(u, v)
-  }
-
-  for (let i = 0; i < position.count; i += 3) {
-    a.fromBufferAttribute(position, i).applyMatrix4(matrixWorld)
-    b.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld)
-    c.fromBufferAttribute(position, i + 2).applyMatrix4(matrixWorld)
-    center.copy(a).add(b).add(c).multiplyScalar(1 / 3)
-    normal.crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
-
-    const isVerticalPanel = Math.abs(normal.y) < 0.45
-    const isTracksideHeight = center.y > 1.2 && center.y < 34
-    const hasWhiteMarkerTexture =
-      isShanghai50MarkerWhiteSample(sampleUv(i, i + 1, i + 2, 1 / 3, 1 / 3, 1 / 3)) ||
-      isShanghai50MarkerWhiteSample(sampleUv(i, i + 1, i + 2, 0.72, 0.14, 0.14)) ||
-      isShanghai50MarkerWhiteSample(sampleUv(i, i + 1, i + 2, 0.14, 0.72, 0.14)) ||
-      isShanghai50MarkerWhiteSample(sampleUv(i, i + 1, i + 2, 0.14, 0.14, 0.72))
-
-    if (isVerticalPanel && isTracksideHeight && hasWhiteMarkerTexture) {
-      continue
-    }
-    keep.push(i, i + 1, i + 2)
-  }
-
-  if (keep.length === position.count) return
-  if (keep.length === 0) {
-    mesh.visible = false
-    return
-  }
-
-  const next = new THREE.BufferGeometry()
-  for (const name of Object.keys(source.attributes)) {
-    const attr = source.getAttribute(name)
-    const values: number[] = []
-    for (const vertexIndex of keep) {
-      for (let component = 0; component < attr.itemSize; component++) {
-        values.push(attributeValue(attr, vertexIndex, component))
-      }
-    }
-    next.setAttribute(
-      name,
-      new THREE.BufferAttribute(new Float32Array(values), attr.itemSize, attr.normalized),
-    )
-  }
-  next.computeBoundingBox()
-  next.computeBoundingSphere()
-  mesh.geometry = next
-}
-
 export interface LowPolyShanghaiTriangleErase {
   point: { x: number; y: number; z: number }
   radius: number
   meshName?: string | null
   verticalOnly?: boolean
+  connectedOnly?: boolean
 }
 
 export function eraseLowPolyShanghaiTriangles(
@@ -501,17 +313,72 @@ export function eraseLowPolyShanghaiTriangles(
     const normal = new THREE.Vector3()
     const keep: number[] = []
 
-    for (let i = 0; i < position.count; i += 3) {
-      a.fromBufferAttribute(position, i).applyMatrix4(matrixWorld)
-      b.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld)
-      c.fromBufferAttribute(position, i + 2).applyMatrix4(matrixWorld)
-      center.copy(a).add(b).add(c).multiplyScalar(1 / 3)
-      normal.crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
-      const matchesSurface = !verticalOnly || Math.abs(normal.y) < 0.72
-      if (matchesSurface && center.distanceToSquared(target) <= radiusSq) {
-        removed++
-      } else {
-        keep.push(i, i + 1, i + 2)
+    if (deletion.connectedOnly) {
+      let seedTriangle = -1
+      let seedDistanceSq = Infinity
+      for (let i = 0; i < position.count; i += 3) {
+        a.fromBufferAttribute(position, i).applyMatrix4(matrixWorld)
+        b.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld)
+        c.fromBufferAttribute(position, i + 2).applyMatrix4(matrixWorld)
+        center.copy(a).add(b).add(c).multiplyScalar(1 / 3)
+        const distanceSq = center.distanceToSquared(target)
+        if (distanceSq < seedDistanceSq) {
+          seedDistanceSq = distanceSq
+          seedTriangle = i / 3
+        }
+      }
+      if (seedTriangle < 0 || seedDistanceSq > radiusSq) return
+
+      const triangleCount = position.count / 3
+      const trianglesByVertex = new Map<string, number[]>()
+      const vertexKey = (index: number): string => {
+        const precision = 1000
+        return `${Math.round(position.getX(index) * precision)}:${Math.round(position.getY(index) * precision)}:${Math.round(position.getZ(index) * precision)}`
+      }
+      for (let triangle = 0; triangle < triangleCount; triangle++) {
+        const offset = triangle * 3
+        for (let vertex = 0; vertex < 3; vertex++) {
+          const key = vertexKey(offset + vertex)
+          const linked = trianglesByVertex.get(key)
+          if (linked) linked.push(triangle)
+          else trianglesByVertex.set(key, [triangle])
+        }
+      }
+
+      const selected = new Uint8Array(triangleCount)
+      const queue = [seedTriangle]
+      selected[seedTriangle] = 1
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const triangle = queue[cursor]
+        const offset = triangle * 3
+        for (let vertex = 0; vertex < 3; vertex++) {
+          for (const linked of trianglesByVertex.get(vertexKey(offset + vertex)) ?? []) {
+            if (selected[linked]) continue
+            selected[linked] = 1
+            queue.push(linked)
+          }
+        }
+      }
+
+      for (let triangle = 0; triangle < triangleCount; triangle++) {
+        const offset = triangle * 3
+        if (selected[triangle]) removed++
+        else keep.push(offset, offset + 1, offset + 2)
+      }
+    } else {
+
+      for (let i = 0; i < position.count; i += 3) {
+        a.fromBufferAttribute(position, i).applyMatrix4(matrixWorld)
+        b.fromBufferAttribute(position, i + 1).applyMatrix4(matrixWorld)
+        c.fromBufferAttribute(position, i + 2).applyMatrix4(matrixWorld)
+        center.copy(a).add(b).add(c).multiplyScalar(1 / 3)
+        normal.crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize()
+        const matchesSurface = !verticalOnly || Math.abs(normal.y) < 0.72
+        if (matchesSurface && center.distanceToSquared(target) <= radiusSq) {
+          removed++
+        } else {
+          keep.push(i, i + 1, i + 2)
+        }
       }
     }
 
@@ -595,8 +462,6 @@ export function addLowPolyShanghai(
           obj.receiveShadow = meshHasRoadSurfaceHint(obj)
           obj.frustumCulled = true
           obj.visible = !meshIsColliderOnly(obj)
-          stripLowRoadsideBannerTriangles(obj)
-          stripShanghai50MarkerTriangles(obj)
           const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
           for (const mat of materials) {
             mat.needsUpdate = true

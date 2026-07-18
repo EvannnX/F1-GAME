@@ -13,10 +13,11 @@ import { StateMachine, GameState, createInitialContext } from './game/state'
 import { createMenu, type CameraMode } from './ui/menu'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
-import { createIntro } from './ui/intro'
+import { createTransitionVideo } from './ui/transitionVideo'
 import { createMinimap } from './ui/minimap'
-import { createTelemetryMap, type TelemetryMapRoadTriangle } from './ui/telemetryMap'
+import { createTelemetryMap, type TelemetryMapPoint } from './ui/telemetryMap'
 import { createPersonalityCard } from './ui/personalityCard'
+import { installGlbObjectDeletionGui, isGlbObjectDeletionGuiEnabled } from './ui/glbObjectDeletion'
 import { installF1tiApi } from './f1ti/api'
 import { installGlbGridPlacementGui, isGlbGridPlacementGuiEnabled } from './ui/glbGridPlacement'
 import {
@@ -64,6 +65,8 @@ import {
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
+import { SHANGHAI_GLB_ROAD_ROUTE } from './data/shanghaiGlbRoadRoute'
+import { SHANGHAI_GLB_ROAD_MASK } from './data/shanghaiGlbRoadMask'
 
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
@@ -86,7 +89,7 @@ const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_M
 const GLB_PLAYER_TARGET_LENGTH_M = 5.0 * GLB_PLAYER_VISUAL_SCALE
 const GLB_START_POSE_STORAGE_KEY = 'f1s_glb_drive_start_pose_v1'
 const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v3'
-const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v1'
+const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v2'
 const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
 const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v1'
 const GLB_CAMERA_TUNING_STORAGE_KEY = 'f1s_glb_camera_tuning_v1'
@@ -95,6 +98,7 @@ const SCENE_CACHE_STORAGE_KEYS = [
   GLB_START_POSE_STORAGE_KEY,
   GLB_GRID_STORAGE_KEY,
   GLB_SIGN_DELETIONS_STORAGE_KEY,
+  'f1s_glb_sign_deletions_v1',
   LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY,
   'f1s_glb_drive_start_pose',
   'f1s_direct_glb_start_pose',
@@ -128,29 +132,6 @@ const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
   { id: 'mclaren', x: -131.19, z: 109.09, headingDeg: 271.5 },
   { id: 'player', x: -147.24, z: 109.34, headingDeg: 270.6 },
   { id: 'redbull', x: -139.35, z: 116.66, headingDeg: -89.6 },
-]
-
-const DEFAULT_GLB_SIGN_DELETIONS: LowPolyShanghaiTriangleErase[] = [
-  {
-    point: { x: -381.86, y: -0.45, z: 44.37 },
-    radius: 8,
-    verticalOnly: true,
-  },
-  {
-    point: { x: -381.86, y: 5.5, z: 44.37 },
-    radius: 9,
-    verticalOnly: true,
-  },
-  {
-    point: { x: -381.86, y: 12, z: 44.37 },
-    radius: 9,
-    verticalOnly: true,
-  },
-  {
-    point: { x: -381.86, y: 18, z: 44.37 },
-    radius: 8,
-    verticalOnly: true,
-  },
 ]
 
 interface SavedGlbStartPose {
@@ -191,12 +172,10 @@ function bootApp(): void {
 function createStatusPanel(): HTMLDivElement {
   const panel = document.createElement('div')
   panel.style.cssText = `
-    position:fixed;left:16px;top:16px;z-index:20;
-    min-width:220px;max-width:min(420px,calc(100vw - 32px));
-    padding:12px 14px;border-radius:8px;
-    background:rgba(5,8,12,.74);color:#eaffff;
-    font:600 13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
-    box-shadow:0 10px 28px rgba(0,0,0,.26);
+    position:fixed;left:50%;top:50%;z-index:20;transform:translate(-50%,-50%);
+    max-width:min(520px,calc(100vw - 48px));color:#fff;text-align:center;
+    font:700 16px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+    text-shadow:0 3px 14px rgba(0,0,0,.9);
     pointer-events:none;white-space:pre-line;
   `
   document.body.appendChild(panel)
@@ -285,24 +264,22 @@ function normalizeSavedGlbSignDeletion(value: unknown): LowPolyShanghaiTriangleE
     radius,
     meshName: typeof record.meshName === 'string' ? record.meshName : null,
     verticalOnly: typeof record.verticalOnly === 'boolean' ? record.verticalOnly : true,
+    connectedOnly: record.connectedOnly === true,
   }
 }
 
 function readSavedGlbSignDeletions(): LowPolyShanghaiTriangleErase[] {
   try {
     const raw = localStorage.getItem(GLB_SIGN_DELETIONS_STORAGE_KEY)
-    if (!raw) return DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } }))
+    if (!raw) return []
     const parsed = JSON.parse(raw)
     const source = Array.isArray(parsed) ? parsed : [parsed]
     const deletions = source
       .map(normalizeSavedGlbSignDeletion)
       .filter((item): item is LowPolyShanghaiTriangleErase => Boolean(item))
-    return [
-      ...DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } })),
-      ...deletions,
-    ]
+    return deletions
   } catch {
-    return DEFAULT_GLB_SIGN_DELETIONS.map((item) => ({ ...item, point: { ...item.point } }))
+    return []
   }
 }
 
@@ -511,60 +488,36 @@ function createGlbGridOpponentStates(
     })
 }
 
-function materialNamesForObject(obj: THREE.Mesh): string[] {
-  if (!obj.material) return []
-  const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
-  return materials.map((mat) => mat.name ?? '')
-}
+function createGlbTelemetryRouteMap(
+  lowPolyShanghai: LowPolyShanghaiBundle,
+): { routePoints: TelemetryMapPoint[]; roadMask: typeof SHANGHAI_GLB_ROAD_MASK & {
+  placementX: number
+  placementZ: number
+  placementYawDeg: number
+  placementScale: number
+} } {
+  const placement = lowPolyShanghai.getPlacement()
+  const rotation = THREE.MathUtils.degToRad(placement.yawDeg)
+  const cos = Math.cos(rotation)
+  const sin = Math.sin(rotation)
 
-function meshLooksLikeRoadForTelemetry(mesh: THREE.Mesh): boolean {
-  const name = `${mesh.name} ${materialNamesForObject(mesh).join(' ')}`.toLowerCase()
-  return name.includes('road') || name.includes('tarmac') || name.includes('line_white')
-}
-
-function createGlbTelemetryRoadMap(lowPolyShanghai: LowPolyShanghaiBundle): { roadTriangles: TelemetryMapRoadTriangle[] } {
-  const triangles: TelemetryMapRoadTriangle[] = []
-  const candidates: THREE.Mesh[] = []
-  lowPolyShanghai.group.updateMatrixWorld(true)
-  lowPolyShanghai.group.traverse((obj) => {
-    if (obj instanceof THREE.Mesh && obj.geometry && meshLooksLikeRoadForTelemetry(obj)) {
-      candidates.push(obj)
-    }
-  })
-
-  let totalTriangles = 0
-  for (const mesh of candidates) {
-    const position = mesh.geometry.getAttribute('position')
-    if (position) totalTriangles += Math.floor(position.count / 3)
+  return {
+    roadMask: {
+      ...SHANGHAI_GLB_ROAD_MASK,
+      placementX: placement.x,
+      placementZ: placement.z,
+      placementYawDeg: placement.yawDeg,
+      placementScale: placement.scale,
+    },
+    routePoints: SHANGHAI_GLB_ROAD_ROUTE.map(([sourceX, sourceZ]) => {
+      const x = sourceX * placement.scale
+      const z = sourceZ * placement.scale
+      return {
+        x: placement.x + x * cos + z * sin,
+        z: placement.z - x * sin + z * cos,
+      }
+    }),
   }
-  const stride = Math.max(1, Math.ceil(totalTriangles / 5200))
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const c = new THREE.Vector3()
-  let triIndex = 0
-
-  for (const mesh of candidates) {
-    const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry
-    const position = source.getAttribute('position')
-    if (!position) continue
-    for (let i = 0; i < position.count; i += 3) {
-      if (triIndex++ % stride !== 0) continue
-      a.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld)
-      b.fromBufferAttribute(position, i + 1).applyMatrix4(mesh.matrixWorld)
-      c.fromBufferAttribute(position, i + 2).applyMatrix4(mesh.matrixWorld)
-      triangles.push({
-        ax: a.x,
-        az: a.z,
-        bx: b.x,
-        bz: b.z,
-        cx: c.x,
-        cz: c.z,
-      })
-    }
-    if (source !== mesh.geometry) source.dispose()
-  }
-
-  return { roadTriangles: triangles }
 }
 
 function findGlbStartPose(ground: LowPolyShanghaiGroundSampler): { pos: THREE.Vector3; heading: number; normal: THREE.Vector3 } {
@@ -724,11 +677,17 @@ function bootstrapGlbVersion(): void {
 
   const status = createStatusPanel()
   const menu = createMenu()
+  const hud = createHud()
+  const transitionVideo = createTransitionVideo('video/beginning.mp4')
   const countdownOverlay = createGlbCountdownOverlay()
   const result = createResult()
   const personalityCard = createPersonalityCard()
   const setStatus = (text: string): void => {
+    status.style.display = ''
     status.textContent = text
+  }
+  const hideStatus = (): void => {
+    status.style.display = 'none'
   }
   setStatus('上海赛车场 GLB 主游戏\n正在加载地图...')
 
@@ -758,6 +717,8 @@ function bootstrapGlbVersion(): void {
   let cameraTuningGuiActive = cameraTuningGuiRequested
   const firstPersonGuiRequested = isCockpitPlacementGuiEnabled()
   let firstPersonGuiActive = firstPersonGuiRequested
+  const objectDeletionGuiRequested = isGlbObjectDeletionGuiEnabled()
+  let objectDeletionGuiActive = objectDeletionGuiRequested
   let glbCameraTuning = readSavedGlbCameraTuning(GLB_CAMERA_TUNING_STORAGE_KEY, DEFAULT_GLB_CAMERA_TUNING)
   let glbOpponentStates: OpponentState[] = []
   let glbOpponentStateById = new Map<string, OpponentState>()
@@ -820,7 +781,7 @@ function bootstrapGlbVersion(): void {
       throttle: manualThrottle ? rawInput.throttle : 0,
       manualThrottle,
     }
-    const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive
+    const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive && !objectDeletionGuiActive
       ? driveInput
       : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
     drive.update(dt, gameInput)
@@ -835,7 +796,7 @@ function bootstrapGlbVersion(): void {
     firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
     if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
-    if (!gridPlacementGuiActive && !carVisualTuningGuiActive) {
+    if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
       if (cameraMode === 'first') {
         updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
       } else {
@@ -862,13 +823,7 @@ function bootstrapGlbVersion(): void {
         })),
       })
     }
-    setStatus(
-      `上海赛车场 GLB 主游戏 · ${cameraMode === 'first' ? '第一视角' : '第三视角'}\n` +
-      `${gridPlacementGuiActive ? '发车格编辑中' : carVisualTuningGuiActive ? '赛车尺寸调参中' : cameraTuningGuiActive ? '第三视角相机调参中' : firstPersonGuiActive ? '第一视角调参中' : countdownActive ? '红灯倒计时' : glbFinishing ? '已冲线，正在结算' : started ? '比赛中' : '等待开始'}\n` +
-      `速度 ${Math.round(drive.state.speed * 3.6)} km/h\n` +
-      `${gridPlacementGuiActive ? '拖动车上标记调整发车位' : carVisualTuningGuiActive ? '调整宽度/高度/长度' : cameraTuningGuiActive ? 'WASD/方向键调整相机' : firstPersonGuiActive ? '右侧面板调整 Eye / Pitch / Yaw / Roll' : 'P 保存起点'}\n` +
-      `WASD/方向键驾驶`,
-    )
+    hud.update({ speedKmh: drive.state.speed * 3.6, lapMs: 0, mode: 'keyboard' })
     bundle.render()
   })
   loop.start()
@@ -932,6 +887,9 @@ function bootstrapGlbVersion(): void {
     const startGlbCountdown = (): void => {
       if (!drive) return
       clearGlbCountdown()
+      hideStatus()
+      hud.show()
+      hud.update({ speedKmh: 0, lapMs: 0, mode: 'keyboard' })
       started = false
       countdownActive = true
       // Countdown is a presentation phase. Temporarily use the low-cost
@@ -979,7 +937,7 @@ function bootstrapGlbVersion(): void {
             countdown = null
           }
           window.setTimeout(() => {
-            if (gridPlacementGuiActive || carVisualTuningGuiActive || cameraTuningGuiActive || firstPersonGuiActive || started) return
+            if (gridPlacementGuiActive || carVisualTuningGuiActive || cameraTuningGuiActive || firstPersonGuiActive || objectDeletionGuiActive || started) return
             startGlbCountdown()
           }, 900)
         },
@@ -990,6 +948,7 @@ function bootstrapGlbVersion(): void {
       glbFinishing = true
       started = false
       countdownActive = false
+      hud.hide()
       const lapMs = Math.max(0, performance.now() - glbRaceStartTime)
       const topSpeedKmh = drive.state.topSpeed * 3.6
       countdownOverlay.flash('FINISH!', '#00d2be', 1400)
@@ -1017,6 +976,7 @@ function bootstrapGlbVersion(): void {
         management: drive.state.onRoad ? 80 : 58,
       }
       void (async () => {
+        await transitionVideo.play()
         await personalityCard.show(stats, telemetry)
         if (glbResultVisible) return
         glbResultVisible = true
@@ -1057,36 +1017,43 @@ function bootstrapGlbVersion(): void {
         && glbPreviousGateCoordinate < -1
         && gateCoordinate >= 0
         && lateralCoordinate <= 12
+      const returnedToFinishArea = glbRaceArmed
+        && glbRaceDistance >= 1000
+        && Math.hypot(dx, dz) <= 22
       glbPreviousGateCoordinate = gateCoordinate
-      if (crossedGate) finishGlbRace()
+      if (crossedGate || returnedToFinishArea) finishGlbRace()
     }
     const showGlbStartMenu = (): void => {
-      setStatus('上海赛车场 GLB 主游戏\n选择画质和操作方式')
+      hideStatus()
+      hud.hide()
       menu.show((cfg) => {
         menu.hide()
-        cameraMode = cfg.cameraMode
-        applyCameraModeVisibility()
-        bundle.setPerformanceMode(cfg.performanceMode)
-        storage.setPerformanceMode(cfg.performanceMode)
-        resetGlbRaceGrid()
         startGlbAudio()
-        void Promise.all([
-          initInput(cfg.inputMode),
-          firstPersonCockpit.ready.catch((e) => {
-            console.warn('[F1S] first person cockpit failed:', e)
-          }),
-        ]).then(([controller]) => {
-          input?.destroy()
-          input = controller
-          startGlbCountdown()
-        }).catch((e) => {
-          console.warn('[F1S] GLB input init failed:', e)
-          void initInput('keyboard').then((controller) => {
+        void (async () => {
+          await transitionVideo.play()
+          cameraMode = cfg.cameraMode
+          applyCameraModeVisibility()
+          bundle.setPerformanceMode(cfg.performanceMode)
+          storage.setPerformanceMode(cfg.performanceMode)
+          resetGlbRaceGrid()
+          try {
+            const [controller] = await Promise.all([
+              initInput(cfg.inputMode),
+              firstPersonCockpit.ready.catch((e) => {
+                console.warn('[F1S] first person cockpit failed:', e)
+              }),
+            ])
             input?.destroy()
             input = controller
             startGlbCountdown()
-          })
-        })
+          } catch (e) {
+            console.warn('[F1S] GLB input init failed:', e)
+            const controller = await initInput('keyboard')
+            input?.destroy()
+            input = controller
+            startGlbCountdown()
+          }
+        })()
       })
     }
     const applyGridPlacementToWorld = (placement: GlbGridPlacement): void => {
@@ -1128,7 +1095,7 @@ function bootstrapGlbVersion(): void {
       })
     }
     applySavedCarVisualTuning()
-    telemetryMap = createTelemetryMap(createGlbTelemetryRoadMap(lowPolyShanghai))
+    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap(lowPolyShanghai))
     telemetryMap.resetTrail()
     telemetryMap.show()
     updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
@@ -1142,8 +1109,10 @@ function bootstrapGlbVersion(): void {
     } catch (e) {
       console.warn('[F1S] GLB audio rig init failed:', e)
     }
-    if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested) {
+    if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested || objectDeletionGuiRequested) {
       started = false
+      hideStatus()
+      hud.show()
     }
     if (firstPersonGuiRequested) {
       cameraMode = 'first'
@@ -1214,7 +1183,25 @@ function bootstrapGlbVersion(): void {
       })
       showToast('相机调参已打开', 1800)
     }
-    if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested) {
+    if (objectDeletionGuiRequested) {
+      objectDeletionGuiActive = true
+      telemetryMap?.hide()
+      hud.hide()
+      installGlbObjectDeletionGui({
+        root: lowPolyShanghai.group,
+        camera: bundle.camera,
+        renderer: bundle.renderer,
+        storageKey: GLB_SIGN_DELETIONS_STORAGE_KEY,
+        onClose: () => {
+          objectDeletionGuiActive = false
+          telemetryMap?.show()
+          resetGlbRaceGrid()
+          showGlbStartMenu()
+        },
+      })
+      showToast('场景物体删除 GUI 已打开', 1800)
+    }
+    if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested && !objectDeletionGuiRequested) {
       started = false
       showGlbStartMenu()
       showToast('第三视角 GLB 主游戏已就绪', 1600)
@@ -1397,6 +1384,7 @@ function bootstrap(): void {
   const sm = new StateMachine(ctx)
   const menu = createMenu()
   const hud = createHud()
+  const transitionVideo = createTransitionVideo('video/beginning.mp4')
   hud.show() // visible from boot (kept on through MENU/RACE; only RESULT hides it)
   hud.update({ speedKmh: 0, lapMs: 0, mode: 'keyboard' })
   const result = createResult()
@@ -1607,6 +1595,7 @@ function bootstrap(): void {
         if (commentaryMode === 'coach') world.coach.unlock()
         SFX.uiClick()
         unlockAudio()
+        await transitionVideo.play()
         // Boot the engine + BGM rig from inside the click handler so iOS
         // unlocks AudioContext on the same gesture.
         try {
@@ -2011,6 +2000,7 @@ function bootstrap(): void {
       minimap.hide()
       // Reveal the MBTI-style racer-personality card first, then fall
       // through to the regular result panel.
+      await transitionVideo.play()
       await personalityCard.show(buildPlayerStats(), {
         bestLapMs: ctx.raceData.bestLap ?? 0,
         topSpeedKmh: ctx.raceData.topSpeed,
@@ -2067,12 +2057,7 @@ function bootstrap(): void {
   })
   loop.start()
 
-  // Boot sequence: play the intro video first, then jump into the menu.
-  // If the video fails / is skipped, we still go to the menu.
-  const intro = createIntro('video/beginning.mp4')
-  void intro.show().then(() => {
-    void sm.transition(GameState.MENU)
-  })
+  void sm.transition(GameState.MENU)
 }
 
 if (document.readyState === 'loading') {

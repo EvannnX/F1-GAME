@@ -18,9 +18,23 @@ export interface TelemetryMapRoadTriangle {
   cz: number
 }
 
+export interface TelemetryMapRoadMask {
+  minX: number
+  minZ: number
+  cellSize: number
+  cols: number
+  rows: number
+  bitsBase64: string
+  placementX?: number
+  placementZ?: number
+  placementYawDeg?: number
+  placementScale?: number
+}
+
 export interface TelemetryMapSource {
   routePoints?: TelemetryMapPoint[]
   roadTriangles?: TelemetryMapRoadTriangle[]
+  roadMask?: TelemetryMapRoadMask
 }
 
 export interface TelemetryMapCar {
@@ -51,6 +65,7 @@ export interface TelemetryMapController {
 export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSource): TelemetryMapController {
   const trackPoints = Array.isArray(source) ? source : (source.routePoints ?? [])
   const roadTriangles = Array.isArray(source) ? [] : (source.roadTriangles ?? [])
+  const roadMask = Array.isArray(source) ? undefined : source.roadMask
   let host: HTMLDivElement | null = null
   let canvas: HTMLCanvasElement | null = null
   let ctx: CanvasRenderingContext2D | null = null
@@ -81,6 +96,25 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     includeBoundsPoint(tri.bx, tri.bz)
     includeBoundsPoint(tri.cx, tri.cz)
   }
+  if (roadMask) {
+    const rotation = (roadMask.placementYawDeg ?? 0) * Math.PI / 180
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const placementScale = roadMask.placementScale ?? 1
+    const placementX = roadMask.placementX ?? 0
+    const placementZ = roadMask.placementZ ?? 0
+    const maxMaskX = roadMask.minX + roadMask.cols * roadMask.cellSize
+    const maxMaskZ = roadMask.minZ + roadMask.rows * roadMask.cellSize
+    for (const [x, z] of [
+      [roadMask.minX, roadMask.minZ], [maxMaskX, roadMask.minZ],
+      [maxMaskX, maxMaskZ], [roadMask.minX, maxMaskZ],
+    ]) {
+      includeBoundsPoint(
+        placementX + (x * cos + z * sin) * placementScale,
+        placementZ + (-x * sin + z * cos) * placementScale,
+      )
+    }
+  }
   if (!Number.isFinite(minX) || !Number.isFinite(minZ)) {
     minX = -100
     maxX = 100
@@ -102,7 +136,7 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
 
   const drawRoadTriangles = (): void => {
     if (!staticCtx || roadTriangles.length < 1) return
-    staticCtx.fillStyle = 'rgba(255,255,255,0.92)'
+    staticCtx.fillStyle = 'rgba(255,255,255,0.9)'
     staticCtx.beginPath()
     for (const tri of roadTriangles) {
       const [ax, ay] = project(tri.ax, tri.az)
@@ -116,23 +150,70 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     staticCtx.fill()
   }
 
+  const drawRoadMask = (): void => {
+    if (!staticCtx || !roadMask) return
+    const maskCanvas = document.createElement('canvas')
+    maskCanvas.width = roadMask.cols
+    maskCanvas.height = roadMask.rows
+    const maskContext = maskCanvas.getContext('2d')
+    if (!maskContext) return
+    const image = maskContext.createImageData(roadMask.cols, roadMask.rows)
+    const binary = atob(roadMask.bitsBase64)
+    for (let index = 0; index < roadMask.cols * roadMask.rows; index++) {
+      if (!(binary.charCodeAt(index >> 3) & (1 << (index & 7)))) continue
+      const pixel = index * 4
+      image.data[pixel] = 255
+      image.data[pixel + 1] = 255
+      image.data[pixel + 2] = 255
+      image.data[pixel + 3] = 242
+    }
+    maskContext.putImageData(image, 0, 0)
+
+    const rotation = (roadMask.placementYawDeg ?? 0) * Math.PI / 180
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const placementScale = roadMask.placementScale ?? 1
+    const pixelScale = roadMask.cellSize * placementScale * scale
+    const placementX = roadMask.placementX ?? 0
+    const placementZ = roadMask.placementZ ?? 0
+    const originX = placementX + (roadMask.minX * cos + roadMask.minZ * sin) * placementScale
+    const originZ = placementZ + (-roadMask.minX * sin + roadMask.minZ * cos) * placementScale
+    staticCtx.save()
+    staticCtx.imageSmoothingEnabled = true
+    staticCtx.setTransform(
+      cos * pixelScale,
+      -sin * pixelScale,
+      sin * pixelScale,
+      cos * pixelScale,
+      originX * scale + offX,
+      originZ * scale + offY,
+    )
+    staticCtx.drawImage(maskCanvas, 0, 0)
+    staticCtx.restore()
+  }
+
   const drawRouteLineFallback = (): void => {
     if (!staticCtx || trackPoints.length <= 1) return
     for (const pass of [
-      { stroke: 'rgba(0,0,0,0.7)', width: 7 },
-      { stroke: 'rgba(255,255,255,0.94)', width: 4 },
+      { stroke: 'rgba(0,0,0,0.78)', width: 9 },
+      { stroke: 'rgba(255,255,255,0.96)', width: 5.5 },
     ]) {
       staticCtx.strokeStyle = pass.stroke
       staticCtx.lineWidth = pass.width
       staticCtx.lineCap = 'round'
       staticCtx.lineJoin = 'round'
       staticCtx.beginPath()
-      for (let i = 0; i <= trackPoints.length; i++) {
-        const p = trackPoints[i % trackPoints.length]
-        const [px, py] = project(p.x, p.z)
-        if (i === 0) staticCtx.moveTo(px, py)
-        else staticCtx.lineTo(px, py)
+      const first = project(trackPoints[0].x, trackPoints[0].z)
+      const second = project(trackPoints[1].x, trackPoints[1].z)
+      staticCtx.moveTo((first[0] + second[0]) * 0.5, (first[1] + second[1]) * 0.5)
+      for (let i = 1; i <= trackPoints.length; i++) {
+        const current = trackPoints[i % trackPoints.length]
+        const next = trackPoints[(i + 1) % trackPoints.length]
+        const [cx, cy] = project(current.x, current.z)
+        const [nx, ny] = project(next.x, next.z)
+        staticCtx.quadraticCurveTo(cx, cy, (cx + nx) * 0.5, (cy + ny) * 0.5)
       }
+      staticCtx.closePath()
       staticCtx.stroke()
     }
   }
@@ -145,7 +226,9 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     staticCtx.roundRect(0, 0, MAP_W, MAP_H, 8)
     staticCtx.fill()
 
-    if (roadTriangles.length > 0) {
+    if (roadMask) {
+      drawRoadMask()
+    } else if (roadTriangles.length > 0) {
       drawRoadTriangles()
     } else {
       drawRouteLineFallback()
@@ -220,15 +303,6 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
       ctx.stroke()
     }
 
-    const speed = Math.round(player.speedKmh ?? 0)
-    ctx.fillStyle = '#fff'
-    ctx.font = '800 15px -apple-system, BlinkMacSystemFont, sans-serif'
-    ctx.textAlign = 'right'
-    ctx.fillText(`${speed} km/h`, MAP_W - 10, 16)
-    ctx.textAlign = 'left'
-    ctx.fillStyle = player.onRoad === false ? '#facc15' : '#25f4ee'
-    ctx.font = '700 10px -apple-system, BlinkMacSystemFont, sans-serif'
-    ctx.fillText(player.onRoad === false ? 'OFF ROAD' : 'ON ROAD', 10, MAP_H - 9)
   }
 
   drawStatic()

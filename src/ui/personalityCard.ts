@@ -20,6 +20,18 @@ import hamiltonPhoto from '../assets/drivers/hamilton.webp?url'
 import antoPhoto from '../assets/drivers/anto.webp?url'
 import verstapanPhoto from '../assets/drivers/verstapan.webp?url'
 
+const F1TI_CARD_MODULES = import.meta.glob('../../f1ti_cards/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
+
+const F1TI_CARD_BY_TYPECODE: Record<string, string> = {}
+for (const [path, url] of Object.entries(F1TI_CARD_MODULES)) {
+  const code = path.match(/\/([A-Z]+)-[^/]+\.png$/)?.[1]
+  if (code) F1TI_CARD_BY_TYPECODE[code] = url
+}
+
 /** Concrete telemetry captured during the race, used to generate the
  *  "为何你是这个类型" reasons grounded in actual performance. */
 export interface RaceTelemetry {
@@ -139,6 +151,8 @@ export function createPersonalityCard(): PersonalityCardController {
   ): Promise<void> => {
     hide()
     const personality = data['你的赛车人格']
+    const typeCode = personality['类型代码'] as string | undefined
+    const f1tiCardUrl = typeCode ? F1TI_CARD_BY_TYPECODE[typeCode] : null
     const tags = data['核心标签']
     // Telemetry-grounded reasons replace the generic ones when a race
     // actually completed; the archetype flavour line still tags along
@@ -153,12 +167,65 @@ export function createPersonalityCard(): PersonalityCardController {
 
       host = document.createElement('div')
       host.style.cssText = `
-        position: fixed; inset: 0; z-index: 110;
+        position: fixed; inset: 0; z-index: 210;
         display: flex; align-items: center; justify-content: center;
         background: rgba(8,12,22,0.94);
         padding: 12px;
         font-family: -apple-system, "PingFang SC", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
       `
+
+      if (f1tiCardUrl) {
+        const stage = document.createElement('div')
+        stage.style.cssText = `
+          position:relative;width:min(96vw,calc(88vh * 12 / 7),1200px);aspect-ratio:12/7;
+          filter:drop-shadow(0 14px 34px rgba(0,0,0,.5));
+        `
+        const cardImage = document.createElement('img')
+        cardImage.src = f1tiCardUrl
+        cardImage.alt = `${personality['匹配车手']} ${personality['类型名称']}`
+        cardImage.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;'
+        stage.appendChild(cardImage)
+
+        const makeLiveStat = (left: string, width: string, label: string, value: string): HTMLDivElement => {
+          const cell = document.createElement('div')
+          cell.style.cssText = `
+            position:absolute;left:${left};top:35.2%;width:${width};height:10.2%;
+            display:flex;flex-direction:column;align-items:center;justify-content:center;
+            background:#fff;color:#bf1f24;line-height:1;pointer-events:none;
+          `
+          const valueEl = document.createElement('div')
+          valueEl.textContent = value
+          valueEl.style.cssText = 'font-size:clamp(15px,2.1vw,27px);font-weight:500;letter-spacing:0;white-space:nowrap;'
+          const labelEl = document.createElement('div')
+          labelEl.textContent = label
+          labelEl.style.cssText = 'margin-top:7px;font-size:clamp(8px,.9vw,12px);color:#795456;letter-spacing:2px;white-space:nowrap;'
+          cell.append(valueEl, labelEl)
+          return cell
+        }
+
+        if (telemetry) {
+          stage.append(
+            makeLiveStat('41.4%', '16.3%', '单圈用时', formatLap(telemetry.bestLapMs)),
+            makeLiveStat('57.7%', '22.8%', '最高时速', `${Math.round(telemetry.topSpeedKmh)} km/h`),
+            makeLiveStat('80.4%', '14.8%', '匹配度', `${personality['匹配度']}%`),
+          )
+        }
+
+        const continueButton = document.createElement('button')
+        continueButton.type = 'button'
+        continueButton.textContent = '继续'
+        continueButton.style.cssText = `
+          position:absolute;right:3%;bottom:4%;min-width:112px;min-height:42px;
+          border:1px solid rgba(255,255,255,.7);border-radius:6px;
+          background:rgba(8,12,22,.78);color:#fff;font-size:14px;font-weight:800;
+          letter-spacing:3px;cursor:pointer;
+        `
+        continueButton.addEventListener('click', hide, { once: true })
+        stage.appendChild(continueButton)
+        host.appendChild(stage)
+        document.body.appendChild(host)
+        return
+      }
 
       // --- Outer card frame.
       const card = document.createElement('div')
@@ -211,7 +278,6 @@ export function createPersonalityCard(): PersonalityCardController {
         object-fit: contain;
         display: block;
       `
-      const typeCode = personality['类型代码'] as string | undefined
       const photoUrl = typeCode ? PHOTO_BY_TYPECODE[typeCode] : null
       if (photoUrl) {
         photo.src = photoUrl
