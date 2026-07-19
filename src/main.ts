@@ -10,7 +10,11 @@ import { createPhysics, PHYS_MAX_SPEED, type PhysicsBundle } from './game/physic
 import { initInput, type InputController } from './input'
 import { GameLoop } from './game/loop'
 import { StateMachine, GameState, createInitialContext } from './game/state'
-import { createMenu, type CameraMode } from './ui/menu'
+import { createMenu, type CameraMode, type MenuStartConfig } from './ui/menu'
+import { showHomeScreen } from './ui/homeScreen'
+import { showHowToPlay } from './ui/howToPlay'
+import { showGarageSelection } from './ui/garage'
+import { onPlayerCarChange, readSelectedPlayerCar } from './data/playerCars'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createTransitionVideo } from './ui/transitionVideo'
@@ -163,10 +167,54 @@ function resetSceneCacheFromUrl(): boolean {
   return true
 }
 
-function bootApp(): void {
+type BootReadyHandler = () => void
+
+function bootApp(onReady?: BootReadyHandler): void {
   const sceneCacheWasReset = resetSceneCacheFromUrl()
-  ;(shouldBootMainGame() ? bootstrap : bootstrapGlbVersion)()
+  ;(shouldBootMainGame() ? bootstrap : bootstrapGlbVersion)(onReady)
   if (sceneCacheWasReset) showToast('已清除地图/起点缓存，使用代码默认场景', 3600)
+}
+
+function shouldBypassHomeScreen(): boolean {
+  return isGlbGridPlacementGuiEnabled()
+    || isCarVisualTuningGuiEnabled()
+    || isGlbCameraTuningGuiEnabled()
+    || isCockpitPlacementGuiEnabled()
+    || isGlbObjectDeletionGuiEnabled()
+}
+
+function bootWithHomeScreen(): void {
+  if (shouldBypassHomeScreen()) {
+    bootApp()
+    return
+  }
+  let markGameReady: BootReadyHandler = () => { /* assigned by the readiness promise */ }
+  const gameReady = new Promise<void>((resolve) => {
+    markGameReady = resolve
+  })
+  showHomeScreen(() => {
+    showHowToPlay(async () => {
+      await gameReady
+      showGarageSelection(() => { /* The prepared race settings menu is underneath. */ })
+    })
+  })
+
+  const bootInBackground = (): void => {
+    try {
+      bootApp(markGameReady)
+    } catch (error) {
+      console.warn('[F1S] background boot failed:', error)
+      markGameReady()
+    }
+  }
+  const idleWindow = window as Window & {
+    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+  }
+  if (idleWindow.requestIdleCallback) {
+    idleWindow.requestIdleCallback(bootInBackground, { timeout: 500 })
+  } else {
+    window.setTimeout(bootInBackground, 180)
+  }
 }
 
 function createStatusPanel(): HTMLDivElement {
@@ -657,12 +705,19 @@ function updateGlbFirstPersonCamera(
   camera.updateProjectionMatrix()
 }
 
-function bootstrapGlbVersion(): void {
+function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
+  let readyNotified = false
+  const notifyReady = (): void => {
+    if (readyNotified) return
+    readyNotified = true
+    onReady?.()
+  }
   installGlobalErrorHandlers()
 
   const container = document.getElementById('app')
   if (!container) {
     console.warn('[F1S] #app missing')
+    notifyReady()
     return
   }
 
@@ -672,6 +727,7 @@ function bootstrapGlbVersion(): void {
   } catch (e) {
     console.warn('[F1S] scene init failed:', e)
     container.textContent = e instanceof Error ? e.message : String(e)
+    notifyReady()
     return
   }
 
@@ -691,10 +747,36 @@ function bootstrapGlbVersion(): void {
   }
   setStatus('上海赛车场 GLB 主游戏\n正在加载地图...')
 
+  let glbMenuStartHandler: ((cfg: MenuStartConfig) => void) | null = null
+  let queuedMenuConfig: MenuStartConfig | null = null
+  const regularGameBoot = !isGlbGridPlacementGuiEnabled()
+    && !isCarVisualTuningGuiEnabled()
+    && !isGlbCameraTuningGuiEnabled()
+    && !isCockpitPlacementGuiEnabled()
+    && !isGlbObjectDeletionGuiEnabled()
+  const showGlbStartMenu = (): void => {
+    hideStatus()
+    hud.hide()
+    menu.show((cfg) => {
+      if (!glbMenuStartHandler) {
+        queuedMenuConfig = cfg
+        return
+      }
+      menu.hide()
+      glbMenuStartHandler(cfg)
+    })
+    notifyReady()
+  }
+  if (regularGameBoot) showGlbStartMenu()
+
   const weather = pickRandomWeather()
   bundle.applyWeather(weather)
   const lowPolyShanghai = addLowPolyShanghai(bundle.scene, readSavedLowPolyShanghaiPlacementForMain())
-  const car = createCar({ visualScale: GLB_PLAYER_VISUAL_SCALE })
+  const car = createCar({
+    visualScale: GLB_PLAYER_VISUAL_SCALE,
+    carId: readSelectedPlayerCar(),
+  })
+  onPlayerCarChange((carId) => { void car.setCarModel(carId) })
   const carBaseScale = car.group.scale.clone()
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
@@ -766,6 +848,7 @@ function bootstrapGlbVersion(): void {
   })
 
   const loop = new GameLoop((dt) => {
+    if (document.body.classList.contains('f1s-home-active') || document.body.classList.contains('f1s-guide-active') || document.body.classList.contains('f1s-garage-active') || document.body.classList.contains('f1s-race-menu-active')) return
     if (!drive) {
       bundle.render()
       return
@@ -1023,11 +1106,7 @@ function bootstrapGlbVersion(): void {
       glbPreviousGateCoordinate = gateCoordinate
       if (crossedGate || returnedToFinishArea) finishGlbRace()
     }
-    const showGlbStartMenu = (): void => {
-      hideStatus()
-      hud.hide()
-      menu.show((cfg) => {
-        menu.hide()
+    glbMenuStartHandler = (cfg): void => {
         startGlbAudio()
         void (async () => {
           await transitionVideo.play()
@@ -1054,7 +1133,12 @@ function bootstrapGlbVersion(): void {
             startGlbCountdown()
           }
         })()
-      })
+    }
+    if (queuedMenuConfig) {
+      const cfg = queuedMenuConfig
+      queuedMenuConfig = null
+      menu.hide()
+      glbMenuStartHandler(cfg)
     }
     const applyGridPlacementToWorld = (placement: GlbGridPlacement): void => {
       const nextPose = glbDrivePoseFromPlacement(placement, ground)
@@ -1203,12 +1287,12 @@ function bootstrapGlbVersion(): void {
     }
     if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested && !objectDeletionGuiRequested) {
       started = false
-      showGlbStartMenu()
       showToast('第三视角 GLB 主游戏已就绪', 1600)
     }
   }).catch((e) => {
     console.warn('[F1S] GLB version failed:', e)
     setStatus(`上海赛车场 GLB 主游戏\n加载失败: ${e instanceof Error ? e.message : String(e)}`)
+    notifyReady()
   })
 }
 
@@ -1243,12 +1327,13 @@ interface World {
   performanceMode: boolean
 }
 
-function bootstrap(): void {
+function bootstrap(onReady?: BootReadyHandler): void {
   installGlobalErrorHandlers()
 
   const container = document.getElementById('app')
   if (!container) {
     console.warn('[F1S] #app missing')
+    onReady?.()
     return
   }
 
@@ -1270,13 +1355,15 @@ function bootstrap(): void {
           某些浏览器禁止 file:// 加载 WebGL。
         </div>
       </div>`
+    onReady?.()
     return
   }
 
   // Build static world (track + car) once.
   const track = createTrack()
   bundle.scene.add(track.group)
-  const car = createCar()
+  const car = createCar({ carId: readSelectedPlayerCar() })
+  onPlayerCarChange((carId) => { void car.setCarModel(carId) })
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
   const physics = createPhysics(track)
@@ -2044,6 +2131,7 @@ function bootstrap(): void {
 
   // ---------------- Loop ----------------
   const loop = new GameLoop((dt) => {
+    if (document.body.classList.contains('f1s-home-active') || document.body.classList.contains('f1s-guide-active') || document.body.classList.contains('f1s-garage-active') || document.body.classList.contains('f1s-race-menu-active')) return
     sm.update(dt)
     track.updateAtmosphere(dt)
     bundle.updateShadowFollow(physics.state.pos)
@@ -2057,13 +2145,13 @@ function bootstrap(): void {
   })
   loop.start()
 
-  void sm.transition(GameState.MENU)
+  void sm.transition(GameState.MENU).then(() => onReady?.())
 }
 
 if (document.readyState === 'loading') {
   installF1tiApi()
-  document.addEventListener('DOMContentLoaded', bootApp, { once: true })
+  document.addEventListener('DOMContentLoaded', bootWithHomeScreen, { once: true })
 } else {
   installF1tiApi()
-  bootApp()
+  bootWithHomeScreen()
 }

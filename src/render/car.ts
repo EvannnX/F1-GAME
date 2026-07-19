@@ -4,7 +4,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
-import carGlbUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
+import { playerCarById, type PlayerCarId } from '../data/playerCars'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
@@ -21,12 +21,14 @@ export interface CarBundle {
   setLivery: (team: TeamId) => void
   emitSpeedTrail: (intensity: number) => void
   emitSparks: (worldPos: THREE.Vector3, count: number) => void
+  setCarModel: (id: PlayerCarId) => Promise<void>
   update: (dt: number, speed01: number, steer?: number) => void
   dispose: () => void
 }
 
 export interface CarOptions {
   visualScale?: number
+  carId?: PlayerCarId
 }
 
 const PARTICLE_MAX = 256
@@ -939,6 +941,15 @@ function fitGltfToTrack(model: THREE.Object3D): void {
   }
 }
 
+function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): WheelRig[] {
+  const strategy = playerCarById(carId).wheelStrategy
+  if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
+
+  // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
+  // static wheels until their own mesh mapping and pivots have been verified.
+  return []
+}
+
 export function createCar(options: CarOptions = {}): CarBundle {
   const group = new THREE.Group()
   group.name = 'car'
@@ -1015,10 +1026,30 @@ export function createCar(options: CarOptions = {}): CarBundle {
   const loader = new GLTFLoader()
   loader.setMeshoptDecoder(MeshoptDecoder)
   loader.setDRACOLoader(getDracoLoader())
-  ;(async () => {
+  let loadVersion = 0
+  let requestedCarId: PlayerCarId | null = null
+  let disposed = false
+
+  const disposeLoadedModel = (model: THREE.Object3D): void => {
+    model.traverse((obj) => {
+      const mesh = obj as THREE.Mesh
+      if (mesh.geometry) mesh.geometry.dispose()
+      const material = mesh.material
+      if (material) {
+        if (Array.isArray(material)) material.forEach((item) => item.dispose())
+        else material.dispose()
+      }
+    })
+  }
+
+  const setCarModel = async (carId: PlayerCarId): Promise<void> => {
+    if (requestedCarId === carId || disposed) return
+    requestedCarId = carId
+    const version = ++loadVersion
+    const definition = playerCarById(carId)
     try {
-      log(`fetching:\n${carGlbUrl.slice(0, 120)}${carGlbUrl.length > 120 ? '…' : ''}`)
-      const res = await fetch(carGlbUrl)
+      log(`fetching ${carId} [${definition.wheelStrategy}]:\n${definition.url.slice(0, 120)}${definition.url.length > 120 ? '…' : ''}`)
+      const res = await fetch(definition.url)
       if (!res.ok) throw new Error(`fetch ${res.status}`)
       const buf = await res.arrayBuffer()
       log(`fetched ${buf.byteLength} bytes, parsing…`)
@@ -1033,6 +1064,10 @@ export function createCar(options: CarOptions = {}): CarBundle {
       })
 
       const model = gltf.scene
+      if (disposed || version !== loadVersion) {
+        disposeLoadedModel(model)
+        return
+      }
       let meshCount = 0
       model.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) meshCount++
@@ -1048,30 +1083,42 @@ export function createCar(options: CarOptions = {}): CarBundle {
           prepareMeshForInteriorCamera(mesh)
         }
       })
-      // Swap placeholder out.
-      group.remove(placeholder.group)
-      disposePlaceholder(placeholder)
-      placeholderActive = false
+      const nextWheelRigs = createPlayerWheelRigs(carId, model)
+      if (disposed || version !== loadVersion) {
+        disposeLoadedModel(model)
+        return
+      }
+
+      if (placeholderActive) {
+        group.remove(placeholder.group)
+        disposePlaceholder(placeholder)
+        placeholderActive = false
+      } else {
+        group.remove(activeModel)
+        disposeLoadedModel(activeModel)
+      }
       group.add(model)
       activeModel = model
       activeWheels = []
-      wheelRigs = createRedBullWheelRigs(model)
+      wheelRigs = nextWheelRigs
       steerOnlyRigs = []
+      smoothSteer = 0
       const bbox = new THREE.Box3().setFromObject(model)
       const sz = bbox.getSize(new THREE.Vector3())
       log(
-        `LOADED ✓\nmeshes=${meshCount} wheel-rigs=${wheelRigs.length}\nsize ${sz.x.toFixed(1)}×${sz.y.toFixed(1)}×${sz.z.toFixed(1)}m`,
+        `LOADED ${carId} ✓\nstrategy=${definition.wheelStrategy} meshes=${meshCount} wheel-rigs=${wheelRigs.length}\nsize ${sz.x.toFixed(1)}×${sz.y.toFixed(1)}×${sz.z.toFixed(1)}m`,
         '#0f0',
       )
-      // (debug panel removed)
     } catch (e) {
+      if (version === loadVersion) requestedCarId = null
       const msg = e instanceof Error ? e.message : String(e)
       const stack = e instanceof Error && e.stack ? `\n${e.stack.split('\n').slice(0, 3).join('\n')}` : ''
-      console.warn('[F1S] GLB load failed:', e)
+      console.warn(`[F1S] ${carId} GLB load failed:`, e)
       log(`FAILED ✗\n${msg}${stack}`, '#f55')
-      // keep panel visible; user reports back
     }
-  })()
+  }
+
+  void setCarModel(options.carId ?? 'redbull')
 
   const setLivery = (team: TeamId): void => {
     const c = TEAM_COLORS[team]
@@ -1174,21 +1221,15 @@ export function createCar(options: CarOptions = {}): CarBundle {
   }
 
   const dispose = (): void => {
+    disposed = true
+    loadVersion++
     if (placeholderActive) disposePlaceholder(placeholder)
-    activeModel.traverse((obj) => {
-      const mesh = obj as THREE.Mesh
-      if (mesh.geometry) mesh.geometry.dispose()
-      const mat = mesh.material
-      if (mat) {
-        if (Array.isArray(mat)) mat.forEach((m) => m.dispose())
-        else mat.dispose()
-      }
-    })
+    else disposeLoadedModel(activeModel)
     trailGeo.dispose()
     trailMat.dispose()
     sparkGeo.dispose()
     sparkMat.dispose()
   }
 
-  return { group, particles, setLivery, emitSpeedTrail, emitSparks, update, dispose }
+  return { group, particles, setLivery, emitSpeedTrail, emitSparks, setCarModel, update, dispose }
 }

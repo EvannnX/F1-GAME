@@ -1,5 +1,5 @@
 {
-  "name": "f1-sense",
+  "name": "f1ti-racing",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build && node -e \"const fs=require('fs');const p='dist/index.html';let s=fs.readFileSync(p,'utf8');s=s.replace(/ crossorigin(=\\\"[^\\\"]*\\\")?/g,'');fs.writeFileSync(p,s);console.log('stripped crossorigin')\"",
     "preview": "vite preview",
+    "verify:redbull-wheels": "node scripts/verify-redbull-wheel-profile.mjs",
     "size": "ls -lh dist/index.html 2>/dev/null",
     "zip": "cd dist && zip -r ../submission.zip ."
   },

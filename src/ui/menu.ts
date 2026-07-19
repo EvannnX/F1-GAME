@@ -59,26 +59,259 @@ const isCoarsePointer = (): boolean => {
   }
 }
 
+const MENU_STYLE_ID = 'f1s-race-menu-style'
+
+function installMenuStyles(): void {
+  if (document.getElementById(MENU_STYLE_ID)) return
+  const style = document.createElement('style')
+  style.id = MENU_STYLE_ID
+  style.textContent = `
+    .f1s-race-menu {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      overflow: hidden;
+      background: #d7d9de;
+      color: #15171c;
+      font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+      isolation: isolate;
+    }
+    .f1s-race-menu::before {
+      content: '';
+      position: absolute;
+      right: -8vw;
+      bottom: -23vh;
+      width: 68vw;
+      height: 48vh;
+      border: 42px solid rgba(255, 255, 255, .42);
+      border-radius: 50%;
+      transform: rotate(-8deg);
+      pointer-events: none;
+    }
+    .f1s-race-menu__topline {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 7px;
+      background: #d41222;
+      box-shadow: 0 2px 16px rgba(0, 0, 0, .28);
+    }
+    .f1s-race-menu__heading {
+      position: absolute;
+      top: 24px;
+      left: clamp(20px, 5vw, 74px);
+      display: flex;
+      min-width: min(370px, 54vw);
+      height: 58px;
+      align-items: center;
+      padding: 0 46px 0 64px;
+      background: rgba(250, 250, 251, .98);
+      clip-path: polygon(0 0, 100% 0, calc(100% - 32px) 100%, 0 100%);
+      box-shadow: 0 8px 22px rgba(27, 30, 37, .16);
+      font-size: 22px;
+      font-weight: 950;
+      letter-spacing: 0;
+    }
+    .f1s-race-menu__heading::before {
+      content: '';
+      position: absolute;
+      left: 24px;
+      width: 20px;
+      height: 20px;
+      border: 6px solid #d41222;
+      transform: rotate(45deg);
+    }
+    .f1s-race-menu__brand {
+      position: absolute;
+      top: 30px;
+      right: clamp(22px, 5vw, 76px);
+      color: #b5b8c0;
+      font-size: clamp(24px, 4vw, 48px);
+      font-style: italic;
+      font-weight: 950;
+      letter-spacing: 0;
+    }
+    .f1s-race-menu__brand span { color: #d41222; }
+    .f1s-race-menu__settings {
+      position: absolute;
+      z-index: 1;
+      top: 118px;
+      bottom: 116px;
+      left: 50%;
+      display: grid;
+      width: min(1120px, calc(100vw - 72px));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px 24px;
+      align-content: center;
+      transform: translateX(-50%);
+    }
+    .f1s-race-menu__setting {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .f1s-race-menu__caption {
+      color: #585c65;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+    .f1s-race-menu__options {
+      display: grid;
+      grid-template-columns: repeat(var(--option-count), minmax(0, 1fr));
+      gap: 9px;
+    }
+    .f1s-race-menu__option {
+      display: flex;
+      min-width: 0;
+      min-height: 66px;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 8px 13px 8px 16px;
+      border: 1px solid #bec1c8;
+      border-left: 6px solid transparent;
+      border-radius: 4px;
+      background: rgba(250, 250, 251, .96);
+      color: #20232a;
+      cursor: pointer;
+      box-shadow: 0 6px 16px rgba(32, 36, 44, .09);
+      transition: border-color .14s ease, background .14s ease, color .14s ease, transform .14s ease;
+    }
+    .f1s-race-menu__option:hover,
+    .f1s-race-menu__option:focus-visible {
+      border-color: #d41222;
+      outline: none;
+      transform: translateY(-1px);
+    }
+    .f1s-race-menu__option.is-active {
+      border-color: #b80f1d;
+      border-left-color: #fff;
+      background: #b80f1d;
+      color: #fff;
+    }
+    .f1s-race-menu__label {
+      overflow: hidden;
+      width: 100%;
+      font-size: 16px;
+      font-weight: 950;
+      letter-spacing: 0;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .f1s-race-menu__tag {
+      overflow: hidden;
+      width: 100%;
+      margin-top: 3px;
+      opacity: .66;
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: 0;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .f1s-race-menu__footer {
+      position: absolute;
+      z-index: 2;
+      right: clamp(20px, 5vw, 76px);
+      bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
+      left: clamp(20px, 5vw, 76px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+    }
+    .f1s-race-menu__best {
+      color: #60646d;
+      font-size: 13px;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+    .f1s-race-menu__start {
+      position: relative;
+      min-width: 310px;
+      min-height: 72px;
+      padding: 0 68px 0 48px;
+      border: 2px solid #fff;
+      border-radius: 6px;
+      background: #b80f1d;
+      color: #fff;
+      font: 950 21px/1 Inter, "Helvetica Neue", Arial, sans-serif;
+      letter-spacing: 0;
+      cursor: pointer;
+      box-shadow: 0 12px 26px rgba(42, 10, 14, .3);
+      transition: background .16s ease, transform .16s ease;
+    }
+    .f1s-race-menu__start::after {
+      content: '›';
+      position: absolute;
+      top: 50%;
+      right: 28px;
+      font: 500 38px/1 Arial, sans-serif;
+      transform: translateY(-55%);
+    }
+    .f1s-race-menu__start:hover,
+    .f1s-race-menu__start:focus-visible {
+      background: #e01a2b;
+      outline: none;
+      transform: translateY(-2px);
+    }
+    @media (max-height: 620px) {
+      .f1s-race-menu__heading {
+        top: 14px;
+        height: 46px;
+        min-width: 290px;
+        padding-left: 54px;
+        font-size: 17px;
+      }
+      .f1s-race-menu__heading::before { left: 20px; width: 15px; height: 15px; border-width: 4px; }
+      .f1s-race-menu__brand { top: 20px; font-size: 28px; }
+      .f1s-race-menu__settings {
+        top: 72px;
+        bottom: 78px;
+        width: calc(100vw - 36px);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px 10px;
+      }
+      .f1s-race-menu__setting { gap: 4px; }
+      .f1s-race-menu__caption { font-size: 10px; }
+      .f1s-race-menu__options { gap: 5px; }
+      .f1s-race-menu__option { min-height: 48px; padding: 5px 7px 5px 9px; border-left-width: 4px; }
+      .f1s-race-menu__label { font-size: 13px; }
+      .f1s-race-menu__tag { margin-top: 1px; font-size: 8px; }
+      .f1s-race-menu__footer { right: 18px; bottom: 12px; left: 18px; }
+      .f1s-race-menu__start { min-width: 240px; min-height: 56px; font-size: 18px; }
+      .f1s-race-menu__best { font-size: 11px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .f1s-race-menu__option,
+      .f1s-race-menu__start { transition: none; }
+    }
+  `
+  document.head.appendChild(style)
+}
+
 export function createMenu(): MenuController {
   let host: HTMLDivElement | null = null
 
   const show = (onStart: (cfg: MenuStartConfig) => void): void => {
     hide()
+    installMenuStyles()
     host = document.createElement('div')
-    host.style.cssText = `
-      position: fixed; inset: 0; z-index: 100;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: linear-gradient(180deg, rgba(10,14,26,0.85), rgba(10,14,26,0.95));
-      color: #fff; gap: 16px; padding: 24px;
-      overflow-y: auto;
-    `
-    const title = document.createElement('div')
-    title.textContent = 'F1 体感飙速'
-    title.style.cssText = 'font-size: 44px; font-weight: 900; letter-spacing: 4px;'
+    host.className = 'f1s-race-menu'
+    host.setAttribute('aria-label', '比赛设置')
 
-    const sub = document.createElement('div')
-    sub.textContent = 'FEEL THE F1'
-    sub.style.cssText = 'font-size: 18px; color: #ff1801; letter-spacing: 6px; font-weight: 700;'
+    const topLine = document.createElement('div')
+    topLine.className = 'f1s-race-menu__topline'
+    const title = document.createElement('div')
+    title.className = 'f1s-race-menu__heading'
+    title.textContent = '比赛设置'
+
+    const brand = document.createElement('div')
+    brand.className = 'f1s-race-menu__brand'
+    brand.innerHTML = 'F1<span>TI</span>'
 
     const makeRow = (
       caption: string,
@@ -88,38 +321,33 @@ export function createMenu(): MenuController {
       onChange: (key: string) => void,
     ): HTMLDivElement => {
       const wrap = document.createElement('div')
-      wrap.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 8px;'
+      wrap.className = 'f1s-race-menu__setting'
       const cap = document.createElement('div')
       cap.textContent = caption
-      cap.style.cssText = 'font-size: 13px; color: #aaa; letter-spacing: 4px;'
+      cap.className = 'f1s-race-menu__caption'
       const row = document.createElement('div')
-      row.style.cssText = 'display: flex; gap: 10px;'
+      row.className = 'f1s-race-menu__options'
+      row.style.setProperty('--option-count', String(keys.length))
       let selected = initial
       const buttons: Record<string, HTMLButtonElement> = {}
       const paint = (): void => {
         for (const k of keys) {
           const b = buttons[k]
           const active = k === selected
-          b.style.background = active ? '#ff1801' : 'transparent'
-          b.style.color = active ? '#fff' : '#ddd'
-          b.style.borderColor = active ? '#ff1801' : '#666'
+          b.classList.toggle('is-active', active)
+          b.setAttribute('aria-pressed', String(active))
         }
       }
       for (const k of keys) {
         const b = document.createElement('button')
-        b.style.cssText = `
-          min-width: 100px; min-height: 52px;
-          background: transparent; color: #ddd; border: 2px solid #666; border-radius: 8px;
-          font-size: 15px; font-weight: 700; letter-spacing: 2px; cursor: pointer;
-          display: flex; flex-direction: column; align-items: center; justify-content: center;
-          padding: 4px 10px;
-        `
+        b.type = 'button'
+        b.className = 'f1s-race-menu__option'
         const lab = document.createElement('div')
         lab.textContent = labels[k].label
-        lab.style.cssText = 'font-size: 16px; font-weight: 800;'
+        lab.className = 'f1s-race-menu__label'
         const tag = document.createElement('div')
         tag.textContent = labels[k].tag
-        tag.style.cssText = 'font-size: 10px; opacity: 0.8; margin-top: 2px;'
+        tag.className = 'f1s-race-menu__tag'
         b.appendChild(lab)
         b.appendChild(tag)
         b.addEventListener('click', () => {
@@ -187,14 +415,9 @@ export function createMenu(): MenuController {
     )
 
     const btn = document.createElement('button')
-    btn.textContent = '开 始 比 赛'
-    btn.style.cssText = `
-      min-width: 220px; min-height: 70px; margin-top: 8px;
-      background: #fff; color: #ff1801;
-      border: none; border-radius: 8px;
-      font-size: 22px; font-weight: 900; letter-spacing: 4px;
-      cursor: pointer;
-    `
+    btn.type = 'button'
+    btn.className = 'f1s-race-menu__start'
+    btn.textContent = '开始比赛'
     btn.addEventListener('click', () => {
       // CRITICAL for iOS: DeviceOrientationEvent.requestPermission() MUST
       // be invoked synchronously inside the user-gesture click handler.
@@ -231,31 +454,28 @@ export function createMenu(): MenuController {
       })
     }, { once: true })
 
-    const note = document.createElement('div')
-    note.style.cssText = 'font-size: 12px; color: #888; max-width: 360px; text-align: center; line-height: 1.6;'
-    note.textContent = '体感:左右倾 = 转向 · 前后倾 = 油门/刹车 · 1 圈定胜负'
-
     const best = storage.getBestLap()
     const bestEl = document.createElement('div')
-    bestEl.style.cssText = 'font-size: 13px; color: #888; min-height: 18px;'
+    bestEl.className = 'f1s-race-menu__best'
     bestEl.textContent = best ? `个人最佳: ${formatLapTime(best)}` : '首次挑战'
 
-    host.appendChild(title)
-    host.appendChild(sub)
-    host.appendChild(diffRow)
-    host.appendChild(inputRow)
-    host.appendChild(commentaryRow)
-    host.appendChild(qualityRow)
-    host.appendChild(cameraRow)
-    host.appendChild(btn)
-    host.appendChild(note)
-    host.appendChild(bestEl)
+    const settings = document.createElement('div')
+    settings.className = 'f1s-race-menu__settings'
+    settings.append(diffRow, inputRow, commentaryRow, qualityRow, cameraRow)
+
+    const footer = document.createElement('div')
+    footer.className = 'f1s-race-menu__footer'
+    footer.append(bestEl, btn)
+
+    host.append(topLine, title, brand, settings, footer)
     document.body.appendChild(host)
+    document.body.classList.add('f1s-race-menu-active')
   }
 
   const hide = (): void => {
     if (host && host.parentElement) host.parentElement.removeChild(host)
     host = null
+    document.body.classList.remove('f1s-race-menu-active')
   }
 
   return { show, hide }

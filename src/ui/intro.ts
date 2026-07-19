@@ -71,10 +71,10 @@ export function createIntro(videoUrl: string): IntroController {
         font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
       `
       const splashTitle = document.createElement('div')
-      splashTitle.textContent = 'F1 体感飙速'
+      splashTitle.textContent = 'F1TI'
       splashTitle.style.cssText = 'font-size: 40px; font-weight: 900; letter-spacing: 6px;'
       const splashSub = document.createElement('div')
-      splashSub.textContent = 'FEEL THE F1'
+      splashSub.textContent = '测测你的 F1TI'
       splashSub.style.cssText = 'font-size: 16px; color: #ff1801; letter-spacing: 8px; font-weight: 700;'
       const playBtn = document.createElement('button')
       playBtn.textContent = '▶ 点 击 开 始'

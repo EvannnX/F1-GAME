@@ -6,7 +6,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import type { WeatherPreset } from './weather'
-import skyboxHdrUrl from '../assets/background/Cloudymorning4k.hdr?url'
+import skyboxHdrUrl from '../assets/background/Cloudymorning2k.hdr?url'
 
 export interface SceneBundle {
   scene: THREE.Scene
@@ -28,11 +28,23 @@ export interface SceneOptions {
   performanceMode?: boolean
 }
 
-const pixelRatioCap = (performanceMode: boolean): number =>
-  performanceMode ? 1.5 : 2
+const isMobileGpu = (): boolean => {
+  const coarsePointer = window.matchMedia?.('(pointer: coarse)').matches ?? false
+  const smallScreen = Math.min(window.screen.width, window.screen.height) <= 820
+  const limitedCpu = typeof navigator.hardwareConcurrency === 'number' && navigator.hardwareConcurrency <= 4
+  return coarsePointer || smallScreen || limitedCpu
+}
 
-const shadowMapSize = (performanceMode: boolean): number =>
-  performanceMode ? 1024 : 2048
+const pixelRatioCap = (performanceMode: boolean, mobileGpu: boolean): number => {
+  if (mobileGpu) return performanceMode ? 1 : 1.25
+  return performanceMode ? 1.25 : 1.5
+}
+
+const shadowMapSize = (performanceMode: boolean, mobileGpu: boolean): number => {
+  if (performanceMode && mobileGpu) return 512
+  if (performanceMode || mobileGpu) return 1024
+  return 2048
+}
 
 const SUN_OFFSET = new THREE.Vector3(-95, 78, -135)
 const RIM_OFFSET = new THREE.Vector3(130, 58, 95)
@@ -111,6 +123,7 @@ function buildSkyEquirect(): THREE.CanvasTexture {
 
 export function createScene(container: HTMLElement, options: SceneOptions = {}): SceneBundle {
   let performanceMode = options.performanceMode === true
+  const mobileGpu = isMobileGpu()
   const scene = new THREE.Scene()
   // Bright daytime sky.
   scene.background = new THREE.Color('#87ceeb')
@@ -133,8 +146,10 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     // overlapping coplanar road segments (the T13 "shimmer").
     logarithmicDepthBuffer: !performanceMode,
   })
+  let resolutionScale = 1
   const applyPixelRatio = (): void => {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap(performanceMode)))
+    const baseRatio = Math.min(window.devicePixelRatio, pixelRatioCap(performanceMode, mobileGpu))
+    renderer.setPixelRatio(baseRatio * resolutionScale)
   }
   applyPixelRatio()
   renderer.setSize(container.clientWidth, container.clientHeight)
@@ -146,20 +161,30 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   renderer.shadowMap.type = performanceMode ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap
   container.appendChild(renderer.domElement)
 
-  const composer = new EffectComposer(renderer)
-  const renderPass = new RenderPass(scene, camera)
-  const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(container.clientWidth, container.clientHeight),
-    performanceMode ? 0.12 : 0.22,
-    0.24,
-    0.88,
-  )
-  const gradePass = new ShaderPass(CinematicGradeShader)
-  const outputPass = new OutputPass()
-  composer.addPass(renderPass)
-  composer.addPass(bloomPass)
-  composer.addPass(gradePass)
-  composer.addPass(outputPass)
+  let composer: EffectComposer | null = null
+  let bloomPass: UnrealBloomPass | null = null
+  const shouldUsePostProcessing = (): boolean => !performanceMode && !mobileGpu
+  const ensurePostProcessing = (): void => {
+    if (composer || !shouldUsePostProcessing()) return
+    composer = new EffectComposer(renderer)
+    const renderPass = new RenderPass(scene, camera)
+    bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(container.clientWidth, container.clientHeight),
+      0.22,
+      0.24,
+      0.88,
+    )
+    composer.addPass(renderPass)
+    composer.addPass(bloomPass)
+    composer.addPass(new ShaderPass(CinematicGradeShader))
+    composer.addPass(new OutputPass())
+  }
+  const disposePostProcessing = (): void => {
+    composer?.dispose()
+    composer = null
+    bloomPass = null
+  }
+  ensurePostProcessing()
 
   // Direct sunlight — strong & warm. High contrast vs. fill light = crisp 3D.
   const sun = new THREE.DirectionalLight(0xffdfb0, 4.8)
@@ -169,7 +194,7 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     renderer.shadowMap.enabled = true
     renderer.shadowMap.autoUpdate = false
     renderer.shadowMap.type = performanceMode ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap
-    const shadowSize = shadowMapSize(performanceMode)
+    const shadowSize = shadowMapSize(performanceMode, mobileGpu)
     sun.shadow.mapSize.set(shadowSize, shadowSize)
     if (sun.shadow.map) {
       sun.shadow.map.dispose()
@@ -258,13 +283,14 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     rim.color.set(preset.nightMode ? '#7aa7ff' : '#9fc7ff')
     rim.intensity = preset.nightMode ? 1.55 : 1.15
     renderer.toneMappingExposure = Math.max(preset.exposure, preset.nightMode ? 1.08 : 1.22)
-    bloomPass.strength = preset.nightMode ? 0.26 : (performanceMode ? 0.12 : 0.22)
+    if (bloomPass) bloomPass.strength = preset.nightMode ? 0.26 : 0.22
   }
 
   const setPerformanceMode = (enabled: boolean): void => {
     performanceMode = enabled
-    bloomPass.strength = performanceMode ? 0.12 : 0.22
-    bloomPass.radius = performanceMode ? 0.16 : 0.24
+    resolutionScale = 1
+    if (shouldUsePostProcessing()) ensurePostProcessing()
+    else disposePostProcessing()
     applyShadowQuality()
     applyPixelRatio()
     resize()
@@ -272,7 +298,8 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   const lastShadowFocus = new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY)
   const updateShadowFollow = (worldPos: THREE.Vector3): void => {
-    if (lastShadowFocus.distanceToSquared(worldPos) < 16) return
+    const updateDistance = performanceMode ? (mobileGpu ? 14 : 10) : 6
+    if (lastShadowFocus.distanceToSquared(worldPos) < updateDistance * updateDistance) return
     lastShadowFocus.copy(worldPos)
     // Re-centre the shadow camera frustum on the player so its 100×100 m
     // window of high-res shadow always contains the car + nearby road.
@@ -291,19 +318,54 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     camera.aspect = w / h
     camera.updateProjectionMatrix()
     renderer.setSize(w, h)
-    composer.setSize(w, h)
-    bloomPass.resolution.set(w, h)
+    if (composer) {
+      composer.setPixelRatio(renderer.getPixelRatio())
+      composer.setSize(w, h)
+    }
     renderer.shadowMap.needsUpdate = true
   }
 
+  let fpsSampleStartedAt = performance.now()
+  let lastRenderedAt = fpsSampleStartedAt
+  let fpsSampleFrames = 0
+  let lastResolutionChangeAt = fpsSampleStartedAt
+  const updateAdaptiveResolution = (now: number): void => {
+    const frameGap = now - lastRenderedAt
+    lastRenderedAt = now
+    if (frameGap > 250) {
+      fpsSampleStartedAt = now
+      fpsSampleFrames = 0
+      return
+    }
+    fpsSampleFrames++
+    const sampleDuration = now - fpsSampleStartedAt
+    if (sampleDuration < 1800) return
+    const fps = fpsSampleFrames * 1000 / sampleDuration
+    let nextScale = resolutionScale
+    if (fps < 43 && resolutionScale > 0.72) {
+      nextScale = Math.max(0.72, resolutionScale - 0.12)
+    } else if (fps > 57 && resolutionScale < 1 && now - lastResolutionChangeAt > 6000) {
+      nextScale = Math.min(1, resolutionScale + 0.06)
+    }
+    fpsSampleStartedAt = now
+    fpsSampleFrames = 0
+    if (nextScale === resolutionScale) return
+    resolutionScale = nextScale
+    lastResolutionChangeAt = now
+    applyPixelRatio()
+    resize()
+  }
+
   const render = (): void => {
-    composer.render()
+    updateAdaptiveResolution(performance.now())
+    if (composer) composer.render()
+    else renderer.render(scene, camera)
   }
 
   const dispose = (): void => {
     environmentRT?.dispose()
     hdrBackgroundTexture?.dispose()
-    composer.dispose()
+    disposePostProcessing()
     renderer.dispose()
     if (renderer.domElement.parentElement === container) {
       container.removeChild(renderer.domElement)
