@@ -87,6 +87,103 @@ const CinematicGradeShader = {
   `,
 }
 
+interface RainSystem {
+  points: THREE.Points
+  setWeather: (preset: WeatherPreset) => void
+  setPerformanceMode: (enabled: boolean) => void
+  update: (timeSeconds: number, pixelRatio: number) => void
+  dispose: () => void
+}
+
+function createRainSystem(mobileGpu: boolean): RainSystem {
+  const maxDrops = 1400
+  const positions = new Float32Array(maxDrops * 3)
+  const speeds = new Float32Array(maxDrops)
+  for (let i = 0; i < maxDrops; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 82
+    positions[i * 3 + 1] = Math.random() * 34
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 110
+    speeds[i] = 20 + Math.random() * 18
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geometry.setAttribute('dropSpeed', new THREE.BufferAttribute(speeds, 1))
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0 },
+      uHeight: { value: 34 },
+      uIntensity: { value: 1 },
+      uPixelRatio: { value: 1 },
+    },
+    vertexShader: `
+      attribute float dropSpeed;
+      uniform float uTime;
+      uniform float uHeight;
+      uniform float uPixelRatio;
+      varying float vBrightness;
+
+      void main() {
+        float y = mod(position.y - uTime * dropSpeed, uHeight) - uHeight * 0.42;
+        vec3 worldPosition = vec3(
+          cameraPosition.x + position.x,
+          cameraPosition.y + y,
+          cameraPosition.z + position.z
+        );
+        vec4 viewPosition = viewMatrix * vec4(worldPosition, 1.0);
+        float depth = max(5.0, -viewPosition.z);
+        gl_Position = projectionMatrix * viewPosition;
+        gl_PointSize = clamp((7.5 + dropSpeed * 0.08) * uPixelRatio * 16.0 / depth, 2.0, 9.0);
+        vBrightness = clamp(1.15 - depth / 120.0, 0.28, 0.92);
+      }
+    `,
+    fragmentShader: `
+      uniform float uIntensity;
+      varying float vBrightness;
+
+      void main() {
+        vec2 drop = gl_PointCoord - vec2(0.5);
+        float narrow = 1.0 - smoothstep(0.055, 0.18, abs(drop.x));
+        float tapered = 1.0 - smoothstep(0.18, 0.52, abs(drop.y));
+        float alpha = narrow * tapered * vBrightness * 0.72 * uIntensity;
+        if (alpha < 0.02) discard;
+        gl_FragColor = vec4(0.78, 0.88, 0.94, alpha);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
+  })
+  const points = new THREE.Points(geometry, material)
+  points.name = 'camera-follow-rain'
+  points.visible = false
+  points.frustumCulled = false
+  points.renderOrder = 50
+
+  const setPerformanceMode = (enabled: boolean): void => {
+    geometry.setDrawRange(0, enabled || mobileGpu ? 520 : maxDrops)
+  }
+  setPerformanceMode(false)
+
+  return {
+    points,
+    setWeather: (preset) => {
+      points.visible = preset.precipitation === 'rain'
+      material.uniforms.uIntensity.value = preset.rainIntensity ?? 0
+    },
+    setPerformanceMode,
+    update: (timeSeconds, pixelRatio) => {
+      if (!points.visible) return
+      material.uniforms.uTime.value = timeSeconds
+      material.uniforms.uPixelRatio.value = pixelRatio
+    },
+    dispose: () => {
+      geometry.dispose()
+      material.dispose()
+    },
+  }
+}
+
 /** Procedurally builds a sky/ground equirect texture (256×128) we can run
  *  through PMREMGenerator. Cheap, ~3 ms at boot, no asset bytes. */
 function buildSkyEquirect(): THREE.CanvasTexture {
@@ -227,11 +324,15 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   const ambient = new THREE.AmbientLight(0xffffff, 0.07)
   scene.add(ambient)
+  const rain = createRainSystem(mobileGpu)
+  rain.setPerformanceMode(performanceMode)
+  scene.add(rain.points)
   renderer.toneMappingExposure = 1.28
 
   // --- Procedural sky env map: gives PBR materials proper reflections.
   let environmentRT: THREE.WebGLRenderTarget | null = null
   let hdrBackgroundTexture: THREE.Texture | null = null
+  let currentWeather: WeatherPreset | null = null
   const pmrem = new THREE.PMREMGenerator(renderer)
   pmrem.compileEquirectangularShader()
   const skyTex = buildSkyEquirect()
@@ -252,8 +353,13 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
         hdrBackgroundTexture?.dispose()
         environmentRT = hdrRT
         hdrBackgroundTexture = texture
-        scene.background = texture
+        scene.background = currentWeather?.precipitation === 'rain'
+          ? new THREE.Color(currentWeather.sky)
+          : texture
         scene.environment = hdrRT.texture
+        const rainy = currentWeather?.precipitation === 'rain'
+        scene.backgroundIntensity = rainy ? 0.58 : 1
+        scene.environmentIntensity = rainy ? 0.68 : 1
         hdrPmrem.dispose()
       },
       undefined,
@@ -265,7 +371,13 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   loadHdrSkybox()
 
   const applyWeather = (preset: WeatherPreset): void => {
-    if (scene.background instanceof THREE.Color) {
+    currentWeather = preset
+    const rainy = preset.precipitation === 'rain'
+    if (rainy) {
+      scene.background = new THREE.Color(preset.sky)
+    } else if (hdrBackgroundTexture) {
+      scene.background = hdrBackgroundTexture
+    } else if (scene.background instanceof THREE.Color) {
       scene.background.set(preset.sky)
     }
     if (scene.fog instanceof THREE.Fog) {
@@ -275,15 +387,20 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     } else {
       scene.fog = new THREE.Fog(preset.fogColor, preset.fogNear, preset.fogFar)
     }
-    sun.color.set(preset.nightMode ? '#b6c8ff' : '#ffdfb0')
-    sun.intensity = preset.nightMode ? 2.25 : 4.8
+    sun.color.set(rainy ? preset.sunColor : preset.nightMode ? '#b6c8ff' : '#ffdfb0')
+    sun.intensity = rainy ? preset.sunIntensity : preset.nightMode ? 2.25 : 4.8
     hemi.color.set(preset.hemiSky)
     hemi.groundColor.set(preset.hemiGround)
-    hemi.intensity = Math.max(preset.hemiIntensity, preset.nightMode ? 0.65 : 0.95)
-    rim.color.set(preset.nightMode ? '#7aa7ff' : '#9fc7ff')
-    rim.intensity = preset.nightMode ? 1.55 : 1.15
-    renderer.toneMappingExposure = Math.max(preset.exposure, preset.nightMode ? 1.08 : 1.22)
-    if (bloomPass) bloomPass.strength = preset.nightMode ? 0.26 : 0.22
+    hemi.intensity = rainy ? preset.hemiIntensity : Math.max(preset.hemiIntensity, preset.nightMode ? 0.65 : 0.95)
+    rim.color.set(rainy ? '#9eb2bd' : preset.nightMode ? '#7aa7ff' : '#9fc7ff')
+    rim.intensity = rainy ? 0.62 : preset.nightMode ? 1.55 : 1.15
+    renderer.toneMappingExposure = rainy
+      ? preset.exposure
+      : Math.max(preset.exposure, preset.nightMode ? 1.08 : 1.22)
+    scene.backgroundIntensity = rainy ? 0.58 : 1
+    scene.environmentIntensity = rainy ? 0.68 : 1
+    rain.setWeather(preset)
+    if (bloomPass) bloomPass.strength = rainy ? 0.12 : preset.nightMode ? 0.26 : 0.22
   }
 
   const setPerformanceMode = (enabled: boolean): void => {
@@ -291,6 +408,7 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     resolutionScale = 1
     if (shouldUsePostProcessing()) ensurePostProcessing()
     else disposePostProcessing()
+    rain.setPerformanceMode(performanceMode)
     applyShadowQuality()
     applyPixelRatio()
     resize()
@@ -358,6 +476,7 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   const render = (): void => {
     updateAdaptiveResolution(performance.now())
+    rain.update(performance.now() * 0.001, renderer.getPixelRatio())
     if (composer) composer.render()
     else renderer.render(scene, camera)
   }
@@ -365,6 +484,7 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   const dispose = (): void => {
     environmentRT?.dispose()
     hdrBackgroundTexture?.dispose()
+    rain.dispose()
     disposePostProcessing()
     renderer.dispose()
     if (renderer.domElement.parentElement === container) {

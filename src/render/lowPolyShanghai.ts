@@ -4,7 +4,48 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 
-const lowPolyShanghaiUrl = 'assets/上海赛车场压缩.glb'
+const SHANGHAI_2018_ROOT = 'src/shanghai-international-circuit-2018-layout'
+const lowPolyShanghaiUrl = `${SHANGHAI_2018_ROOT}/source/shanghai_meshopt.glb`
+const SHANGHAI_2018_TEXTURE_OVERRIDES: Record<string, string> = {
+  Prato: `${SHANGHAI_2018_ROOT}/textures/Meshesgrassxgrass0171_diff_18.png`,
+  tarmac: `${SHANGHAI_2018_ROOT}/textures/asphalt-new.png`,
+  '14': `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
+  '15': `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
+  Pit_lane: `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
+}
+const SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS = new Set([
+  'lg_pit_exit_light_b_01', 'Recinto', 'sha_barrier_grandstandboundary_a',
+  'sha_grandstand_group_d', 'core_start_lights_a', 'lg_marshal_light_b_light',
+  'lg_marshal_light_b_screen', 'tree04a', 'tree04b', 'tree06a', 'treeline',
+  'sha_distantbuildings_a', 'standard_1!0', 'sha_grandstand_group_d!0',
+  'sha_gridlines_a', 'sha_grandstand_underbrolly_b_02',
+  'sha_grandstand_underbrolly_b_03', 'aa_4', 'aa_3', 'sha_barrier_pitwall_a!0',
+])
+const SHANGHAI_2018_ALPHA_BLEND_MATERIALS = new Set([
+  'material_sha_building_glasstower_a_01', 'aa_3!0', 'sha_building_commstower_a',
+  'sha_hut_pitlanetower_a', 'sha_pole_ranking_a!0', 'sha_pole_ranking_a',
+  'sha_building_glasstower_a_03', 'aa_1!0',
+])
+const SHANGHAI_2018_ROAD_DECAL_MATERIALS = new Set([
+  '01_-_default', 'skid', 'raceline', 'Line_asf', 'LInea_PITNew',
+  'sha_gridlines_a', '2!0', '18', '33',
+])
+const SHANGHAI_2018_DECAL_DEPTH_ORDER: Record<string, number> = {
+  Line_asf: 1,
+  skid: 2,
+  raceline: 3,
+  '01_-_default': 4,
+  LInea_PITNew: 5,
+  sha_gridlines_a: 6,
+  '2!0': 7,
+  '18': 7,
+  '33': 7,
+}
+const SHANGHAI_2018_DRIVE_SURFACE_MATERIALS = new Set([
+  'tarmac', '14', '15', 'Pit_lane', 'Out', 'Prato', '28', '35', '32',
+  '17', '16', '13', '9!0', '12', 'Pirelli_terra', 'Petronas_out',
+  'Out_rolex', '2!0', '24', '22', '23', '20', '21', 'Kerb_giallo',
+])
 const ROAD_SURFACE_HINTS = ['road', 'tarmac', 'line_white']
 const GROUND_SURFACE_HINTS = [
   ...ROAD_SURFACE_HINTS,
@@ -47,6 +88,11 @@ export interface LowPolyShanghaiBundle {
   getPlacement: () => LowPolyShanghaiPlacement
   setPlacement: (next: Partial<LowPolyShanghaiPlacement>) => void
   ready: Promise<LowPolyShanghaiLoadResult>
+}
+
+export interface Shanghai2018GridSlot {
+  position: THREE.Vector3
+  heading: number
 }
 
 export interface LowPolyShanghaiSurfaceSampler {
@@ -126,13 +172,323 @@ function meshHasGroundSurfaceHint(mesh: THREE.Mesh): boolean {
   const name = `${mesh.name} ${materialNamesForMesh(mesh).join(' ')}`.toLowerCase()
   if (name.includes('fence') || name.includes('barrier') || name.includes('wall')) return false
   if (name.includes('collider') || name.includes('tree') || name.includes('startlight')) return false
-  return GROUND_SURFACE_HINTS.some((hint) => name.includes(hint))
+  return materialNamesForMesh(mesh).some((materialName) => SHANGHAI_2018_DRIVE_SURFACE_MATERIALS.has(materialName)) ||
+    GROUND_SURFACE_HINTS.some((hint) => name.includes(hint))
+}
+
+async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void> {
+  const overrideTargets = new Map<string, THREE.MeshStandardMaterial[]>()
+  const blueRunoffMaterials: THREE.MeshStandardMaterial[] = []
+  const blueRunoffContinuation: Array<{
+    material: THREE.MeshStandardMaterial
+    object: THREE.Mesh
+  }> = []
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    for (const material of materials) {
+      if (material instanceof THREE.MeshStandardMaterial && SHANGHAI_2018_TEXTURE_OVERRIDES[material.name]) {
+        const targets = overrideTargets.get(material.name) ?? []
+        targets.push(material)
+        overrideTargets.set(material.name, targets)
+      }
+      if (material instanceof THREE.MeshStandardMaterial && material.name === 'RUG_blu') {
+        blueRunoffMaterials.push(material)
+      }
+      if (material instanceof THREE.MeshStandardMaterial && material.name === 'Spec_glill') {
+        blueRunoffContinuation.push({ material, object: obj })
+      }
+      if (material.map) {
+        material.map.anisotropy = 8
+        material.map.needsUpdate = true
+      }
+      if (SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS.has(material.name)) {
+        material.alphaTest = 0.32
+        material.alphaToCoverage = true
+        material.transparent = false
+        material.depthWrite = true
+        material.side = THREE.DoubleSide
+      }
+      if (SHANGHAI_2018_ALPHA_BLEND_MATERIALS.has(material.name)) {
+        material.alphaTest = 0.01
+        material.transparent = true
+        material.depthWrite = false
+        material.side = THREE.DoubleSide
+      }
+      if (material.name === 'RUG_blu') {
+        material.transparent = false
+        material.alphaTest = 0
+        material.depthWrite = true
+        material.polygonOffset = true
+        material.polygonOffsetFactor = -1
+        material.polygonOffsetUnits = -1
+        obj.renderOrder = Math.max(obj.renderOrder, 10)
+      }
+      if (SHANGHAI_2018_ROAD_DECAL_MATERIALS.has(material.name)) {
+        const depthOrder = SHANGHAI_2018_DECAL_DEPTH_ORDER[material.name] ?? 1
+        material.transparent = true
+        material.alphaTest = 0.015
+        material.depthWrite = false
+        material.polygonOffset = true
+        material.polygonOffsetFactor = -depthOrder
+        material.polygonOffsetUnits = -depthOrder
+        obj.renderOrder = 100 + depthOrder
+      }
+      material.needsUpdate = true
+    }
+  })
+
+  const blueRunoffMaterial = blueRunoffMaterials[0]
+  if (blueRunoffMaterial) {
+    for (const { material, object } of blueRunoffContinuation) {
+      material.map = blueRunoffMaterial.map
+      material.color.copy(blueRunoffMaterial.color)
+      material.roughness = blueRunoffMaterial.roughness
+      material.metalness = blueRunoffMaterial.metalness
+      material.transparent = false
+      material.alphaTest = 0
+      material.depthWrite = true
+      material.polygonOffset = true
+      material.polygonOffsetFactor = -2
+      material.polygonOffsetUnits = -2
+      material.visible = true
+      material.needsUpdate = true
+      object.renderOrder = Math.max(object.renderOrder, 11)
+    }
+  }
+
+  const textureLoader = new THREE.TextureLoader()
+  await Promise.all(Array.from(overrideTargets, ([materialName, materials]) => new Promise<void>((resolve) => {
+    textureLoader.load(
+      SHANGHAI_2018_TEXTURE_OVERRIDES[materialName],
+      (texture) => {
+        const previous = materials[0]?.map
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.flipY = false
+        texture.generateMipmaps = true
+        texture.magFilter = THREE.LinearFilter
+        texture.minFilter = THREE.LinearMipmapLinearFilter
+        texture.anisotropy = 8
+        if (materialName === 'Prato') {
+          texture.wrapS = THREE.RepeatWrapping
+          texture.wrapT = THREE.RepeatWrapping
+          texture.repeat.set(72, 66)
+        } else if (previous) {
+          texture.wrapS = previous.wrapS
+          texture.wrapT = previous.wrapT
+          texture.offset.copy(previous.offset)
+          texture.repeat.copy(previous.repeat)
+          texture.center.copy(previous.center)
+          texture.rotation = previous.rotation
+          texture.channel = previous.channel
+        }
+        for (const material of materials) {
+          material.map = texture
+          material.color.set(0xffffff)
+          material.needsUpdate = true
+        }
+        texture.needsUpdate = true
+        resolve()
+      },
+      undefined,
+      () => resolve(),
+    )
+  })))
+}
+
+function shanghai2018MaterialGuide(root: THREE.Object3D, materialName: string): {
+  center: THREE.Vector3
+  forward: THREE.Vector3
+  length: number
+} | null {
+  const box = new THREE.Box3()
+  const point = new THREE.Vector3()
+  root.updateMatrixWorld(true)
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const geometry = obj.geometry
+    const position = geometry.getAttribute('position')
+    const index = geometry.getIndex()
+    if (!position) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    const groups = geometry.groups.length > 0
+      ? geometry.groups
+      : [{ start: 0, count: index?.count ?? position.count, materialIndex: 0 }]
+    for (const group of groups) {
+      if (materials[group.materialIndex ?? 0]?.name !== materialName) continue
+      const end = Math.min(group.start + group.count, index?.count ?? position.count)
+      for (let offset = group.start; offset < end; offset++) {
+        const vertex = index ? index.getX(offset) : offset
+        point.fromBufferAttribute(position, vertex).applyMatrix4(obj.matrixWorld)
+        box.expandByPoint(point)
+      }
+    }
+  })
+  if (box.isEmpty()) return null
+  const size = box.getSize(new THREE.Vector3())
+  const forward = size.x >= size.z ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1)
+  return {
+    center: box.getCenter(new THREE.Vector3()),
+    forward,
+    length: Math.max(size.x, size.z),
+  }
+}
+
+interface Shanghai2018AllianzCandidate {
+  center: THREE.Vector3
+  mesh: THREE.Mesh
+  triangleOffsets: number[]
+}
+
+function collectShanghai2018AllianzCandidates(root: THREE.Object3D): {
+  guide: NonNullable<ReturnType<typeof shanghai2018MaterialGuide>>
+  candidates: Shanghai2018AllianzCandidate[]
+} | null {
+  const guide = shanghai2018MaterialGuide(root, 'sha_gridlines_a')
+  if (!guide) return null
+  const candidates: Shanghai2018AllianzCandidate[] = []
+  root.updateMatrixWorld(true)
+
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    const geometry = obj.geometry
+    const position = geometry.getAttribute('position')
+    const index = geometry.getIndex()
+    if (!position || !index) return
+    const allianzRanges = geometry.groups.length > 0
+      ? geometry.groups.filter((group) => materials[group.materialIndex ?? 0]?.name === 'wall8')
+      : materials[0]?.name === 'wall8'
+        ? [{ start: 0, count: index.count, materialIndex: 0 }]
+        : []
+    if (allianzRanges.length === 0) return
+    const triangles: Array<{ offset: number; center: THREE.Vector3 }> = []
+    const point = new THREE.Vector3()
+    for (const range of allianzRanges) {
+      const end = Math.min(range.start + range.count, index.count)
+      for (let offset = range.start; offset + 2 < end; offset += 3) {
+        const center = new THREE.Vector3()
+        for (let corner = 0; corner < 3; corner++) {
+          point.fromBufferAttribute(position, index.getX(offset + corner)).applyMatrix4(obj.matrixWorld)
+          center.add(point)
+        }
+        triangles.push({ offset, center: center.multiplyScalar(1 / 3) })
+      }
+    }
+
+    const pending = new Set(triangles.map((_, triangleIndex) => triangleIndex))
+    while (pending.size > 0) {
+      const first = pending.values().next().value as number
+      const cluster = [first]
+      pending.delete(first)
+      for (let cursor = 0; cursor < cluster.length; cursor++) {
+        const current = triangles[cluster[cursor]].center
+        for (const candidate of Array.from(pending)) {
+          if (current.distanceToSquared(triangles[candidate].center) > 16) continue
+          pending.delete(candidate)
+          cluster.push(candidate)
+        }
+      }
+      const box = new THREE.Box3()
+      for (const triangleIndex of cluster) box.expandByPoint(triangles[triangleIndex].center)
+      candidates.push({
+        center: box.getCenter(new THREE.Vector3()),
+        mesh: obj,
+        triangleOffsets: cluster.map((triangleIndex) => triangles[triangleIndex].offset),
+      })
+    }
+  })
+  return { guide, candidates }
+}
+
+export function listShanghai2018AllianzSlots(root: THREE.Object3D): Shanghai2018GridSlot[] {
+  const collected = collectShanghai2018AllianzCandidates(root)
+  if (!collected) return []
+  const heading = Math.atan2(collected.guide.forward.x, collected.guide.forward.z)
+  return collected.candidates.map(({ center }) => ({ position: center.clone(), heading }))
+}
+
+export function extractShanghai2018GridSlots(
+  root: THREE.Object3D,
+  slotCount = 5,
+  selectedPlayerPosition?: { x: number; z: number } | null,
+): Shanghai2018GridSlot[] {
+  const collected = collectShanghai2018AllianzCandidates(root)
+  if (!collected) return []
+  const { guide, candidates } = collected
+  const target = selectedPlayerPosition
+    ? new THREE.Vector3(selectedPlayerPosition.x, guide.center.y, selectedPlayerPosition.z)
+    : guide.center.clone().addScaledVector(
+        guide.forward,
+        -Math.max(0, guide.length * 0.5 - 10),
+      )
+
+  const selected = candidates
+    .sort((a, b) => a.center.distanceToSquared(target) - b.center.distanceToSquared(target))
+    .slice(0, Math.max(1, slotCount))
+  if (selected.length === 0) return []
+  // The Allianz boxes share a mesh, so visibility alone does not remove them
+  // from the ground and obstacle samplers. Strip every identified box from the
+  // geometry while retaining the nearest slots only as grid coordinates.
+  const removedByMesh = new Map<THREE.Mesh, Set<number>>()
+  for (const candidate of candidates) {
+    const offsets = removedByMesh.get(candidate.mesh) ?? new Set<number>()
+    for (const offset of candidate.triangleOffsets) offsets.add(offset)
+    removedByMesh.set(candidate.mesh, offsets)
+  }
+  for (const [mesh, removedOffsets] of removedByMesh) {
+    const geometry = mesh.geometry
+    const index = geometry.getIndex()
+    if (!index) continue
+    const kept: number[] = []
+    const nextGroups: Array<{ start: number; count: number; materialIndex: number }> = []
+    const sourceGroups = geometry.groups.length > 0
+      ? geometry.groups
+      : [{ start: 0, count: index.count, materialIndex: 0 }]
+    for (const group of sourceGroups) {
+      const groupStart = kept.length
+      const end = Math.min(group.start + group.count, index.count)
+      for (let offset = group.start; offset + 2 < end; offset += 3) {
+        if (removedOffsets.has(offset)) continue
+        kept.push(index.getX(offset), index.getX(offset + 1), index.getX(offset + 2))
+      }
+      const groupCount = kept.length - groupStart
+      if (groupCount > 0) {
+        nextGroups.push({
+          start: groupStart,
+          count: groupCount,
+          materialIndex: group.materialIndex ?? 0,
+        })
+      }
+    }
+    geometry.setIndex(kept)
+    geometry.clearGroups()
+    for (const group of nextGroups) geometry.addGroup(group.start, group.count, group.materialIndex)
+    geometry.computeBoundingBox()
+    geometry.computeBoundingSphere()
+  }
+
+  const heading = Math.atan2(guide.forward.x, guide.forward.z)
+  const playerCandidate = selected[0]
+  const remaining = selected
+    .slice(1)
+    .sort((a, b) => a.center.distanceToSquared(playerCandidate.center) - b.center.distanceToSquared(playerCandidate.center))
+  return [playerCandidate, ...remaining].map(({ center }) => ({ position: center, heading }))
 }
 
 function meshHasObstacleSurfaceHint(mesh: THREE.Mesh): boolean {
   const name = `${mesh.name} ${materialNamesForMesh(mesh).join(' ')}`.toLowerCase()
   if (name.includes('road') || name.includes('tarmac') || name.includes('line_white')) return false
   return OBSTACLE_SURFACE_HINTS.some((hint) => name.includes(hint))
+}
+
+function materialHasObstacleSurfaceHint(mesh: THREE.Mesh, materialName: string, materialCount: number): boolean {
+  if (materialName === 'wall8') return false
+  const materialSearchName = materialName.toLowerCase()
+  if (ROAD_SURFACE_HINTS.some((hint) => materialSearchName.includes(hint))) return false
+  if (OBSTACLE_SURFACE_HINTS.some((hint) => materialSearchName.includes(hint))) return true
+  if (materialCount > 1) return false
+  return meshHasObstacleSurfaceHint(mesh)
 }
 
 function meshIsColliderOnly(mesh: THREE.Mesh): boolean {
@@ -451,9 +807,10 @@ export function addLowPolyShanghai(
   const ready = new Promise<LowPolyShanghaiLoadResult>((resolve, reject) => {
     loader.load(
       lowPolyShanghaiUrl,
-      (gltf) => {
+      async (gltf) => {
         const model = gltf.scene
         model.name = 'shanghai-international-circuit-full-model'
+        await prepareShanghai2018Materials(model)
         model.updateMatrixWorld(true)
 
         model.traverse((obj) => {
@@ -542,10 +899,12 @@ function collectGroundSurfaceTargets(root: THREE.Object3D): THREE.Object3D[] {
   return groundTargets
 }
 
-function collectObstacleSurfaceTargets(root: THREE.Object3D): THREE.Object3D[] {
-  const obstacleTargets: THREE.Object3D[] = []
+function collectObstacleSurfaceTargets(root: THREE.Object3D): THREE.Mesh[] {
+  const obstacleTargets: THREE.Mesh[] = []
   root.traverse((obj) => {
-    if (obj instanceof THREE.Mesh && !obj.userData.driveVisualChunk && meshHasObstacleSurfaceHint(obj)) {
+    if (!(obj instanceof THREE.Mesh) || obj.userData.driveVisualChunk) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    if (materials.some((material) => materialHasObstacleSurfaceHint(obj, material.name ?? '', materials.length))) {
       obstacleTargets.push(obj)
     }
   })
@@ -576,14 +935,28 @@ export function createLowPolyShanghaiObstacleSampler(
 
   lowPolyShanghai.group.updateMatrixWorld(true)
   for (const target of obstacleTargets) {
-    if (!(target instanceof THREE.Mesh)) continue
     const position = target.geometry.getAttribute('position')
     if (!position) continue
-    const step = Math.max(1, Math.floor(position.count / maxPointsPerMesh))
-    for (let i = 0; i < position.count; i += step) {
-      tmp.fromBufferAttribute(position, i).applyMatrix4(target.matrixWorld)
-      if (Number.isFinite(tmp.x) && Number.isFinite(tmp.y) && Number.isFinite(tmp.z)) {
-        addPoint(tmp)
+    const index = target.geometry.getIndex()
+    const materials = Array.isArray(target.material) ? target.material : [target.material]
+    const ranges = target.geometry.groups.length > 0
+      ? target.geometry.groups.filter((group) => {
+          const material = materials[group.materialIndex ?? 0]
+          return materialHasObstacleSurfaceHint(target, material?.name ?? '', materials.length)
+        })
+      : materialHasObstacleSurfaceHint(target, materials[0]?.name ?? '', materials.length)
+        ? [{ start: 0, count: index?.count ?? position.count, materialIndex: 0 }]
+        : []
+    const eligiblePointCount = ranges.reduce((sum, range) => sum + range.count, 0)
+    const step = Math.max(1, Math.floor(eligiblePointCount / maxPointsPerMesh))
+    for (const range of ranges) {
+      const end = Math.min(range.start + range.count, index?.count ?? position.count)
+      for (let offset = range.start; offset < end; offset += step) {
+        const vertex = index ? index.getX(offset) : offset
+        tmp.fromBufferAttribute(position, vertex).applyMatrix4(target.matrixWorld)
+        if (Number.isFinite(tmp.x) && Number.isFinite(tmp.y) && Number.isFinite(tmp.z)) {
+          addPoint(tmp)
+        }
       }
     }
   }
@@ -672,7 +1045,7 @@ export function createLowPolyShanghaiGroundSampler(
       lastPlacementKey = keyNow
       matrixWorldFresh = false
     }
-    const key = `${Math.round(x * 2)}:${Math.round(z * 2)}`
+    const key = `${Math.round(x * 20)}:${Math.round(z * 20)}`
     if (cache.has(key)) {
       const cached = cache.get(key)
       return cached
@@ -702,6 +1075,7 @@ export function createLowPolyShanghaiGroundSampler(
       normal: hitWorldNormal(fallbackHit),
       isRoad: roadHit !== undefined,
     }
+    if (cache.size > 16000) cache.clear()
     cache.set(key, result)
     return { point: result.point.clone(), normal: result.normal.clone(), isRoad: result.isRoad }
   }

@@ -28,11 +28,11 @@ export interface CarVisualTuningGuiOptions extends CarVisualTuningTargets {
 type TuningTarget = 'all' | 'player' | 'opponents'
 type ScaleKey = keyof CarVisualAxisScale
 
-const STORAGE_KEY = 'f1s_car_visual_tuning_v1'
+const STORAGE_KEY = 'f1s_car_visual_tuning_v3'
 const GUI_PARAMS = ['carVisualGui', 'carSizeGui', 'carScaleGui', 'tuneCars']
 
 const DEFAULT_AXIS_SCALE: CarVisualAxisScale = {
-  overall: 0.8,
+  overall: 0.7,
   width: 1.05,
   height: 1,
   length: 1,

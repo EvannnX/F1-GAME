@@ -42,7 +42,7 @@ interface LabelSpriteRefs {
   material: THREE.SpriteMaterial
 }
 
-const GUI_PARAMS = ['gridGui', 'startGridGui', 'gridEditor', 'placeGrid']
+const GUI_PARAMS = ['gridGui', 'startGridGui', 'gridEditor', 'placeGrid', 'allianzGridGui']
 const GRID_LABELS: Record<string, string> = {
   player: '玩家',
   ferrari: 'Ferrari',

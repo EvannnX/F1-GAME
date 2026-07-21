@@ -1,0 +1,1465 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-21T07:16:36.889Z",
+  "product": {
+    "name": "F1TI",
+    "packageName": "f1ti-racing",
+    "packageVersion": "0.1.0",
+    "htmlTitle": "F1TI | 测测你的 F1TI"
+  },
+  "repository": {
+    "branch": "main",
+    "headCommit": "a0fb7bf7214aeb1a5d392cc2c64b69d6d2f42e4d",
+    "githubRemote": "git@github.com:EvannnX/F1-GAME.git",
+    "githubMainCommit": "a0fb7bf7214aeb1a5d392cc2c64b69d6d2f42e4d",
+    "workingTreeChanges": [
+      "M .gitignore",
+      " M PROJECT.md",
+      " M package.json",
+      " M src/game/glbDrivePhysics.ts",
+      " M src/main.ts",
+      " M src/render/lowPolyShanghai.ts",
+      " M src/render/scene.ts",
+      " M src/render/weather.ts",
+      " M src/ui/carVisualTuning.ts",
+      " M src/ui/glbGridPlacement.ts",
+      " M src/ui/personalityCard.ts",
+      " M submission.zip",
+      "?? RELEASE_METADATA.json",
+      "?? scripts/capture-release-metadata.mjs",
+      "?? scripts/copy-runtime-public-assets.mjs",
+      "?? src/shanghai-international-circuit-2018-layout/",
+      "?? src/ui/shanghai2018AllianzGridGui.ts",
+      "?? src/ui/shanghai2018MapTest.ts"
+    ]
+  },
+  "toolchain": {
+    "node": "v25.6.1",
+    "npm": "11.9.0",
+    "vite": "^5.4.10",
+    "three": "^0.170.0",
+    "buildTarget": "esnext",
+    "minifier": "terser",
+    "singleFilePlugin": "^2.0.3"
+  },
+  "build": {
+    "command": "npm run release:check",
+    "zipCommand": "npm run zip",
+    "publicCopyMode": "allowlisted public assets plus the external Shanghai 2018 runtime directory",
+    "assetsInlineLimitBytes": 100000000,
+    "totalDistBytes": 73522321,
+    "indexHtmlBytes": 33534592,
+    "indexHtmlGzipBytes": 21731680,
+    "indexHtmlSha256": "bbcd7af1f556d64a42d4befa484db3a6f583b242cc8d9fc67cddcdb51fa698f3",
+    "sourceFingerprintSha256": "b2323febf2a1f19450c8aaa6cbd8ddf5e9c80062bcd8748520d77fa603e33c0c",
+    "zipArtifact": null
+  },
+  "gameplayCompatibility": {
+    "mapProfile": "shanghai-international-circuit-2018-layout",
+    "allianzGridAnchorStorageKey": "f1s_shanghai2018_allianz_grid_anchor_v1",
+    "gridStorageKey": "f1s_shanghai2018_grid_placements_v2",
+    "startPoseStorageKey": "f1s_shanghai2018_start_pose_v1",
+    "signDeletionStorageKey": "f1s_shanghai2018_object_deletions_v1",
+    "cameraStorageKey": "f1s_shanghai2018_camera_tuning_v2",
+    "carVisualStorageKey": "f1s_car_visual_tuning_v3",
+    "selectedCarStorageKey": "f1s_selected_player_car_v1",
+    "defaultGrid": [
+      {
+        "id": "player",
+        "x": -264.27,
+        "z": 520.03,
+        "headingDeg": 281.7
+      },
+      {
+        "id": "redbull",
+        "x": -230.42,
+        "z": 511.9,
+        "headingDeg": 281.7
+      },
+      {
+        "id": "ferrari",
+        "x": -257.32,
+        "z": 513.86,
+        "headingDeg": 284.4
+      },
+      {
+        "id": "mclaren",
+        "x": -240.22,
+        "z": 509.83,
+        "headingDeg": 283.5
+      },
+      {
+        "id": "mercedes",
+        "x": -247.97,
+        "z": 516.04,
+        "headingDeg": 282
+      }
+    ],
+    "defaultThirdPersonCamera": {
+      "backDistance": 4.15,
+      "upDistance": 1.32,
+      "lookAhead": 7.2,
+      "lookUp": -0.2,
+      "fov": 48
+    }
+  },
+  "protectedProfiles": {
+    "redbull": {
+      "strategy": "redbull-github-v1",
+      "sourceCommit": "ccc253bf5cbd7e2f09d981eb813ac69071bffc26",
+      "modelSha1": "66c78ca97b11d3cbaf20f2bf9c7eec7a2614d3ae",
+      "wheelFunctionSha1": "9f4217b13761e023416082195eb44a6fdfe3a9c0",
+      "wheelSpinRate": 42,
+      "frontSteerMaxDegrees": 18
+    }
+  },
+  "weather": {
+    "rainQuery": "?weather=rain",
+    "gameplayAndCacheIsolation": true,
+    "qualityRainDrops": 1400,
+    "mobileOrPerformanceRainDrops": 520
+  },
+  "requiredRuntimePublicAssets": [
+    "src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb",
+    "src/shanghai-international-circuit-2018-layout/textures",
+    "public/audio/commentary",
+    "public/video/beginning.mp4",
+    "public/fibi.webp"
+  ],
+  "excludedSourceAssets": [
+    {
+      "path": "public/assets/上海赛车场.glb",
+      "bytes": 420689880,
+      "reason": "source-only duplicate; excluded from dist and upload ZIP"
+    },
+    {
+      "path": "public/assets/上海赛车场压缩.glb",
+      "bytes": 7977516,
+      "reason": "source-only duplicate; excluded from dist and upload ZIP"
+    },
+    {
+      "path": "public/assets/第一人称用/第一人称视角.glb",
+      "bytes": 63510788,
+      "reason": "source-only duplicate; excluded from dist and upload ZIP"
+    }
+  ],
+  "distFiles": [
+    {
+      "path": "dist/audio/commentary/01_countdown.mp3",
+      "bytes": 36276,
+      "sha256": "647f95dbd5abad6d12cc089b4f29e96308f0bfe2d2dcf1b4a595d7cd7b0895ec"
+    },
+    {
+      "path": "dist/audio/commentary/02_race_start.mp3",
+      "bytes": 32096,
+      "sha256": "420a4e1b29a129a1c2723cb179683bcacf105d211654856acf570ce7447d34e8"
+    },
+    {
+      "path": "dist/audio/commentary/03_strong_launch.mp3",
+      "bytes": 36145,
+      "sha256": "1053e19c9983d34327bd340f56362e862a0f9a9cf0221536f389111c937b7ffa"
+    },
+    {
+      "path": "dist/audio/commentary/04_slow_launch.mp3",
+      "bytes": 39019,
+      "sha256": "e96cc13710d278fbd9d79c5ea90d551196cb13f6cb569d74228a67819285e8a9"
+    },
+    {
+      "path": "dist/audio/commentary/05_first_acceleration.mp3",
+      "bytes": 31182,
+      "sha256": "4fd2eccd3e47bfd7b42529f823018d6eed8b73e5aa47923423855cf6b1cc0ab3"
+    },
+    {
+      "path": "dist/audio/commentary/06_first_corner.mp3",
+      "bytes": 37190,
+      "sha256": "94d8d6fa869725421e1d904283b4850cc0fa7364305c473b46d4b42daf774905"
+    },
+    {
+      "path": "dist/audio/commentary/07_clean_corner.mp3",
+      "bytes": 39149,
+      "sha256": "8d03836be70b50e0df406df865fdd73b52a24227a56604a8c0180faef6e1043e"
+    },
+    {
+      "path": "dist/audio/commentary/08_wide_corner.mp3",
+      "bytes": 43590,
+      "sha256": "610ae9a617536d6ebf89e89fe5e1b00d30691db450054e84a3aac7a24d8f5dfa"
+    },
+    {
+      "path": "dist/audio/commentary/09_sharp_steering.mp3",
+      "bytes": 41892,
+      "sha256": "8da13f5252b683004e8ba239f663145d15f778c92e645976d54ffa57671ebfad"
+    },
+    {
+      "path": "dist/audio/commentary/10_near_miss.mp3",
+      "bytes": 36929,
+      "sha256": "8b8167dee8b2b5d873024ba504c3545fb6720ce7bf4e1e68dc3013b42de935a7"
+    },
+    {
+      "path": "dist/audio/commentary/11_first_collision.mp3",
+      "bytes": 38888,
+      "sha256": "21a721b58c228ef51a730477592d7b954badb639bbb8c145afdb2da1537c88ae"
+    },
+    {
+      "path": "dist/audio/commentary/12_repeated_collisions.mp3",
+      "bytes": 45680,
+      "sha256": "9665d1e45bb6748eef66dbc5363e814dea8896048afd3089805ccfa8aadd9e29"
+    },
+    {
+      "path": "dist/audio/commentary/13_recovery_after_mistake.mp3",
+      "bytes": 37190,
+      "sha256": "3fd1749084e59c3faa614618f8c0fec60b4ac3dff165bd6a6784659f1370c680"
+    },
+    {
+      "path": "dist/audio/commentary/14_off_track.mp3",
+      "bytes": 42806,
+      "sha256": "b02c374dc85d14f02df12bd7ca4c439ea1027d18fcf99093b2a6ffb9e4ec179b"
+    },
+    {
+      "path": "dist/audio/commentary/15_back_on_track.mp3",
+      "bytes": 33794,
+      "sha256": "4e41b6dba556e1ff236549965526fafdb85a20735db3bb0febe8e57b8e4b2d07"
+    },
+    {
+      "path": "dist/audio/commentary/16_high_speed_section.mp3",
+      "bytes": 37451,
+      "sha256": "c5eb22ec0bdd8dfae54bda9ae1fd96d83f1c3af9c9bdbc86eb9aa56af2afdef9"
+    },
+    {
+      "path": "dist/audio/commentary/17_smooth_sector.mp3",
+      "bytes": 41892,
+      "sha256": "c8f4ccbbe06a9abcfaae7da9708885838266b2dd42366a8e8ef027030e10c310"
+    },
+    {
+      "path": "dist/audio/commentary/18_risky_shortcut.mp3",
+      "bytes": 37190,
+      "sha256": "d4980669a6dedca7fdaf0be086bb69463f292868d9ed03ce2e071d60385eb568"
+    },
+    {
+      "path": "dist/audio/commentary/19_safe_route_chosen.mp3",
+      "bytes": 41631,
+      "sha256": "98f332be1043161fa9c402d03364d6172984c2703d048b8968e48fc61527f6e4"
+    },
+    {
+      "path": "dist/audio/commentary/20_overtake_pass.mp3",
+      "bytes": 45027,
+      "sha256": "b1d60278b81286d2ebab1e91181cbe1bb6e925cf02724342d05bc186724adecb"
+    },
+    {
+      "path": "dist/audio/commentary/21_losing_control.mp3",
+      "bytes": 34839,
+      "sha256": "ebdfd2803614a633490e482f2ff1565e45f8258c26bbc186071355312f9fefd5"
+    },
+    {
+      "path": "dist/audio/commentary/22_regains_control.mp3",
+      "bytes": 30660,
+      "sha256": "23023f3f6be1ddc39a2529b8a42e1b8ad30b2faa0b7490c4e06b809f25b18d0b"
+    },
+    {
+      "path": "dist/audio/commentary/23_low_speed_hesitation.mp3",
+      "bytes": 51166,
+      "sha256": "a9c27ef5c7583aa44edd13cab872565ae4ef84eda298a3c9570f2c318e94d14b"
+    },
+    {
+      "path": "dist/audio/commentary/24_good_rhythm.mp3",
+      "bytes": 35231,
+      "sha256": "55a628575d4d109a9b5e15be0e415383076cc29260eca9e1ef6bae1d555afe81"
+    },
+    {
+      "path": "dist/audio/commentary/25_halfway_point.mp3",
+      "bytes": 41109,
+      "sha256": "39f7ec083a20b6f183ba93644d87552ec51654ecfc4e7cc4afe77450f429504d"
+    },
+    {
+      "path": "dist/audio/commentary/26_final_10_seconds.mp3",
+      "bytes": 44635,
+      "sha256": "8637d13d98b9b5ed0feb37530d4c2b579a88d3d597b92506945b5356e87acdaa"
+    },
+    {
+      "path": "dist/audio/commentary/27_final_push.mp3",
+      "bytes": 35100,
+      "sha256": "f2058839dcd9b36448b88f1baf9c762b2692a81255bb1858dce21c2abf2ccf9c"
+    },
+    {
+      "path": "dist/audio/commentary/28_finish_line.mp3",
+      "bytes": 46072,
+      "sha256": "d33600e4a6d6c8dfc10389988f0a9990a2abd5bb2fb1f8bca14147666ddc2019"
+    },
+    {
+      "path": "dist/audio/commentary/29_great_finish.mp3",
+      "bytes": 33402,
+      "sha256": "bdf66e5261cb3b838d97390ea15f115dbb59579022a3e675bbba9ec8293afe54"
+    },
+    {
+      "path": "dist/audio/commentary/30_messy_finish.mp3",
+      "bytes": 45811,
+      "sha256": "8ca7df07b8eb71c85806447b6de2d057d318a47984252f9f2f7d14dbebe6d292"
+    },
+    {
+      "path": "dist/audio/commentary/31_podium_reveal.mp3",
+      "bytes": 41500,
+      "sha256": "67c06356f9339b49ddd896d9d410fce5935952d61034fa520885d8621585566e"
+    },
+    {
+      "path": "dist/fibi.webp",
+      "bytes": 17806,
+      "sha256": "beeb511d252da0ffb186affd757be1649055ba2e91e25e2a32541dd0abc3733e"
+    },
+    {
+      "path": "dist/index.html",
+      "bytes": 33534592,
+      "sha256": "bbcd7af1f556d64a42d4befa484db3a6f583b242cc8d9fc67cddcdb51fa698f3"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb",
+      "bytes": 28020792,
+      "sha256": "b26f6cae8c5cdce01cc9e471f9aafd6ba530ecdc644525576569707263fd37c8"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/advert_side_a_d_56.png",
+      "bytes": 111794,
+      "sha256": "91d5b2af9c6eef1cd76db5b210e3cef8088ff17e13ce263a53945be5ca2689fd"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/allianz_board_a_143.png",
+      "bytes": 4689,
+      "sha256": "3a52f2ad47a123a2f39db1c09a86c5955192d466773806fcdaa3b25fe8eba557"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/armco_grey_main_a_01_d_38.png",
+      "bytes": 99043,
+      "sha256": "0cbff05a0f5dc0130def692c930a0f9b8997ab1b47370f1f1dca8aa5bc8e1f9e"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/asphalt-new.png",
+      "bytes": 2988813,
+      "sha256": "b9cf557a355f8616e2b3f708f752f11d8633427780aa8b8e0a26cdbd895901f0"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Blocchi _dist_121.png",
+      "bytes": 68883,
+      "sha256": "cc9441a1c3bca1f31e0e2eb56654061bc22305c07cbf7dddb121b947ecdca677"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/conc_bollard_filler_a_01_d_39.png",
+      "bytes": 115981,
+      "sha256": "5a9d2c20469838407280f40016475149b8f21cc9e5d364e4b4090b04a6cd15f2"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/distance_assets_outfield_d_79.png",
+      "bytes": 54837,
+      "sha256": "21c6c9776ee3e1a129b65579c919ddf43af1688fe92f7225e743d9efd1c0ae24"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/distance_assets_paddock_d_80.png",
+      "bytes": 35339,
+      "sha256": "2ddadceb0b719855488a2a21d146d31d7016a7961fea1d44fa0e6d20521e9011"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Emirates_better_11.png",
+      "bytes": 11398,
+      "sha256": "3782c0518ea69eb2f5def60c4aa8076810207aaed7704173555e627e546ad2fa"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/f1_board_a_120.png",
+      "bytes": 3833,
+      "sha256": "dbde094f82c83937abb4db9e2a9a13adb166bac1aabdf647566dce50c06eadea"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/f1_board_b_16.png",
+      "bytes": 5400,
+      "sha256": "9b4ce5872f7349efb0fada2298bb45f2772d3dd247980416181803d27f390462"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/fence_barbed_b_01_d_134.png",
+      "bytes": 13828,
+      "sha256": "1e7816455f1aea60df1b4008b49bf1f7c0637e7e2bc96984be7614e2f1f1c677"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/fly_emirates_terrain_a_89.png",
+      "bytes": 9886,
+      "sha256": "19cab564c9b38841ae99341bd16c02533f34da00eb8d163535e8f6bb0fdfeaaa"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/groove01_24.png",
+      "bytes": 548,
+      "sha256": "86b0875abbf11197b10a1bab4ede767f427cc00811edf981630f6021aa8ca72e"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Gru_mobole_27.png",
+      "bytes": 94538,
+      "sha256": "e486e0f44adfacdd3b56c02c3ddd4c8592333a3f7f638112b2e22f6212fcb692"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Heine_no_14.png",
+      "bytes": 6606,
+      "sha256": "956f8f0b78812b2851b5b958b34461e46232986e9c2d40d86e651bbb075caac9"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/jumbotron_b_01_d_82.png",
+      "bytes": 55936,
+      "sha256": "3e0090be8ea888fabd800f8efcec53bdd59d965f2c23fa1f970e823ce7ea5753"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/lg_board_a_51.png",
+      "bytes": 4060,
+      "sha256": "f3b277100352933cc77daf8d0412deaa430e3652def951d9f35e8b2b1de88163"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/marquee_truck_a_02_d_74.png",
+      "bytes": 72178,
+      "sha256": "9817c192511c86fe067c8eadcca176af50cada5d6c9612d2c851e9af239485b3"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Meshesbldgobjconcrete11_diff_61.png",
+      "bytes": 3726,
+      "sha256": "94d750322644394d2c14dda6aac1d5210b21b628237e699b6478fb43a3631a81"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Meshesgrassfldgrass0541_diff_24.png",
+      "bytes": 89396,
+      "sha256": "ff74526700a2016cbe325d991a2959809d30e75b3ca8309e356ef57518c7b06f"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Meshesgrassxgrass0171_diff_18.png",
+      "bytes": 2633694,
+      "sha256": "7420e12bce931fd2e3f25f659acbbb407d1b30a432c49398958fde8637d64208"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/New_line_PIT_126.png",
+      "bytes": 2670,
+      "sha256": "a6fb03d3b086eea420555bce24ea86c7ed7b9444693c5cdc05fa755318ee531d"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/nuove barriere_19.png",
+      "bytes": 21435,
+      "sha256": "e31bd503647d85f2ff0060e6849a723c1e46b6506c3377eb41f3ac498f092f0d"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/PAT_asf_out_123.png",
+      "bytes": 146897,
+      "sha256": "8f3c4375cfa6f28d515490188c6ba2d55c71bf1e2e9d5ede947071928b23257e"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/PAT_Einak_basso_15.png",
+      "bytes": 7846,
+      "sha256": "d40d499283c4995d1e87f6155cd9d9b07eec833addafe4dfaf935d226833dd7c"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/PAT_gril_113.png",
+      "bytes": 77496,
+      "sha256": "1f80a2bdaa5841898394f3339624d2057e62584ed830dfc0977c484cadf8faff"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/PAT_rug_blu_112.png",
+      "bytes": 186171,
+      "sha256": "9201afd3c9283aec8f9ad8b53f050251c49c37a94cde7383933c7d8ba4e32e34"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/PAT_special_111.png",
+      "bytes": 42501,
+      "sha256": "3637d1a0ac2f479b7a42fa8a9dee6cbb3a226fdf93e459b516828a6703c37c9f"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Petronas_sign_cina_17.png",
+      "bytes": 10303,
+      "sha256": "be7f9586612eae771931dc4fd57f42c5705b43e9eae4265a8d57f671afa45d55"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/Pirelli_pan_12.png",
+      "bytes": 1148,
+      "sha256": "23186a04382c4eef62fb246f61f98e4f99c0cdbfbd6005853f8b14da851fed48"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/rolex_board_a_6.png",
+      "bytes": 3950,
+      "sha256": "737e17e6d97b02d440d1ffd442a229f3c90418aa7136721b3c1904bedaf29a4b"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/rolex_board_b_13.png",
+      "bytes": 6871,
+      "sha256": "61312fee5686f041e35ac6cfc45afff7dcc8eae39569ef23496db5c98d488825"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/rolex_clock_hd_21.png",
+      "bytes": 69464,
+      "sha256": "c35c0ceefbc62344e21209fa52e7737c28516ddf08bdb654fe3f8ee9ad8aff16"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/rolex_terrain_a_142.png",
+      "bytes": 3747,
+      "sha256": "716e04271dd5c1522689cef9fa393e2bdbdf55180a3e97c9b607eac6114bceb7"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_aqueduct_a_01_d_92.png",
+      "bytes": 33616,
+      "sha256": "2ceeb5f35bdabff93cfd546a9259df2596c11795fc2739146d2189da6f815212"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_banner_greyframe_a_d_57.png",
+      "bytes": 39778,
+      "sha256": "fce1a514352df5ad9c3ae36a7c59e3132984761110e35846b4693810e865070e"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_banner_onastick_a_d_78.png",
+      "bytes": 94339,
+      "sha256": "6ad7f13de46d11f9062b8c84e45e1b1d057381618022b009c0abdbc6cdcefc8a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_banner_startfinish_a_d_59.png",
+      "bytes": 76702,
+      "sha256": "e9c9718284ee3fc272f31976f3548d11793521057d8e4298eab23f739261be75"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_barrier_armcostubyellow_a_d_47.png",
+      "bytes": 78878,
+      "sha256": "8f837dedca3311b6c69ddd05358d9e64832ae34a852eebe810bda4ad27f65767"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_barrier_barbfence_a_01_d_28.png",
+      "bytes": 13647,
+      "sha256": "f690490f36b26c0b80f9dcfa7cd605fcd97208001c8c5f00ec024a0f26ed4d03"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_barrier_barbfence_a_02_d_42.png",
+      "bytes": 16528,
+      "sha256": "03f8d1243e9ad749b216fd1aa6ae5bd851a865636a153b5801b8c5d1fc613599"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_barrier_pitwall_a_d_45.png",
+      "bytes": 44138,
+      "sha256": "b117444a28b92441c05a2cfd479e4e99c8e47717c30f8e140374d1b57c99a7cc"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_brick_a_01_d_93.png",
+      "bytes": 48866,
+      "sha256": "a50a8e4a0f0a0225219d472940e865909729bb8b796228a9ffade83bbb951257"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_commsplex_a_d_30.png",
+      "bytes": 41802,
+      "sha256": "dbb0ed505add59ae8a2b60c7aa58962de5353659444005d83bec1fcd07068dc9"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_commstower_a_d_31.png",
+      "bytes": 54026,
+      "sha256": "000018ed5799e80c3486dd1b183a7877f1c337d680e461e081912f3d16c2fa34"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_curvedroof_a_d_54.png",
+      "bytes": 21075,
+      "sha256": "4e5eb72541842b016be5552d59eb6cbc31f7e31bb415fadedaa481ed15e2643a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_glasstower_a_02_d_4.png",
+      "bytes": 14061,
+      "sha256": "27e470ea82d25e9d3bd497b92761280137e441ca5971e8a737541b1d287bc8c6"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_glasstunnel_a_d_32.png",
+      "bytes": 42547,
+      "sha256": "00e0d979d8f65f58788da27ecabaad8474381fb6a15a3cc8d94ea7b33675da86"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_kartcenter_a_d_33.png",
+      "bytes": 40932,
+      "sha256": "aa58dc0ce9273e0c08b3a88b6b3ba25eb264947927535ac56547b37466cff317"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_pitgarages_a_01_d_114.png",
+      "bytes": 1624,
+      "sha256": "aa9cc10199afa187128e2e5f5aaf5b1dfa1e2d1cb4e634c0c3729c72a888d8a5"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_pitgarages_a_02_d_46.png",
+      "bytes": 71934,
+      "sha256": "e66e12c2e19681390337b7278d94859c05137aaf24d664c7ce605b73452a64bc"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_publicwc_a_d_88.png",
+      "bytes": 33830,
+      "sha256": "fe688e84b7c8b7c3b8b9ea47e954017db1e11833824096a951d1fea8a1d5d0a1"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_building_skybridge_a_d_34.png",
+      "bytes": 17681,
+      "sha256": "62d8c1be285813e932bf9f1db0b07c70bc7aa1518e5441a366e5c8a1707f2acd"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_cloaca_a_01_d_94.png",
+      "bytes": 21032,
+      "sha256": "d991c29c5d41edad56b306b2115d5bf7808b3ec03875a93b429266c775e7181e"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_colour_seating_a_01_d_132.png",
+      "bytes": 9577,
+      "sha256": "ea69fc7cc49d8568bcc2f12eea4ae270166a27dbb46cc68f8eb6b80c85beefea"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_grandstand_expo_a_d_9.png",
+      "bytes": 54519,
+      "sha256": "ecc200988612f97590d3c14f5acb16f81d8bd13fe0857ee93407dbdfbee1a1dd"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_grandstand_group_a_d_35.png",
+      "bytes": 35812,
+      "sha256": "cf3360407b175cfe12e76b6b46f97a363f4d3943d75916b92b61238d9e982c1f"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_grandstand_main_a_d_44.png",
+      "bytes": 33061,
+      "sha256": "14c5560974f08b76ce9c149a5f4c3d4db0c062b71966b7f0fb7bcae6cbca002f"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_grandstand_underbrolly_01_d_43.png",
+      "bytes": 47319,
+      "sha256": "b27b88863a5cb495a6303735f4d1cbc8f8b6835b7e9544bb87def0a43304eade"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_grandstand_underbrolly_02_d_133.png",
+      "bytes": 23336,
+      "sha256": "090367aeed522fd900d79fd3ac9d8be277ff3286ba99fca1047b5b5bfdce0d19"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_hut_marshalls_a_d_63.png",
+      "bytes": 105349,
+      "sha256": "76bbbd6e3ae0622e8a5a553522a2abe0b2fa2f50ac756cd2801de3a57e3813cd"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_hut_pitlanetower_a_d_77.png",
+      "bytes": 53349,
+      "sha256": "cd06de71effd9b08324db054ff28671b1353f5634a86cf97981b7f6932dc8d68"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_hut_shabby_a_d_55.png",
+      "bytes": 72434,
+      "sha256": "3913cb8f995c987bd73390d0843bd3e0eb2d16bb98a054e58cde58bf14aee03a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_infrastructure_arcwall_a_d_116.png",
+      "bytes": 81807,
+      "sha256": "2803bf9be4f79b4aa38305e288b32666dd0f7cbf550d622390aa060099a5d880"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_infrastructure_brollyroof_a_d_37.png",
+      "bytes": 50859,
+      "sha256": "996fdd00df4cc023d6e9c6b15e7a1134e361faa19c7443597d31e1f71782525a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_landscape_01_131.png",
+      "bytes": 10952,
+      "sha256": "51676b70438aa833ca7ba8c3d589a027c5e1d23ca8654b68a4e8e81b7d0ff718"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_pole_bafflelight_a_d_64.png",
+      "bytes": 22535,
+      "sha256": "85b4e9f7e14dc72b48739ac99ca412dfb76912c118ac5eecd4ce3a80d6a02abc"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_pole_ranking_a_d_81.png",
+      "bytes": 80248,
+      "sha256": "8951c798988cf0bc40f103f6cd80affdcb5244fdcf56008b6e61f8c338944a2a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_rug_a_01_d_98.png",
+      "bytes": 204992,
+      "sha256": "dc6eee9dda8dcf0b1ff82fb206aff3d13d1fa33827115052e10c920002eb208d"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_rumble_a_01_d_99.png",
+      "bytes": 69780,
+      "sha256": "e6b01e3edc1ec681959b0c8f4024e8f9d0004666345e92e73ed0233bfd935757"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_sand_a_01_d_139.png",
+      "bytes": 164311,
+      "sha256": "6147592d7e3ea3e42cb9a8bdfec5618f63190fc3db303c8e384b2e94c5e5a0ea"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_sand_a_02_d_140.png",
+      "bytes": 67784,
+      "sha256": "c60880e94bb8ce38f8be64a601ec3a10b34dc0499ba22763823e350993e36059"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_tent_hospitality_a_d_36.png",
+      "bytes": 33138,
+      "sha256": "9079b60df76bf52ed4c11b0cddfdda5ce3d6194b106cc995572f94b02943e8f9"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_transition_a_01_d_106.png",
+      "bytes": 100315,
+      "sha256": "c34d3cb058d94840b3310d82c66918e3f598b134dd82976591dbe91cd4b5b73d"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_wall_a_01_d_107.png",
+      "bytes": 75292,
+      "sha256": "d80af72a714cd897edc0ee6bf9718698a26c736a6647b30afe022f980e15f1eb"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_wall_a_02_d_108.png",
+      "bytes": 38360,
+      "sha256": "875704b4c4b23642b2b3dbfa5f590deb796f472355ac2003a55e5ad66738a282"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_wall_a_03_d_109.png",
+      "bytes": 42138,
+      "sha256": "0a8e3fb02d25c9b26a5f90c4c9bc2c167b715ec39dce7930849ea711b3e85ac4"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_water_a_01_d_110.png",
+      "bytes": 8466,
+      "sha256": "ceecac49e22f888846bb355a734ac1bc3f7c4f88e786adcb416f3ba87668f9ea"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sha_whiteline_a_01_d_135.png",
+      "bytes": 20332,
+      "sha256": "b90b30153fb2813e295a00fa9572b97549ca9f0c23b7770f279d2d26fa308809"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/skid_marks_a_01_d_22.png",
+      "bytes": 12540,
+      "sha256": "955a8eadd17893beaf09a0e71a412674e20024a5c5f1116b8d932476e8d88d68"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sponsor_backboard_01_52.png",
+      "bytes": 24783,
+      "sha256": "5682527d6ecaf8887d8c85df7907188c563fc2a1205d243d2923c67d77b93a12"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sponsor_backboard_02_48.png",
+      "bytes": 110239,
+      "sha256": "9e881f57f2aaaa3728e777ead3386b90b11d35b016f2c0f2cadc4c3b7ef035fb"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sponsor_backframe_01_d_53.png",
+      "bytes": 42128,
+      "sha256": "af7ed27e27f028943e4e49a70dcc429954719b5f6b65f2176b08aaf3c1d21f62"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sponsorx_cats_varbv_d_41.png",
+      "bytes": 33151,
+      "sha256": "f78eb4706f543481507745ca01aa1993b3221cdd5d4109ce12bc2820c99ed100"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/sponsorx_cats_varca_d_40.png",
+      "bytes": 28923,
+      "sha256": "492371105c5f45e1215230528e14e15dc55ffeda1bc8aa9b6bbc1fdf39f44e77"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/telo_1000_7.png",
+      "bytes": 15725,
+      "sha256": "148a78151fc631f4dc990a55836b741e278b407e30a7320916720619a5b4f426"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/tree04a_127.png",
+      "bytes": 101973,
+      "sha256": "bcab9accaf087422841b4b58b761849481b3236cbb22f8e4c1ffac89ea05e95a"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/tree04b_129.png",
+      "bytes": 98640,
+      "sha256": "d33dc925fc76ab0a5f32fb11964c9ce4512b27a383d3a1f673bc07a70ed0cf69"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/tree06a_128.png",
+      "bytes": 119571,
+      "sha256": "bc09aa3d43e6bb94d7e44055d9996c018e0f0a028fdcf1164f35ce20df292a63"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/treeline02_136.png",
+      "bytes": 18643,
+      "sha256": "69e612a17a024eaa8355cf3ba0f5cc77d80a9b06d1d76abdcc10f85e49afe007"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/tyres_add1_23.png",
+      "bytes": 48526,
+      "sha256": "13e18605047b971c0e85982c7a0aee1ee824e155106548c72cf0abac8b17aece"
+    },
+    {
+      "path": "dist/src/shanghai-international-circuit-2018-layout/textures/van_safety_b_d_73.png",
+      "bytes": 81227,
+      "sha256": "49bcc74ec73c6bf2c7a0f87a7715d7e372162472f3a0c3ecc0dfb7094938d67a"
+    },
+    {
+      "path": "dist/video/beginning.mp4",
+      "bytes": 620514,
+      "sha256": "66d2e376e5f255678b214483371f0500391bc2a6de505be635e5e161c1012d39"
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "index.html",
+      "bytes": 3058,
+      "sha256": "8cbabdcff588eec23fc112de99a0fe6a859b2d5d87c8773e9239fa3fb73eb944"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 41377,
+      "sha256": "bfd7ecdb6a1b433acadc7add87d28ec6081c3b2d8c451b36317efaa0ff70e43a"
+    },
+    {
+      "path": "package.json",
+      "bytes": 1140,
+      "sha256": "b779a15b3b13a02336e10e1fa828ce88221751c50129637db6d2a0f0bc84675b"
+    },
+    {
+      "path": "public/audio/commentary/01_countdown.mp3",
+      "bytes": 36276,
+      "sha256": "647f95dbd5abad6d12cc089b4f29e96308f0bfe2d2dcf1b4a595d7cd7b0895ec"
+    },
+    {
+      "path": "public/audio/commentary/02_race_start.mp3",
+      "bytes": 32096,
+      "sha256": "420a4e1b29a129a1c2723cb179683bcacf105d211654856acf570ce7447d34e8"
+    },
+    {
+      "path": "public/audio/commentary/03_strong_launch.mp3",
+      "bytes": 36145,
+      "sha256": "1053e19c9983d34327bd340f56362e862a0f9a9cf0221536f389111c937b7ffa"
+    },
+    {
+      "path": "public/audio/commentary/04_slow_launch.mp3",
+      "bytes": 39019,
+      "sha256": "e96cc13710d278fbd9d79c5ea90d551196cb13f6cb569d74228a67819285e8a9"
+    },
+    {
+      "path": "public/audio/commentary/05_first_acceleration.mp3",
+      "bytes": 31182,
+      "sha256": "4fd2eccd3e47bfd7b42529f823018d6eed8b73e5aa47923423855cf6b1cc0ab3"
+    },
+    {
+      "path": "public/audio/commentary/06_first_corner.mp3",
+      "bytes": 37190,
+      "sha256": "94d8d6fa869725421e1d904283b4850cc0fa7364305c473b46d4b42daf774905"
+    },
+    {
+      "path": "public/audio/commentary/07_clean_corner.mp3",
+      "bytes": 39149,
+      "sha256": "8d03836be70b50e0df406df865fdd73b52a24227a56604a8c0180faef6e1043e"
+    },
+    {
+      "path": "public/audio/commentary/08_wide_corner.mp3",
+      "bytes": 43590,
+      "sha256": "610ae9a617536d6ebf89e89fe5e1b00d30691db450054e84a3aac7a24d8f5dfa"
+    },
+    {
+      "path": "public/audio/commentary/09_sharp_steering.mp3",
+      "bytes": 41892,
+      "sha256": "8da13f5252b683004e8ba239f663145d15f778c92e645976d54ffa57671ebfad"
+    },
+    {
+      "path": "public/audio/commentary/10_near_miss.mp3",
+      "bytes": 36929,
+      "sha256": "8b8167dee8b2b5d873024ba504c3545fb6720ce7bf4e1e68dc3013b42de935a7"
+    },
+    {
+      "path": "public/audio/commentary/11_first_collision.mp3",
+      "bytes": 38888,
+      "sha256": "21a721b58c228ef51a730477592d7b954badb639bbb8c145afdb2da1537c88ae"
+    },
+    {
+      "path": "public/audio/commentary/12_repeated_collisions.mp3",
+      "bytes": 45680,
+      "sha256": "9665d1e45bb6748eef66dbc5363e814dea8896048afd3089805ccfa8aadd9e29"
+    },
+    {
+      "path": "public/audio/commentary/13_recovery_after_mistake.mp3",
+      "bytes": 37190,
+      "sha256": "3fd1749084e59c3faa614618f8c0fec60b4ac3dff165bd6a6784659f1370c680"
+    },
+    {
+      "path": "public/audio/commentary/14_off_track.mp3",
+      "bytes": 42806,
+      "sha256": "b02c374dc85d14f02df12bd7ca4c439ea1027d18fcf99093b2a6ffb9e4ec179b"
+    },
+    {
+      "path": "public/audio/commentary/15_back_on_track.mp3",
+      "bytes": 33794,
+      "sha256": "4e41b6dba556e1ff236549965526fafdb85a20735db3bb0febe8e57b8e4b2d07"
+    },
+    {
+      "path": "public/audio/commentary/16_high_speed_section.mp3",
+      "bytes": 37451,
+      "sha256": "c5eb22ec0bdd8dfae54bda9ae1fd96d83f1c3af9c9bdbc86eb9aa56af2afdef9"
+    },
+    {
+      "path": "public/audio/commentary/17_smooth_sector.mp3",
+      "bytes": 41892,
+      "sha256": "c8f4ccbbe06a9abcfaae7da9708885838266b2dd42366a8e8ef027030e10c310"
+    },
+    {
+      "path": "public/audio/commentary/18_risky_shortcut.mp3",
+      "bytes": 37190,
+      "sha256": "d4980669a6dedca7fdaf0be086bb69463f292868d9ed03ce2e071d60385eb568"
+    },
+    {
+      "path": "public/audio/commentary/19_safe_route_chosen.mp3",
+      "bytes": 41631,
+      "sha256": "98f332be1043161fa9c402d03364d6172984c2703d048b8968e48fc61527f6e4"
+    },
+    {
+      "path": "public/audio/commentary/20_overtake_pass.mp3",
+      "bytes": 45027,
+      "sha256": "b1d60278b81286d2ebab1e91181cbe1bb6e925cf02724342d05bc186724adecb"
+    },
+    {
+      "path": "public/audio/commentary/21_losing_control.mp3",
+      "bytes": 34839,
+      "sha256": "ebdfd2803614a633490e482f2ff1565e45f8258c26bbc186071355312f9fefd5"
+    },
+    {
+      "path": "public/audio/commentary/22_regains_control.mp3",
+      "bytes": 30660,
+      "sha256": "23023f3f6be1ddc39a2529b8a42e1b8ad30b2faa0b7490c4e06b809f25b18d0b"
+    },
+    {
+      "path": "public/audio/commentary/23_low_speed_hesitation.mp3",
+      "bytes": 51166,
+      "sha256": "a9c27ef5c7583aa44edd13cab872565ae4ef84eda298a3c9570f2c318e94d14b"
+    },
+    {
+      "path": "public/audio/commentary/24_good_rhythm.mp3",
+      "bytes": 35231,
+      "sha256": "55a628575d4d109a9b5e15be0e415383076cc29260eca9e1ef6bae1d555afe81"
+    },
+    {
+      "path": "public/audio/commentary/25_halfway_point.mp3",
+      "bytes": 41109,
+      "sha256": "39f7ec083a20b6f183ba93644d87552ec51654ecfc4e7cc4afe77450f429504d"
+    },
+    {
+      "path": "public/audio/commentary/26_final_10_seconds.mp3",
+      "bytes": 44635,
+      "sha256": "8637d13d98b9b5ed0feb37530d4c2b579a88d3d597b92506945b5356e87acdaa"
+    },
+    {
+      "path": "public/audio/commentary/27_final_push.mp3",
+      "bytes": 35100,
+      "sha256": "f2058839dcd9b36448b88f1baf9c762b2692a81255bb1858dce21c2abf2ccf9c"
+    },
+    {
+      "path": "public/audio/commentary/28_finish_line.mp3",
+      "bytes": 46072,
+      "sha256": "d33600e4a6d6c8dfc10389988f0a9990a2abd5bb2fb1f8bca14147666ddc2019"
+    },
+    {
+      "path": "public/audio/commentary/29_great_finish.mp3",
+      "bytes": 33402,
+      "sha256": "bdf66e5261cb3b838d97390ea15f115dbb59579022a3e675bbba9ec8293afe54"
+    },
+    {
+      "path": "public/audio/commentary/30_messy_finish.mp3",
+      "bytes": 45811,
+      "sha256": "8ca7df07b8eb71c85806447b6de2d057d318a47984252f9f2f7d14dbebe6d292"
+    },
+    {
+      "path": "public/audio/commentary/31_podium_reveal.mp3",
+      "bytes": 41500,
+      "sha256": "67c06356f9339b49ddd896d9d410fce5935952d61034fa520885d8621585566e"
+    },
+    {
+      "path": "public/fibi.webp",
+      "bytes": 17806,
+      "sha256": "beeb511d252da0ffb186affd757be1649055ba2e91e25e2a32541dd0abc3733e"
+    },
+    {
+      "path": "public/video/beginning.mp4",
+      "bytes": 620514,
+      "sha256": "66d2e376e5f255678b214483371f0500391bc2a6de505be635e5e161c1012d39"
+    },
+    {
+      "path": "scripts/strip-google-earth-glb.mjs",
+      "bytes": 9778,
+      "sha256": "e98b422d848155b8286c095e731c9388a99f1b41fbecbaf6244a5fec15f95869"
+    },
+    {
+      "path": "scripts/verify-redbull-wheel-profile.mjs",
+      "bytes": 1830,
+      "sha256": "733bf4c400efa345d589be7c87b0d104855c804bcdc338c35700be0b37ce3609"
+    },
+    {
+      "path": "src/assets/AutoSave_Shangai+International+circuit+GP+Track[1].glb",
+      "bytes": 2136536,
+      "sha256": "b26ff7ae1978f3a6d6cd1380d4f08d86953ef9c7b318a8000b4283667fe1e332"
+    },
+    {
+      "path": "src/assets/AutoSave_Shangai_International_Circuit_GP_Track_no_google_earth.glb",
+      "bytes": 2008356,
+      "sha256": "be5874794d33598736b980031c48c075c23f04d88e700be19d41bb71db56fa4e"
+    },
+    {
+      "path": "src/assets/audio/Don Toliver - Lose My Mind (feat. Doja Cat) [From F1® The Movie] [Official Audio].mp3",
+      "bytes": 8366634,
+      "sha256": "4688a66ff917b5d26625d19ca6ad1ab0d7911f75d1ceb78c844afec3f3580bf6"
+    },
+    {
+      "path": "src/assets/audio/bgm.mp3",
+      "bytes": 1643130,
+      "sha256": "50967728245f74654f3678cde27a75b3fd18eba930a82885a9b08716eb1de57f"
+    },
+    {
+      "path": "src/assets/audio/engine.mp3",
+      "bytes": 169272,
+      "sha256": "35800b221eb5f6839b1db7afb2db1b5bcbf947c0b8e5ca73d5f96f3dec2efc22"
+    },
+    {
+      "path": "src/assets/background/Cloudymorning2k.hdr",
+      "bytes": 5420092,
+      "sha256": "8ea58ea31017f17a450f7378031df8b2abc2d241b6379ab106dd7d662f0f854f"
+    },
+    {
+      "path": "src/assets/background/Cloudymorning4k.hdr",
+      "bytes": 20946484,
+      "sha256": "0245bb7ebb7a29bf15d57b89694eb98e99b75133d0440fe09c46474fa403f906"
+    },
+    {
+      "path": "src/assets/background/Cloudymorning4k.webp",
+      "bytes": 384094,
+      "sha256": "92cc508cb0b0ccc3a5baf330ed3636494879fab8b783033f29abd1d560e1db43"
+    },
+    {
+      "path": "src/assets/buidlings/Shanghai+International+Circuit+-+Pit+and+Grandstand.glb",
+      "bytes": 1274700,
+      "sha256": "af4a22d5084b2ef113a64d0cf4ba8ee5ce2ddcfc818b40699c409d3c8d93a9f6"
+    },
+    {
+      "path": "src/assets/drivers/anto.webp",
+      "bytes": 64538,
+      "sha256": "5390dedfc5ca782ae670995cf0458d524f08687654a387d97bee6d2738c2c17c"
+    },
+    {
+      "path": "src/assets/drivers/hamilton.webp",
+      "bytes": 51178,
+      "sha256": "6913500dbce8547a20b1739add45a28e3b716c8caceaa276d4c01ffb82a2266e"
+    },
+    {
+      "path": "src/assets/drivers/verstapan.webp",
+      "bytes": 58540,
+      "sha256": "99e8e0d5094f47d0b18464e8dc8a05a2db2033e61ebae1bfa0cd97b1174aa6bb"
+    },
+    {
+      "path": "src/assets/lowpoly_cartoon_shanghai 2.glb",
+      "bytes": 1235736,
+      "sha256": "d7baf57b341023aeb9e5e9fc83d6b77f7ba7f2356fc8377c2b7eb5dd6d324978"
+    },
+    {
+      "path": "src/assets/models/Ferrari_26.glb",
+      "bytes": 704644,
+      "sha256": "40d8b12337259aa1e98c784eb40975753261024e79e78b771c2287e5b4487f30"
+    },
+    {
+      "path": "src/assets/models/Ferrari_26.opt.glb",
+      "bytes": 1212608,
+      "sha256": "be79f96542e61d06c6b03ba5a634eb3aa0741e1bafd56e935389896e4d186959"
+    },
+    {
+      "path": "src/assets/models/McLaren_MCL35M.glb",
+      "bytes": 781188,
+      "sha256": "575282367c83e1f11b2ecdbb712d4c2ed7f0448a118465a70f31c811975f4c8a"
+    },
+    {
+      "path": "src/assets/models/McLaren_MCL35M.opt.glb",
+      "bytes": 864040,
+      "sha256": "c4aab2d5b387faf516cd0e23ddb4976d769434328f1189e7be72d7dfc080ca1e"
+    },
+    {
+      "path": "src/assets/models/Mercedes_W13.glb",
+      "bytes": 1094088,
+      "sha256": "2a7ca0f0bc752009e6a9c757b55b37edec2f7c379e5bf0183c59aa1ee0ac0ae1"
+    },
+    {
+      "path": "src/assets/models/RB19_REDBULL.glb",
+      "bytes": 2705816,
+      "sha256": "eac44d4cb89e8ed06eab406cd1c6184c63faea51ad168d4b69a22c198a7f0b90"
+    },
+    {
+      "path": "src/assets/models/RB19_REDBULL.opt.glb",
+      "bytes": 2855760,
+      "sha256": "65e24027ad3e9dac251cd4d6c3be753787ca74a2c35777646882cfbacb0087e1"
+    },
+    {
+      "path": "src/assets/models/抖音F1压缩.glb",
+      "bytes": 5110888,
+      "sha256": "39c2487ae940000c1da5bec59c58ebd0a32556f35e466276bc4d00877c0031cf"
+    },
+    {
+      "path": "src/assets/models/抖音F1车.glb",
+      "bytes": 59694340,
+      "sha256": "b78ce851b1a002ba358dddfa326061b76b285d47e3b09bbe8d9911bbc19a2bc9"
+    },
+    {
+      "path": "src/assets/models/抖音车拆解版.glb",
+      "bytes": 72115528,
+      "sha256": "a2cdeb6c3f9b0445b1c8abc6397251597dd1def9a85f910ff1753bd2ad26f04e"
+    },
+    {
+      "path": "src/assets/models/抖音车新版未定.glb",
+      "bytes": 71616276,
+      "sha256": "10a54cc996e735712602d57d2e545dcb08e860abb6992671c069a37b7358770a"
+    },
+    {
+      "path": "src/assets/models/简约版车-optimized.glb",
+      "bytes": 4464208,
+      "sha256": "729effe6cb86ca4f3a2d38b36fc4287a83fa252c463ba1e63cca25f9f232c41d"
+    },
+    {
+      "path": "src/assets/textures/shanghai_environment.webp",
+      "bytes": 186484,
+      "sha256": "a709dc7ba71284377d3d233c9576d025aefefd0c543d0b66a9159f45ba52a4f8"
+    },
+    {
+      "path": "src/assets/上海赛车场压缩.glb",
+      "bytes": 7977516,
+      "sha256": "dfae90b58c586cbdb06f2bf4483e1f7be0a60ae33e428a786109ea79c2fd319d"
+    },
+    {
+      "path": "src/assets/外滩全景图.png",
+      "bytes": 2031463,
+      "sha256": "49cb4e36034f26357ff0b57f2dcff1403d1dac7c0ebb710a562d81e6178f2d32"
+    },
+    {
+      "path": "src/assets/第一人称用/第一人称视角.glb",
+      "bytes": 63510788,
+      "sha256": "a7d56f7ce1cc0987912ca3db8f882fc40b263aacd111c1dc2142e311403dc6ee"
+    },
+    {
+      "path": "src/audio/coach.ts",
+      "bytes": 7902,
+      "sha256": "51f1d4afbe7f0a4eb2eb7daff59242116ff46050617704235d44f87ce758e4d1"
+    },
+    {
+      "path": "src/audio/commentary.ts",
+      "bytes": 19718,
+      "sha256": "5866012e4b52d3ebef6b7017f233ee16adc09686aef3056ac4efcf2141bc23c7"
+    },
+    {
+      "path": "src/audio/engine.ts",
+      "bytes": 3298,
+      "sha256": "7a91ac539aef10d08b5fb6363f5627b64cf904934f24d36a48d28670575c614e"
+    },
+    {
+      "path": "src/audio/zzfx.ts",
+      "bytes": 3924,
+      "sha256": "5135a028c7123979f0faacc70214e57f510edfb76cbc25a74b3fcf01d4b0970d"
+    },
+    {
+      "path": "src/data/playerCars.ts",
+      "bytes": 2726,
+      "sha256": "2212bde67a4f4e4f992ae4687d2dad6637210f64b66d72a57ad1614c2f4e0c2f"
+    },
+    {
+      "path": "src/data/shanghaiGlbRoadMask.ts",
+      "bytes": 9314,
+      "sha256": "934513ad2423bcc6a854dbfdd6462833fc646f57c34d4040a2ffea066ed3d19b"
+    },
+    {
+      "path": "src/data/shanghaiGlbRoadRoute.ts",
+      "bytes": 2150,
+      "sha256": "1bcee005536d4394a3b9f1853c0729de523f8348da4bf791326b052a4d862562"
+    },
+    {
+      "path": "src/f1ti/api.ts",
+      "bytes": 2839,
+      "sha256": "dc4cd089eb1434331fd7d6b4b643ff83c1e2e4f9caab3e472324174350ddf45b"
+    },
+    {
+      "path": "src/game/glbDrivePhysics.ts",
+      "bytes": 8250,
+      "sha256": "e7bcab9b02cea8df2090a04c2eff423cdcc9a38e03aa1eff5551ca7250aba10f"
+    },
+    {
+      "path": "src/game/loop.ts",
+      "bytes": 865,
+      "sha256": "2799ec8aa84aae61b693635c5133e18a49a7b6a40ce31b8fabaafebdfcc7c427"
+    },
+    {
+      "path": "src/game/opponents.ts",
+      "bytes": 9265,
+      "sha256": "b54031e54b270254fca78493118e7aff1342fc8729e76b4d252eb7d4a496e7aa"
+    },
+    {
+      "path": "src/game/physics.ts",
+      "bytes": 4943,
+      "sha256": "c99346c51e3a91038cbbedd6ef226bfaa8857ffbf38cfa8b84089f348a3f15f7"
+    },
+    {
+      "path": "src/game/state.ts",
+      "bytes": 3343,
+      "sha256": "1113315cb3af8f8e5fe1978a2020b598e46542f5a24d3e5b063631aa9737cbb2"
+    },
+    {
+      "path": "src/input/douyinSensor.ts",
+      "bytes": 9248,
+      "sha256": "251ae93b139cdb86bb0f42f0b059854441b3bf644d6eed960f6c9de9bcb17ff8"
+    },
+    {
+      "path": "src/input/gyro.ts",
+      "bytes": 13660,
+      "sha256": "feeb73bdf5f0999afea6dd9d6756438203ec8f2e945a036bd6569f723c8204fa"
+    },
+    {
+      "path": "src/input/index.ts",
+      "bytes": 7182,
+      "sha256": "cf4481afd5dd997377d406f735b26f197153426233705c525cf3178aeb291509"
+    },
+    {
+      "path": "src/input/keyboard.ts",
+      "bytes": 3077,
+      "sha256": "76cc9e1f85d422f1fd3d33b7a6c68e53ca8f195ed7a2fe3d8ceb4e4538b44503"
+    },
+    {
+      "path": "src/input/mouseJoystick.ts",
+      "bytes": 1728,
+      "sha256": "8662a392a1b7f0fbcfe547559ac54ae1858380b37aa00b60092d00ad678143dd"
+    },
+    {
+      "path": "src/input/touch.ts",
+      "bytes": 2382,
+      "sha256": "f7dc78e148e48370632e4a4cff75e7012b2dbcd3639df9acb4f17ea65e310266"
+    },
+    {
+      "path": "src/main.ts",
+      "bytes": 84190,
+      "sha256": "2d5b727a90f009b849b0042263da2eaff647cb65d2407e3e1e0aeaaaa3ec6e79"
+    },
+    {
+      "path": "src/multiplayer/room.ts",
+      "bytes": 8749,
+      "sha256": "2c8bdab036e5ac9c93763df2e6daf97cf02bfcefa05115285564036c495e0b83"
+    },
+    {
+      "path": "src/racerPersonality/driverProfiles.ts",
+      "bytes": 12306,
+      "sha256": "d017d808473df2909093c7ff9a04ed5a4e8d85b425df06efe0b0587633e13b35"
+    },
+    {
+      "path": "src/racerPersonality/index.ts",
+      "bytes": 9082,
+      "sha256": "b065a19213eaa206098090628752a2c530c794a7b1964ca312c3cc74506e648a"
+    },
+    {
+      "path": "src/racerPersonality/reasonGenerator.ts",
+      "bytes": 6156,
+      "sha256": "8f2178da6919d04a8fe107d02f5ac400ab6afc1daae31b2f3c4823858f7b997d"
+    },
+    {
+      "path": "src/racerPersonality/scoring.ts",
+      "bytes": 4670,
+      "sha256": "747c92e8a3399315b21982ef25ceb10b2cb4b38b2be112b1bd194730250a2b8a"
+    },
+    {
+      "path": "src/racerPersonality/tags.ts",
+      "bytes": 1213,
+      "sha256": "dbd8a0c5a7f8d078e017b4ffa3511e95c9d46722ccc72f1586af472bf7ec5865"
+    },
+    {
+      "path": "src/render/autoSaveMap.ts",
+      "bytes": 3035,
+      "sha256": "0e6ee67f356ef7b027eff663efb12181216a3de04937db26f5af0a015dd2db77"
+    },
+    {
+      "path": "src/render/car.ts",
+      "bytes": 43997,
+      "sha256": "2647b8d25bcb0e1339e8e3986143ddebca1b65ef2f9d089b3fbab43c26947102"
+    },
+    {
+      "path": "src/render/firstPersonCockpit.ts",
+      "bytes": 32648,
+      "sha256": "a802fcb5ebdb6c21bdba5f549d63819152dcc9a76d26de3409c44949430515ce"
+    },
+    {
+      "path": "src/render/lights.ts",
+      "bytes": 8195,
+      "sha256": "6747c6504fef4f0a933c9f08de84b51d6682f99619778c52847054e8d3f07854"
+    },
+    {
+      "path": "src/render/lowPolyShanghai.ts",
+      "bytes": 44553,
+      "sha256": "ee47a7cf38f4f7398f2817794f6d55db4bfc2ef45136693289a26f3920365e2f"
+    },
+    {
+      "path": "src/render/opponentCars.ts",
+      "bytes": 10741,
+      "sha256": "bd7cd8a19ccd228555b2a59efd1ef40d53dde10c1f3a180deda91d04b00f304f"
+    },
+    {
+      "path": "src/render/scene.ts",
+      "bytes": 18010,
+      "sha256": "a10a0bd7f1fe0dfdf28c6deb1107e5a186f94acd9778c56b96fdbaceb89cd166"
+    },
+    {
+      "path": "src/render/track.ts",
+      "bytes": 54843,
+      "sha256": "326d28696b86a95b50ee1f320416bc42cd4ae778abc22e418341f65d96b17da6"
+    },
+    {
+      "path": "src/render/weather.ts",
+      "bytes": 3541,
+      "sha256": "61a84cc71979ca34246e8c1f2868ab78fb359c87999508c5c4d1b1e31e0b5c5c"
+    },
+    {
+      "path": "src/types/assets.d.ts",
+      "bytes": 919,
+      "sha256": "f98aad74443ce488612ad543a95293b2c9e0c52d2c28cd3fbfd0aa83664cc775"
+    },
+    {
+      "path": "src/types/multiplayer.d.ts",
+      "bytes": 76,
+      "sha256": "be9afa03a04d3af93cf9cbd832b002ca7856fe829b6d844e81a8448edb6f825e"
+    },
+    {
+      "path": "src/ui/autoSaveMapTest.ts",
+      "bytes": 3071,
+      "sha256": "d97b6cab2741daf70c5eb1dd14f69cbd217f6862d613ff99fbaf38fbedaefe33"
+    },
+    {
+      "path": "src/ui/autoSaveModelPlacement.ts",
+      "bytes": 11749,
+      "sha256": "a74251f845870e4e856bad5bf8ba1139b05cbd799feb29711a71719bd2914488"
+    },
+    {
+      "path": "src/ui/autoSaveTrackAlignment.ts",
+      "bytes": 41735,
+      "sha256": "03fa7abbd693746e8c68e4f1c8694d5c9efca7e83708bbf33657527daa68ebd0"
+    },
+    {
+      "path": "src/ui/carVisualTuning.ts",
+      "bytes": 11382,
+      "sha256": "6c38daa21c864c13c3d29e962c22ade39b191f51dbaf5250bed2cebda6f5593c"
+    },
+    {
+      "path": "src/ui/garage.ts",
+      "bytes": 17749,
+      "sha256": "eee3ade07a5172ee0df4bf929691f0e29c83b3ac3e75e87e538bce516e28847d"
+    },
+    {
+      "path": "src/ui/glbCameraTuning.ts",
+      "bytes": 9953,
+      "sha256": "c85e413491dc5fc75c5d648decbe99058b2f8864a239772af540c436a9baaaef"
+    },
+    {
+      "path": "src/ui/glbGridPlacement.ts",
+      "bytes": 30126,
+      "sha256": "cb3221476ee05106e7f831fc716de11c83c04a89426c7db13a0b4854e21724ab"
+    },
+    {
+      "path": "src/ui/glbObjectDeletion.ts",
+      "bytes": 8687,
+      "sha256": "23db05d89b43709b43165faa624b0d5551893ead578c21687df12178e30c9e95"
+    },
+    {
+      "path": "src/ui/grandstandPlacement.ts",
+      "bytes": 9209,
+      "sha256": "5a57b944a17c90aa56e6367dd46958ed5bba66db5bd3c9d70b48c40f5fcef518"
+    },
+    {
+      "path": "src/ui/homeScreen.ts",
+      "bytes": 14124,
+      "sha256": "3998336b3643028fde040aed6638b132631df62c6cdc0917a8d71d73cd9ee6e4"
+    },
+    {
+      "path": "src/ui/howToPlay.ts",
+      "bytes": 9159,
+      "sha256": "e0ad711bac625fbfa24274ad9e453ec45c42ea2eef70e3f3959015af6ecd0546"
+    },
+    {
+      "path": "src/ui/hud.ts",
+      "bytes": 2412,
+      "sha256": "da6a52f3799936ebb96d54399922b0877e512f5cdedbc96f02dd086ad52b3312"
+    },
+    {
+      "path": "src/ui/intro.ts",
+      "bytes": 6813,
+      "sha256": "499b028ffbed82b60c46ace617058e9fe3790cc501a0b2302a72d8f762241dde"
+    },
+    {
+      "path": "src/ui/lobby.ts",
+      "bytes": 12962,
+      "sha256": "dac71417e4d50d11c93375ac62be3b1596605b929448b5cd9ffe23d611c67f65"
+    },
+    {
+      "path": "src/ui/lowPolyShanghaiPlacement.ts",
+      "bytes": 12570,
+      "sha256": "fc1f16b571343baadc2cb7431f684533b9934d75b6744a5c58a220e4b7ed611e"
+    },
+    {
+      "path": "src/ui/menu.ts",
+      "bytes": 15238,
+      "sha256": "3cff9fe851eaf33c3f62fc234b106f8e800a31370fd3a57e8f3af9857609fee4"
+    },
+    {
+      "path": "src/ui/minimap.ts",
+      "bytes": 5008,
+      "sha256": "18efc741276731fcb760044683dc2773d3e8e668d09f27bb68fc1a8d0c24636b"
+    },
+    {
+      "path": "src/ui/personalityCard.ts",
+      "bytes": 22364,
+      "sha256": "a8ced35ce564bc5ba99c36303e7b432890859e98ae5d40292ea2d61b9214a5dc"
+    },
+    {
+      "path": "src/ui/result.ts",
+      "bytes": 3891,
+      "sha256": "4ac789addb4609d317a67ece25b999a27b0264fc891f9bfd5ea3425b3bd44f62"
+    },
+    {
+      "path": "src/ui/telemetryMap.ts",
+      "bytes": 10467,
+      "sha256": "6120e77d6bc1f7c643f02ccc6bee8282ba6db7f67fe3af9126d7fa5d8a76f7a9"
+    },
+    {
+      "path": "src/ui/texturePlacement.ts",
+      "bytes": 9607,
+      "sha256": "4d0adc676460bf0cc071a60b97e91fa407ae0753825612073a1b32105396d9b3"
+    },
+    {
+      "path": "src/ui/trackPointEdit.ts",
+      "bytes": 26411,
+      "sha256": "f1dbc6207aaf49b116e6fa3ec29df92d3dcfc686f5baec858bbcfd2f8752375b"
+    },
+    {
+      "path": "src/ui/trackTrace.ts",
+      "bytes": 26816,
+      "sha256": "59b5b9960c51c44111bd5446868a40e2dd52bd6063b45dd6a14755420ee1fe64"
+    },
+    {
+      "path": "src/ui/transitionVideo.ts",
+      "bytes": 2304,
+      "sha256": "55ec183bec9063cfc2b338b81c4a22fc2666d4243acbc7b60587b1543c970615"
+    },
+    {
+      "path": "src/utils/error.ts",
+      "bytes": 982,
+      "sha256": "08170c87a4f4264d0fa85e1fc1c7c92b5856b9086077f483de0300def100def4"
+    },
+    {
+      "path": "src/utils/math.ts",
+      "bytes": 929,
+      "sha256": "81d5be8e04efb87745de2e8a9b03c56647117e1c9195053ba9845b80f4a27188"
+    },
+    {
+      "path": "src/utils/storage.ts",
+      "bytes": 1828,
+      "sha256": "6c8d22cdecd2810d82abb76264b6cebb90a07d7690a897da4bcb62104f4b3a85"
+    },
+    {
+      "path": "tsconfig.json",
+      "bytes": 524,
+      "sha256": "d1d78a56462a698c9c931c2b35a4d94a839c4545ddf3b0d1e36b3dd1f1d03ed7"
+    },
+    {
+      "path": "vite.config.ts",
+      "bytes": 1317,
+      "sha256": "336f4917ea293bd5338fdba1934aaf8ac241d6246b0510f3f15aa69ec9626419"
+    },
+    {
+      "path": "scripts/capture-release-metadata.mjs",
+      "bytes": 7106,
+      "sha256": "4b44244fdde1177db2ca53cb6319d1fb9ac1b90b4c10c019850a60c7a40ff457"
+    },
+    {
+      "path": "scripts/copy-runtime-public-assets.mjs",
+      "bytes": 1660,
+      "sha256": "cc4018ddb7ec7ee98c22d0f6e811914c2ba9b082168df02f795e0719c91f6a86"
+    }
+  ]
+}

@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node -e \"const fs=require('fs');const p='dist/index.html';let s=fs.readFileSync(p,'utf8');s=s.replace(/ crossorigin(=\\\"[^\\\"]*\\\")?/g,'');fs.writeFileSync(p,s);console.log('stripped crossorigin')\"",
+    "build": "vite build && node scripts/copy-runtime-public-assets.mjs && node -e \"const fs=require('fs');const p='dist/index.html';let s=fs.readFileSync(p,'utf8');s=s.replace(/ crossorigin(=\\\"[^\\\"]*\\\")?/g,'');fs.writeFileSync(p,s);console.log('stripped crossorigin')\"",
     "preview": "vite preview",
     "verify:redbull-wheels": "node scripts/verify-redbull-wheel-profile.mjs",
+    "metadata": "node scripts/capture-release-metadata.mjs",
+    "release:check": "npm run verify:redbull-wheels && npm run build && npm run metadata",
     "size": "ls -lh dist/index.html 2>/dev/null",
-    "zip": "cd dist && zip -r ../submission.zip ."
+    "zip": "npm run release:check && cd dist && zip -FS -r ../submission.zip . && cd .. && node scripts/capture-release-metadata.mjs --include-zip"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

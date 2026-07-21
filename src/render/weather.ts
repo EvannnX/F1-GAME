@@ -29,6 +29,8 @@ export interface WeatherPreset {
   hazeColor: string
   /** When true, the moon + stars are shown and night-only tweaks kick in. */
   nightMode?: boolean
+  precipitation?: 'rain'
+  rainIntensity?: number
 }
 
 export const WEATHER_PRESETS: WeatherPreset[] = [
@@ -77,6 +79,19 @@ export const WEATHER_PRESETS: WeatherPreset[] = [
     hazeColor: '#a8b4be',
   },
   {
+    id: 'rain',
+    label: '🌧️ 暴雨',
+    sky: '#59646d',
+    fogColor: '#68747c', fogNear: 70, fogFar: 760,
+    sunColor: '#b8c2c8', sunIntensity: 0.75,
+    hemiSky: '#81909a', hemiGround: '#30383c', hemiIntensity: 0.72,
+    exposure: 0.88,
+    cloudColor: '#626d75', cloudOpacity: 1,
+    hazeColor: '#657079',
+    precipitation: 'rain',
+    rainIntensity: 1,
+  },
+  {
     id: 'night',
     label: '🌙 夜晚',
     sky: '#0d1426',
@@ -93,6 +108,9 @@ export const WEATHER_PRESETS: WeatherPreset[] = [
 ]
 
 export function pickRandomWeather(): WeatherPreset {
+  const requested = new URLSearchParams(window.location.search).get('weather')
+  const forced = WEATHER_PRESETS.find((preset) => preset.id === requested)
+  if (forced) return forced
   const i = Math.floor(Math.random() * WEATHER_PRESETS.length)
   return WEATHER_PRESETS[i]
 }

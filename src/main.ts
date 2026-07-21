@@ -14,12 +14,17 @@ import { createMenu, type CameraMode, type MenuStartConfig } from './ui/menu'
 import { showHomeScreen } from './ui/homeScreen'
 import { showHowToPlay } from './ui/howToPlay'
 import { showGarageSelection } from './ui/garage'
+import { installShanghai2018AllianzGridGui } from './ui/shanghai2018AllianzGridGui'
+import {
+  installShanghai2018MapTest,
+  isShanghai2018MapTestEnabled,
+} from './ui/shanghai2018MapTest'
 import { onPlayerCarChange, readSelectedPlayerCar } from './data/playerCars'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createTransitionVideo } from './ui/transitionVideo'
 import { createMinimap } from './ui/minimap'
-import { createTelemetryMap, type TelemetryMapPoint } from './ui/telemetryMap'
+import { createTelemetryMap, type TelemetryMapPoint, type TelemetryMapSource } from './ui/telemetryMap'
 import { createPersonalityCard } from './ui/personalityCard'
 import { installGlbObjectDeletionGui, isGlbObjectDeletionGuiEnabled } from './ui/glbObjectDeletion'
 import { installF1tiApi } from './f1ti/api'
@@ -63,6 +68,8 @@ import {
   createLowPolyShanghaiObstacleSampler,
   createLowPolyShanghaiVisualOptimizer,
   eraseLowPolyShanghaiTriangles,
+  extractShanghai2018GridSlots,
+  listShanghai2018AllianzSlots,
   optimizeLowPolyShanghaiRendering,
   type LowPolyShanghaiBundle,
   type LowPolyShanghaiGroundSampler,
@@ -70,15 +77,14 @@ import {
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
 import { SHANGHAI_GLB_ROAD_ROUTE } from './data/shanghaiGlbRoadRoute'
-import { SHANGHAI_GLB_ROAD_MASK } from './data/shanghaiGlbRoadMask'
 
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
-const GLB_THIRD_BACK_DISTANCE = 4.6
-const GLB_THIRD_UP_DISTANCE = 1.75
-const GLB_THIRD_LOOK_AHEAD = 8.8
-const GLB_THIRD_LOOK_UP = -0.55
-const GLB_THIRD_FOV = 43
+const GLB_THIRD_BACK_DISTANCE = 4.84
+const GLB_THIRD_UP_DISTANCE = 1.54
+const GLB_THIRD_LOOK_AHEAD = 8.4
+const GLB_THIRD_LOOK_UP = -0.23
+const GLB_THIRD_FOV = 48
 const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
   backDistance: GLB_THIRD_BACK_DISTANCE,
   upDistance: GLB_THIRD_UP_DISTANCE,
@@ -86,24 +92,23 @@ const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
   lookUp: GLB_THIRD_LOOK_UP,
   fov: GLB_THIRD_FOV,
 }
-const GLB_VISUAL_GROUND_SINK = 0.12
-const GLB_PLAYER_BASE_VISUAL_SCALE = 0.58
-const GLB_PLAYER_SIZE_MULTIPLIER = 1.7
-const GLB_PLAYER_VISUAL_SCALE = GLB_PLAYER_BASE_VISUAL_SCALE * GLB_PLAYER_SIZE_MULTIPLIER
-const GLB_PLAYER_TARGET_LENGTH_M = 5.0 * GLB_PLAYER_VISUAL_SCALE
-const GLB_START_POSE_STORAGE_KEY = 'f1s_glb_drive_start_pose_v1'
-const GLB_GRID_STORAGE_KEY = 'f1s_glb_grid_placements_v3'
-const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_glb_sign_deletions_v2'
-const LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY = 'f1s_lowpoly_shanghai_placement_v5'
-const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v1'
-const GLB_CAMERA_TUNING_STORAGE_KEY = 'f1s_glb_camera_tuning_v1'
+const GLB_VISUAL_GROUND_SINK = 0.06
+const GLB_PLAYER_VISUAL_SCALE = 1
+const GLB_PLAYER_TARGET_LENGTH_M = 4
+const GLB_START_POSE_STORAGE_KEY = 'f1s_shanghai2018_start_pose_v1'
+const GLB_GRID_STORAGE_KEY = 'f1s_shanghai2018_grid_placements_v2'
+const GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY = 'f1s_shanghai2018_allianz_grid_anchor_v1'
+const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_shanghai2018_object_deletions_v1'
+const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v3'
+const GLB_CAMERA_TUNING_STORAGE_KEY = 'f1s_shanghai2018_camera_tuning_v2'
 const SCENE_CACHE_RESET_PARAMS = ['resetSceneCache', 'clearSceneCache', 'resetMapCache']
 const SCENE_CACHE_STORAGE_KEYS = [
   GLB_START_POSE_STORAGE_KEY,
   GLB_GRID_STORAGE_KEY,
+  'f1s_shanghai2018_grid_placements_v1',
+  GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY,
   GLB_SIGN_DELETIONS_STORAGE_KEY,
   'f1s_glb_sign_deletions_v1',
-  LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY,
   'f1s_glb_drive_start_pose',
   'f1s_direct_glb_start_pose',
   'f1s_lowpoly_shanghai_start_pose',
@@ -120,7 +125,10 @@ const SCENE_CACHE_STORAGE_KEYS = [
   'f1s_first_person_cockpit_placement_v2',
   'f1s_first_person_cockpit_placement_v1',
   CAR_VISUAL_TUNING_STORAGE_KEY,
+  'f1s_car_visual_tuning_v2',
+  'f1s_car_visual_tuning_v1',
   GLB_CAMERA_TUNING_STORAGE_KEY,
+  'f1s_shanghai2018_camera_tuning_v1',
 ]
 
 interface GlbGridPlacement {
@@ -131,11 +139,11 @@ interface GlbGridPlacement {
 }
 
 const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
-  { id: 'ferrari', x: -122.67, z: 116.35, headingDeg: 270.8 },
-  { id: 'mercedes', x: -155.09, z: 116.62, headingDeg: 270.1 },
-  { id: 'mclaren', x: -131.19, z: 109.09, headingDeg: 271.5 },
-  { id: 'player', x: -147.24, z: 109.34, headingDeg: 270.6 },
-  { id: 'redbull', x: -139.35, z: 116.66, headingDeg: -89.6 },
+  { id: 'player', x: -264.27, z: 520.03, headingDeg: 281.7 },
+  { id: 'redbull', x: -230.42, z: 511.9, headingDeg: 281.7 },
+  { id: 'ferrari', x: -257.32, z: 513.86, headingDeg: 284.4 },
+  { id: 'mclaren', x: -240.22, z: 509.83, headingDeg: 283.5 },
+  { id: 'mercedes', x: -247.97, z: 516.04, headingDeg: 282 },
 ]
 
 interface SavedGlbStartPose {
@@ -184,6 +192,12 @@ function shouldBypassHomeScreen(): boolean {
 }
 
 function bootWithHomeScreen(): void {
+  if (isShanghai2018MapTestEnabled()) {
+    const container = document.getElementById('app')
+    if (!container) throw new Error('#app container not found')
+    installShanghai2018MapTest(container)
+    return
+  }
   if (shouldBypassHomeScreen()) {
     bootApp()
     return
@@ -296,6 +310,19 @@ function findGlbGridPlacement(placements: GlbGridPlacement[], id: string): GlbGr
   return placements.find((item) => item.id === id) ?? null
 }
 
+function readShanghai2018AllianzGridAnchor(): { x: number; z: number } | null {
+  try {
+    const raw = localStorage.getItem(GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const x = finiteNumber(parsed.x)
+    const z = finiteNumber(parsed.z)
+    return x === null || z === null ? null : { x, z }
+  } catch {
+    return null
+  }
+}
+
 function normalizeSavedGlbSignDeletion(value: unknown): LowPolyShanghaiTriangleErase | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
@@ -339,23 +366,6 @@ function applySavedGlbSignDeletions(lowPolyShanghai: LowPolyShanghaiBundle): num
   return removed
 }
 
-function readSavedLowPolyShanghaiPlacementForMain(): Record<string, number> | undefined {
-  try {
-    const raw = localStorage.getItem(LOW_POLY_SHANGHAI_PLACEMENT_STORAGE_KEY)
-    if (!raw) return undefined
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const x = finiteNumber(parsed.x)
-    const z = finiteNumber(parsed.z)
-    const y = finiteNumber(parsed.y)
-    const yawDeg = finiteNumber(parsed.yawDeg)
-    const scale = finiteNumber(parsed.scale)
-    if (x === null || z === null || y === null || yawDeg === null || scale === null) return undefined
-    return { x, z, y, yawDeg, scale }
-  } catch {
-    return undefined
-  }
-}
-
 function normalizeSavedGlbStartPose(value: unknown): SavedGlbStartPose | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
@@ -372,15 +382,7 @@ function normalizeSavedGlbStartPose(value: unknown): SavedGlbStartPose | null {
 }
 
 function readSavedGlbStartPose(): SavedGlbStartPose | null {
-  const priorityKeys = [
-    GLB_START_POSE_STORAGE_KEY,
-    'f1s_glb_drive_start_pose',
-    'f1s_direct_glb_start_pose',
-    'f1s_lowpoly_shanghai_start_pose',
-    'f1s_shanghai_glb_start_pose',
-    'f1s_glb_start_pose',
-    'f1s_start_pose',
-  ]
+  const priorityKeys = [GLB_START_POSE_STORAGE_KEY]
   const checked = new Set<string>()
   const readKey = (key: string): SavedGlbStartPose | null => {
     if (checked.has(key)) return null
@@ -416,13 +418,7 @@ function readSavedGlbStartPose(): SavedGlbStartPose | null {
     const pose = readKey(key)
     if (pose) return pose
   }
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i)
-    if (!key || !/(glb|shanghai|start|drive|起点|发车)/i.test(key)) continue
-    const pose = readKey(key)
-    if (pose) return pose
-  }
-  return readKey('f1s_autosave_track_local_points')
+  return null
 }
 
 function writeSavedGlbStartPose(pos: THREE.Vector3, heading: number): void {
@@ -538,38 +534,50 @@ function createGlbGridOpponentStates(
 
 function createGlbTelemetryRouteMap(
   lowPolyShanghai: LowPolyShanghaiBundle,
-): { routePoints: TelemetryMapPoint[]; roadMask: typeof SHANGHAI_GLB_ROAD_MASK & {
-  placementX: number
-  placementZ: number
-  placementYawDeg: number
-  placementScale: number
-} } {
-  const placement = lowPolyShanghai.getPlacement()
-  const rotation = THREE.MathUtils.degToRad(placement.yawDeg)
-  const cos = Math.cos(rotation)
-  const sin = Math.sin(rotation)
+  startAnchor?: THREE.Vector3,
+): TelemetryMapSource {
+  const roadBounds = new THREE.Box3()
+  lowPolyShanghai.group.updateMatrixWorld(true)
+  lowPolyShanghai.group.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    if (!materials.some((material) => material.name === 'tarmac')) return
+    roadBounds.expandByObject(obj)
+  })
+  if (roadBounds.isEmpty()) return { routePoints: [] }
 
-  return {
-    roadMask: {
-      ...SHANGHAI_GLB_ROAD_MASK,
-      placementX: placement.x,
-      placementZ: placement.z,
-      placementYawDeg: placement.yawDeg,
-      placementScale: placement.scale,
-    },
-    routePoints: SHANGHAI_GLB_ROAD_ROUTE.map(([sourceX, sourceZ]) => {
-      const x = sourceX * placement.scale
-      const z = sourceZ * placement.scale
-      return {
-        x: placement.x + x * cos + z * sin,
-        z: placement.z - x * sin + z * cos,
-      }
-    }),
+  let sourceMinX = Infinity
+  let sourceMaxX = -Infinity
+  let sourceMinZ = Infinity
+  let sourceMaxZ = -Infinity
+  for (const [x, z] of SHANGHAI_GLB_ROAD_ROUTE) {
+    sourceMinX = Math.min(sourceMinX, x)
+    sourceMaxX = Math.max(sourceMaxX, x)
+    sourceMinZ = Math.min(sourceMinZ, z)
+    sourceMaxZ = Math.max(sourceMaxZ, z)
   }
+  const sourceWidth = Math.max(1, sourceMaxX - sourceMinX)
+  const sourceHeight = Math.max(1, sourceMaxZ - sourceMinZ)
+  const routePoints: TelemetryMapPoint[] = SHANGHAI_GLB_ROAD_ROUTE.map(([x, z]) => ({
+    x: THREE.MathUtils.lerp(roadBounds.min.x, roadBounds.max.x, (x - sourceMinX) / sourceWidth),
+    z: THREE.MathUtils.lerp(roadBounds.min.z, roadBounds.max.z, (z - sourceMinZ) / sourceHeight),
+  }))
+  if (startAnchor && routePoints.length > 0) {
+    const dx = startAnchor.x - routePoints[0].x
+    const dz = startAnchor.z - routePoints[0].z
+    for (const point of routePoints) {
+      point.x += dx
+      point.z += dz
+    }
+  }
+  return { routePoints }
 }
 
-function findGlbStartPose(ground: LowPolyShanghaiGroundSampler): { pos: THREE.Vector3; heading: number; normal: THREE.Vector3 } {
-  const gridPlayer = findGlbGridPlacement(readSavedGlbGridPlacements(), 'player')
+function findGlbStartPose(
+  ground: LowPolyShanghaiGroundSampler,
+  placements: GlbGridPlacement[],
+): { pos: THREE.Vector3; heading: number; normal: THREE.Vector3 } {
+  const gridPlayer = findGlbGridPlacement(placements, 'player')
   if (gridPlayer) return glbDrivePoseFromPlacement(gridPlayer, ground)
 
   const saved = readSavedGlbStartPose()
@@ -648,7 +656,7 @@ function updateGlbThirdPersonCamera(
   normal: THREE.Vector3,
   tuning: GlbCameraTuning,
 ): void {
-  if (camera.near !== 1) camera.near = 1
+  if (camera.near !== 0.65) camera.near = 0.65
   const up = normal.clone().normalize()
   const forward = new THREE.Vector3(Math.sin(heading), 0, Math.cos(heading))
   forward.addScaledVector(up, -forward.dot(up))
@@ -771,7 +779,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
 
   const weather = pickRandomWeather()
   bundle.applyWeather(weather)
-  const lowPolyShanghai = addLowPolyShanghai(bundle.scene, readSavedLowPolyShanghaiPlacementForMain())
+  const lowPolyShanghai = addLowPolyShanghai(bundle.scene)
   const car = createCar({
     visualScale: GLB_PLAYER_VISUAL_SCALE,
     carId: readSelectedPlayerCar(),
@@ -867,7 +875,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive && !objectDeletionGuiActive
       ? driveInput
       : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
-    drive.update(dt, gameInput)
+    if (started) drive.update(dt, gameInput)
     if (started && !glbFinishing) {
       updateGlbRaceProgress(dt)
     }
@@ -912,6 +920,43 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   loop.start()
 
   void lowPolyShanghai.ready.then(async () => {
+    const allianzGridAnchor = readShanghai2018AllianzGridAnchor()
+    const forceAllianzGridSelection = new URLSearchParams(window.location.search).has('allianzGridGui')
+    if (gridPlacementGuiRequested && (!allianzGridAnchor || forceAllianzGridSelection)) {
+      const allianzSlots = listShanghai2018AllianzSlots(lowPolyShanghai.group)
+      car.group.visible = false
+      firstPersonRig.visible = false
+      hideStatus()
+      installShanghai2018AllianzGridGui({
+        scene: bundle.scene,
+        camera: bundle.camera,
+        renderer: bundle.renderer,
+        slots: allianzSlots,
+        onConfirm: (slot) => {
+          localStorage.setItem(GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY, JSON.stringify({
+            x: Number(slot.position.x.toFixed(3)),
+            z: Number(slot.position.z.toFixed(3)),
+          }))
+          const nearbySlots = [...allianzSlots]
+            .sort((a, b) => a.position.distanceToSquared(slot.position) - b.position.distanceToSquared(slot.position))
+            .slice(0, 5)
+          localStorage.setItem(GLB_GRID_STORAGE_KEY, JSON.stringify(nearbySlots.map((nearby, index) => ({
+            id: ['player', 'redbull', 'ferrari', 'mclaren', 'mercedes'][index],
+            x: Number(nearby.position.x.toFixed(3)),
+            z: Number(nearby.position.z.toFixed(3)),
+            headingDeg: Number(THREE.MathUtils.radToDeg(nearby.heading).toFixed(2)),
+          }))))
+          const url = new URL(window.location.href)
+          url.searchParams.delete('allianzGridGui')
+          url.searchParams.set('gridGui', '1')
+          window.location.replace(url.toString())
+        },
+      })
+      showToast(`请选择正确的 Allianz 发车格（共 ${allianzSlots.length} 个）`, 2600)
+      return
+    }
+    const removalAnchor = findGlbGridPlacement(gridPlacements, 'player')
+    extractShanghai2018GridSlots(lowPolyShanghai.group, 5, removalAnchor)
     const removedSigns = applySavedGlbSignDeletions(lowPolyShanghai)
     if (removedSigns > 0) console.log(`[F1S] applied sign deletions: ${removedSigns}`)
     const renderOptimization = optimizeLowPolyShanghaiRendering(lowPolyShanghai.group)
@@ -933,7 +978,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       ground = createLowPolyShanghaiGroundSampler(lowPolyShanghai)
     }
     const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
-    const pose = findGlbStartPose(ground)
+    const pose = findGlbStartPose(ground, gridPlacements)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
@@ -947,8 +992,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       glbPreviousGateCoordinate = 0
       glbFinishing = false
       glbResultVisible = false
-      setObjectOnGroundHeading(car.group, pose.pos, pose.heading, pose.normal)
-      setObjectOnGroundHeading(firstPersonRig, pose.pos, pose.heading, pose.normal)
+      setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
+      setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
       applyCameraModeVisibility()
       glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
       glbOpponentStateById = new Map(
@@ -958,8 +1003,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       )
       glbOpponentCars?.update(glbOpponentStates)
       telemetryMap?.resetTrail()
-      bundle.updateShadowFollow(pose.pos)
-      updateGlbThirdPersonCamera(bundle.camera, pose.pos, pose.heading, pose.normal, glbCameraTuning)
+      bundle.updateShadowFollow(drive.state.pos)
+      updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
     }
     const clearGlbCountdown = (): void => {
       if (countdown) {
@@ -1179,7 +1224,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })
     }
     applySavedCarVisualTuning()
-    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap(lowPolyShanghai))
+    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap(lowPolyShanghai, pose.pos))
     telemetryMap.resetTrail()
     telemetryMap.show()
     updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)

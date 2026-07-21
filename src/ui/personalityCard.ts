@@ -13,23 +13,18 @@
 import { generateRacerPersonalityResult } from '../racerPersonality'
 import type { RaceData } from '../racerPersonality'
 import type { PlayerStats, RacerPersonalityResult } from '../racerPersonality'
-// Anime portraits inlined as data URLs by Vite (assetsInlineLimit=100MB)
-// so the bundle is fully self-contained — no extra files to ship in the
-// ZIP and no relative path lookups.
-import hamiltonPhoto from '../assets/drivers/hamilton.webp?url'
-import antoPhoto from '../assets/drivers/anto.webp?url'
-import verstapanPhoto from '../assets/drivers/verstapan.webp?url'
+import antonelliPortrait from '../../F1-卡通图/KimiAntonelli.png?url'
+import hamiltonPortrait from '../../F1-卡通图/LouisHamilton.png?url'
+import verstappenPortrait from '../../F1-卡通图/MaxVerstappen.png?url'
 
-const F1TI_CARD_MODULES = import.meta.glob('../../f1ti_cards/*.png', {
-  eager: true,
-  query: '?url',
-  import: 'default',
-}) as Record<string, string>
-
-const F1TI_CARD_BY_TYPECODE: Record<string, string> = {}
-for (const [path, url] of Object.entries(F1TI_CARD_MODULES)) {
-  const code = path.match(/\/([A-Z]+)-[^/]+\.png$/)?.[1]
-  if (code) F1TI_CARD_BY_TYPECODE[code] = url
+// The card frame and every piece of copy are live HTML/CSS. Only the driver
+// cutout remains a raster asset, sourced from F1-卡通图. Add a direct
+// import here only when that result code is enabled in driverProfiles.ts;
+// this keeps dormant portraits out of the mobile bundle.
+const PORTRAIT_BY_TYPECODE: Record<string, string> = {
+  ANTO: antonelliPortrait,
+  HMLT: hamiltonPortrait,
+  VSTP: verstappenPortrait,
 }
 
 /** Concrete telemetry captured during the race, used to generate the
@@ -114,13 +109,8 @@ const CARD_RED_SOFT = 'rgba(183,28,28,0.18)'
 const CARD_INK = '#3a1a1a'
 const CARD_INK_SOFT = '#7a4040'
 
-/** Anime portrait per F1TI typeCode. Add an entry here when a new
- *  portrait ships — no other code change needed. Values are data: URLs
- *  produced by Vite's `?url` import (see top of file). */
-const PHOTO_BY_TYPECODE: Record<string, string> = {
-  HMLT: hamiltonPhoto,
-  ANTO: antoPhoto,
-  VSTP: verstapanPhoto,
+const getPortraitUrl = (typeCode: string | undefined): string | undefined => {
+  return typeCode ? PORTRAIT_BY_TYPECODE[typeCode] : undefined
 }
 
 const isLandscape = (): boolean => {
@@ -134,8 +124,11 @@ const isLandscape = (): boolean => {
 export function createPersonalityCard(): PersonalityCardController {
   let host: HTMLDivElement | null = null
   let resolveFn: (() => void) | null = null
+  let resizeObserver: ResizeObserver | null = null
 
   const hide = (): void => {
+    resizeObserver?.disconnect()
+    resizeObserver = null
     if (host && host.parentElement) host.parentElement.removeChild(host)
     host = null
     if (resolveFn) {
@@ -152,7 +145,6 @@ export function createPersonalityCard(): PersonalityCardController {
     hide()
     const personality = data['你的赛车人格']
     const typeCode = personality['类型代码'] as string | undefined
-    const f1tiCardUrl = typeCode ? F1TI_CARD_BY_TYPECODE[typeCode] : null
     const tags = data['核心标签']
     // Telemetry-grounded reasons replace the generic ones when a race
     // actually completed; the archetype flavour line still tags along
@@ -169,69 +161,19 @@ export function createPersonalityCard(): PersonalityCardController {
       host.style.cssText = `
         position: fixed; inset: 0; z-index: 210;
         display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: clamp(6px, 1.2vh, 12px);
         background: rgba(8,12,22,0.94);
         padding: 12px;
+        box-sizing: border-box;
+        overflow: hidden;
         font-family: -apple-system, "PingFang SC", BlinkMacSystemFont, "Helvetica Neue", sans-serif;
       `
-
-      if (f1tiCardUrl) {
-        const stage = document.createElement('div')
-        stage.style.cssText = `
-          position:relative;width:min(96vw,calc(88vh * 12 / 7),1200px);aspect-ratio:12/7;
-          filter:drop-shadow(0 14px 34px rgba(0,0,0,.5));
-        `
-        const cardImage = document.createElement('img')
-        cardImage.src = f1tiCardUrl
-        cardImage.alt = `${personality['匹配车手']} ${personality['类型名称']}`
-        cardImage.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;'
-        stage.appendChild(cardImage)
-
-        const makeLiveStat = (left: string, width: string, label: string, value: string): HTMLDivElement => {
-          const cell = document.createElement('div')
-          cell.style.cssText = `
-            position:absolute;left:${left};top:35.2%;width:${width};height:10.2%;
-            display:flex;flex-direction:column;align-items:center;justify-content:center;
-            background:#fff;color:#bf1f24;line-height:1;pointer-events:none;
-          `
-          const valueEl = document.createElement('div')
-          valueEl.textContent = value
-          valueEl.style.cssText = 'font-size:clamp(15px,2.1vw,27px);font-weight:500;letter-spacing:0;white-space:nowrap;'
-          const labelEl = document.createElement('div')
-          labelEl.textContent = label
-          labelEl.style.cssText = 'margin-top:7px;font-size:clamp(8px,.9vw,12px);color:#795456;letter-spacing:2px;white-space:nowrap;'
-          cell.append(valueEl, labelEl)
-          return cell
-        }
-
-        if (telemetry) {
-          stage.append(
-            makeLiveStat('41.4%', '16.3%', '单圈用时', formatLap(telemetry.bestLapMs)),
-            makeLiveStat('57.7%', '22.8%', '最高时速', `${Math.round(telemetry.topSpeedKmh)} km/h`),
-            makeLiveStat('80.4%', '14.8%', '匹配度', `${personality['匹配度']}%`),
-          )
-        }
-
-        const continueButton = document.createElement('button')
-        continueButton.type = 'button'
-        continueButton.textContent = '继续'
-        continueButton.style.cssText = `
-          position:absolute;right:3%;bottom:4%;min-width:112px;min-height:42px;
-          border:1px solid rgba(255,255,255,.7);border-radius:6px;
-          background:rgba(8,12,22,.78);color:#fff;font-size:14px;font-weight:800;
-          letter-spacing:3px;cursor:pointer;
-        `
-        continueButton.addEventListener('click', hide, { once: true })
-        stage.appendChild(continueButton)
-        host.appendChild(stage)
-        document.body.appendChild(host)
-        return
-      }
 
       // --- Outer card frame.
       const card = document.createElement('div')
       const cardSize = landscape
-        ? 'width: min(94vw, 940px); height: min(82vh, 540px);'
-        : 'width: min(420px, 92vw); aspect-ratio: 1086 / 1449; max-height: 88vh;'
+        ? 'width: min(96vw, calc(80vh * 12 / 7), 1200px); aspect-ratio: 12 / 7; max-height: 80vh;'
+        : 'width: min(420px, 92vw, calc(80vh * 1086 / 1449)); aspect-ratio: 1086 / 1449; max-height: 80vh;'
       card.style.cssText = `
         position: relative;
         ${cardSize}
@@ -268,17 +210,17 @@ export function createPersonalityCard(): PersonalityCardController {
         ? `flex: 0 0 38%; min-height: 0;
            display: flex; align-items: center; justify-content: center;
            overflow: hidden;`
-        : `flex: 0 0 36%; min-height: 0;
+        : `flex: 0 0 28%; min-height: 0;
            display: flex; align-items: center; justify-content: center;
            overflow: hidden;`
       const photo = document.createElement('img')
-      photo.alt = ''
+      photo.alt = `${personality['匹配车手']} 卡通形象`
       photo.style.cssText = `
         max-width: 100%; max-height: 100%;
         object-fit: contain;
         display: block;
       `
-      const photoUrl = typeCode ? PHOTO_BY_TYPECODE[typeCode] : null
+      const photoUrl = getPortraitUrl(typeCode)
       if (photoUrl) {
         photo.src = photoUrl
       } else {
@@ -300,12 +242,9 @@ export function createPersonalityCard(): PersonalityCardController {
       panel.style.cssText = `
         flex: 1 1 0; min-height: 0; min-width: 0;
         display: flex; flex-direction: column;
-        gap: ${landscape ? '8px' : '6px'};
-        overflow-y: auto;
-        overflow-x: hidden;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
-        padding-right: 4px; /* leave room for the scrollbar */
+        gap: ${landscape ? 'clamp(9px, 1.45vh, 16px)' : '7px'};
+        overflow: hidden;
+        padding: ${landscape ? 'clamp(4px, .8vh, 10px) 6px' : '2px 4px'};
       `
 
       // --- "你的赛车人格" wave header.
@@ -333,6 +272,7 @@ export function createPersonalityCard(): PersonalityCardController {
           el.appendChild(dot)
         }
         const t = document.createElement('div')
+        t.className = 'f1ti-card__section-title'
         t.textContent = text
         t.style.cssText = `
           font-size: ${fontSizeCss};
@@ -348,7 +288,7 @@ export function createPersonalityCard(): PersonalityCardController {
         return row
       }
 
-      const headerSize = landscape ? 'clamp(13px, 2.4vh, 17px)' : 'clamp(13px, 2vh, 16px)'
+      const headerSize = landscape ? 'clamp(14px, 2.7vh, 20px)' : 'clamp(13px, 2.2vh, 17px)'
       const personalityHeader = makeWaveHeader('你 的 赛 车 人 格', headerSize)
 
       // --- Driver-name block — the FOCAL POINT of the card.
@@ -389,14 +329,15 @@ export function createPersonalityCard(): PersonalityCardController {
       // --- Type name — sits right under the giant driver name and reads
       // as a SECONDARY headline (much bigger than before).
       const typeLine = document.createElement('div')
+      typeLine.className = 'f1ti-card__type-name'
       typeLine.textContent = personality['类型名称']
       typeLine.style.cssText = `
         text-align: center;
-        font-size: ${landscape ? 'clamp(16px, 2.8vh, 22px)' : 'clamp(15px, 2.4vh, 19px)'};
-        font-weight: 700;
+        font-size: ${landscape ? 'clamp(18px, 3.5vh, 28px)' : 'clamp(16px, 2.7vh, 21px)'};
+        font-weight: 800;
         color: ${CARD_INK};
         letter-spacing: 4px;
-        margin-top: 4px;
+        margin-top: ${landscape ? '6px' : '4px'};
       `
 
       // --- Stat strip: lap time + top speed + match score. Big enough
@@ -405,8 +346,8 @@ export function createPersonalityCard(): PersonalityCardController {
       statStrip.style.cssText = `
         display: flex; justify-content: center; align-items: stretch;
         gap: ${landscape ? '20px' : '14px'};
-        margin: ${landscape ? '6px 8px' : '4px 6px'};
-        padding: ${landscape ? '6px 0' : '4px 0'};
+        margin: ${landscape ? '8px 8px' : '4px 6px'};
+        padding: ${landscape ? 'clamp(8px, 1.5vh, 14px) 0' : '5px 0'};
         border-top: 1px solid ${CARD_RED_SOFT};
         border-bottom: 1px solid ${CARD_RED_SOFT};
       `
@@ -419,18 +360,21 @@ export function createPersonalityCard(): PersonalityCardController {
           gap: 2px;
         `
         const v = document.createElement('div')
+        v.className = 'f1ti-card__stat-value'
         v.textContent = value
         v.style.cssText = `
-          font-size: ${landscape ? 'clamp(15px, 2.6vh, 20px)' : 'clamp(14px, 2.2vh, 17px)'};
-          font-weight: 800;
+          font-size: ${landscape ? 'clamp(18px, 3.5vh, 26px)' : 'clamp(15px, 2.4vh, 19px)'};
+          font-weight: 900;
           color: ${CARD_RED};
           letter-spacing: 1px;
           line-height: 1;
         `
         const l = document.createElement('div')
+        l.className = 'f1ti-card__stat-label'
         l.textContent = label
         l.style.cssText = `
-          font-size: ${landscape ? 'clamp(9px, 1.3vh, 11px)' : 'clamp(8px, 1.2vh, 10px)'};
+          font-size: ${landscape ? 'clamp(10px, 1.7vh, 13px)' : 'clamp(9px, 1.3vh, 11px)'};
+          font-weight: 600;
           color: ${CARD_INK_SOFT};
           letter-spacing: 2px;
         `
@@ -448,24 +392,30 @@ export function createPersonalityCard(): PersonalityCardController {
 
       // --- "为何你是这个类型" header.
       const reasonHeader = makeWaveHeader('为 何 你 是 这 个 类 型', headerSize)
+      reasonHeader.className = 'f1ti-card__reason-heading'
 
       // --- Reasons box. The OUTER panel is the scroll container; this
       // div just lays out the bullets at their natural height.
       const reasonBox = document.createElement('div')
+      reasonBox.className = 'f1ti-card__reasons'
       reasonBox.style.cssText = `
+        flex: 1 1 auto; min-height: 0;
         display: flex; flex-direction: column;
-        gap: 3px;
-        padding: 4px 4px 6px;
+        justify-content: space-evenly;
+        gap: ${landscape ? 'clamp(4px, .8vh, 8px)' : '4px'};
+        padding: ${landscape ? '6px 6px 8px' : '4px 4px 6px'};
         margin: 0 2px;
-        font-size: ${landscape ? 'clamp(11px, 1.85vh, 14px)' : 'clamp(11px, 1.7vh, 13px)'};
-        line-height: 1.55;
+        font-size: ${landscape ? 'clamp(13px, 2.35vh, 17px)' : 'clamp(11px, 1.8vh, 14px)'};
+        font-weight: 500;
+        line-height: 1.65;
         color: ${CARD_INK};
       `
       for (const r of reasons) {
         const line = document.createElement('div')
+        line.className = 'f1ti-card__reason'
         line.textContent = '· ' + r
         line.style.cssText = `
-          padding: 2px 4px 4px;
+          padding: ${landscape ? 'clamp(4px, .8vh, 8px) 6px' : '3px 4px 5px'};
           border-bottom: 1px dashed ${CARD_RED_SOFT};
         `
         reasonBox.appendChild(line)
@@ -473,13 +423,16 @@ export function createPersonalityCard(): PersonalityCardController {
 
       // --- Tags strip (bottom). NO emoji wreath any more.
       const tagStrip = document.createElement('div')
+      tagStrip.className = 'f1ti-card__tags'
       tagStrip.textContent = tags.map((t) => `# ${t}`).join('   ')
       tagStrip.style.cssText = `
         text-align: center;
-        font-size: ${landscape ? 'clamp(11px, 1.7vh, 13px)' : 'clamp(10px, 1.5vh, 12px)'};
+        flex: 0 0 auto;
+        font-size: ${landscape ? 'clamp(13px, 2.2vh, 16px)' : 'clamp(11px, 1.7vh, 13px)'};
+        font-weight: 700;
         color: ${CARD_RED};
         letter-spacing: 2px;
-        margin-top: ${landscape ? '6px' : '4px'};
+        margin: ${landscape ? '4px 0 8px' : '4px 0'};
       `
 
       // --- Assemble the panel.
@@ -500,8 +453,8 @@ export function createPersonalityCard(): PersonalityCardController {
       // --- Continue button.
       const actions = document.createElement('div')
       actions.style.cssText = `
-        position: absolute; bottom: ${landscape ? '12px' : '20px'}; left: 50%;
-        transform: translateX(-50%);
+        flex: 0 0 auto;
+        display: flex; align-items: center; justify-content: center;
         z-index: 2;
       `
       const closeBtn = document.createElement('button')
@@ -518,17 +471,11 @@ export function createPersonalityCard(): PersonalityCardController {
       host.appendChild(actions)
       document.body.appendChild(host)
 
-      // After layout: shrink the driver name until it fits inside the
-      // bracketed box. Long names ("ANDREA KIMI ANTONELLI", "GUENTHER
-      // STEINER") would otherwise overflow the brackets at the
-      // landscape font ceiling. We start at the CSS-clamped size and
-      // step down 1 px at a time until either it fits or we hit a
-      // floor. requestAnimationFrame so we measure post-layout.
-      requestAnimationFrame(() => {
+      // Fit every text block into one card without scrolling. The base CSS
+      // stays generous on large screens; compact devices progressively
+      // tighten typography and spacing only as much as required.
+      const fitContents = (): void => {
         const minSize = 18
-        // The brackets are absolutely positioned at left/right of
-        // nameBox and are 18 px wide each, so subtract a generous
-        // margin so glyphs don't touch the bracket strokes.
         const horizontalReserve = 56
         const limit = Math.max(0, nameBox.clientWidth - horizontalReserve)
         let size = parseFloat(getComputedStyle(driverName).fontSize) || 32
@@ -544,7 +491,57 @@ export function createPersonalityCard(): PersonalityCardController {
           driverName.style.letterSpacing = '1px'
           driverName.style.lineHeight = '1.05'
         }
-      })
+
+        const shrinkTargets: Array<{ elements: Element[]; floor: number }> = [
+          { elements: Array.from(panel.querySelectorAll('.f1ti-card__section-title')), floor: 10 },
+          { elements: [driverName], floor: 18 },
+          { elements: [typeLine], floor: 13 },
+          { elements: Array.from(panel.querySelectorAll('.f1ti-card__stat-value')), floor: 13 },
+          { elements: Array.from(panel.querySelectorAll('.f1ti-card__stat-label')), floor: 8 },
+          { elements: [reasonBox], floor: 10 },
+          { elements: [tagStrip], floor: 9 },
+        ]
+        const hasOverflow = (): boolean => (
+          panel.scrollHeight > panel.clientHeight + 1 ||
+          reasonBox.scrollHeight > reasonBox.clientHeight + 1
+        )
+
+        let pass = 0
+        while (hasOverflow() && pass < 18) {
+          for (const target of shrinkTargets) {
+            for (const element of target.elements) {
+              const htmlElement = element as HTMLElement
+              const current = parseFloat(getComputedStyle(htmlElement).fontSize)
+              if (current > target.floor) {
+                htmlElement.style.fontSize = `${Math.max(target.floor, current - 0.75)}px`
+              }
+            }
+          }
+          const panelGap = parseFloat(getComputedStyle(panel).gap) || 0
+          panel.style.gap = `${Math.max(2, panelGap - 0.75)}px`
+          const reasonGap = parseFloat(getComputedStyle(reasonBox).gap) || 0
+          reasonBox.style.gap = `${Math.max(1, reasonGap - 0.5)}px`
+          const namePaddingY = parseFloat(getComputedStyle(nameBox).paddingTop) || 0
+          nameBox.style.paddingTop = `${Math.max(5, namePaddingY - 1)}px`
+          nameBox.style.paddingBottom = `${Math.max(5, namePaddingY - 1)}px`
+          const statPaddingY = parseFloat(getComputedStyle(statStrip).paddingTop) || 0
+          statStrip.style.paddingTop = `${Math.max(2, statPaddingY - 0.75)}px`
+          statStrip.style.paddingBottom = `${Math.max(2, statPaddingY - 0.75)}px`
+          for (const reasonLine of reasonBox.children) {
+            const line = reasonLine as HTMLElement
+            const linePaddingY = parseFloat(getComputedStyle(line).paddingTop) || 0
+            line.style.paddingTop = `${Math.max(1, linePaddingY - 0.5)}px`
+            line.style.paddingBottom = `${Math.max(1, linePaddingY - 0.5)}px`
+          }
+          pass += 1
+        }
+      }
+
+      requestAnimationFrame(fitContents)
+      if ('ResizeObserver' in window) {
+        resizeObserver = new ResizeObserver(() => requestAnimationFrame(fitContents))
+        resizeObserver.observe(card)
+      }
     })
   }
 
