@@ -77,6 +77,9 @@ import {
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
 import { SHANGHAI_GLB_ROAD_ROUTE } from './data/shanghaiGlbRoadRoute'
+import { warmRuntimeAssetCache } from './cache/runtimeAssets'
+
+THREE.Cache.enabled = true
 
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
@@ -213,6 +216,8 @@ function bootWithHomeScreen(): void {
     })
   })
 
+  void warmRuntimeAssetCache()
+
   const bootInBackground = (): void => {
     try {
       bootApp(markGameReady)
@@ -221,14 +226,7 @@ function bootWithHomeScreen(): void {
       markGameReady()
     }
   }
-  const idleWindow = window as Window & {
-    requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
-  }
-  if (idleWindow.requestIdleCallback) {
-    idleWindow.requestIdleCallback(bootInBackground, { timeout: 500 })
-  } else {
-    window.setTimeout(bootInBackground, 180)
-  }
+  window.setTimeout(bootInBackground, 0)
 }
 
 function createStatusPanel(): HTMLDivElement {
@@ -1332,7 +1330,6 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
     if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested && !objectDeletionGuiRequested) {
       started = false
-      showToast('第三视角 GLB 主游戏已就绪', 1600)
     }
   }).catch((e) => {
     console.warn('[F1S] GLB version failed:', e)

@@ -13,6 +13,10 @@ const SHANGHAI_2018_TEXTURE_OVERRIDES: Record<string, string> = {
   '15': `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
   Pit_lane: `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
 }
+export const LOW_POLY_SHANGHAI_RUNTIME_URLS = [
+  lowPolyShanghaiUrl,
+  ...new Set(Object.values(SHANGHAI_2018_TEXTURE_OVERRIDES)),
+]
 const SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS = new Set([
   'lg_pit_exit_light_b_01', 'Recinto', 'sha_barrier_grandstandboundary_a',
   'sha_grandstand_group_d', 'core_start_lights_a', 'lg_marshal_light_b_light',
@@ -45,7 +49,9 @@ const SHANGHAI_2018_DRIVE_SURFACE_MATERIALS = new Set([
   'tarmac', '14', '15', 'Pit_lane', 'Out', 'Prato', '28', '35', '32',
   '17', '16', '13', '9!0', '12', 'Pirelli_terra', 'Petronas_out',
   'Out_rolex', '2!0', '24', '22', '23', '20', '21', 'Kerb_giallo',
+  'RUG_blu', 'Spec_glill',
 ])
+const SHANGHAI_2018_ROADLIKE_RUNOFF_MATERIALS = new Set(['RUG_blu', 'Spec_glill'])
 const ROAD_SURFACE_HINTS = ['road', 'tarmac', 'line_white']
 const GROUND_SURFACE_HINTS = [
   ...ROAD_SURFACE_HINTS,
@@ -103,6 +109,7 @@ export interface LowPolyShanghaiGroundHit {
   point: THREE.Vector3
   normal: THREE.Vector3
   isRoad: boolean
+  isRunoff?: boolean
 }
 
 export interface LowPolyShanghaiGroundSampler {
@@ -867,6 +874,11 @@ function hitHasRoadHint(hit: THREE.Intersection): boolean {
   return ROAD_SURFACE_HINTS.some((hint) => name.includes(hint))
 }
 
+function hitHasDriveSurfaceHint(hit: THREE.Intersection): boolean {
+  const materialName = materialNameForHit(hit)
+  return SHANGHAI_2018_DRIVE_SURFACE_MATERIALS.has(materialName) || hitHasRoadHint(hit)
+}
+
 function hitNormalY(hit: THREE.Intersection): number {
   if (!hit.face) return 0
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)
@@ -918,8 +930,16 @@ export function createLowPolyShanghaiObstacleSampler(
   const cellSize = 8
   const maxPointsPerMesh = 6000
   const maxPointsPerCell = 36
+  const obstaclePadding = 0.2
   const grid = new Map<string, THREE.Vector3[]>()
   const tmp = new THREE.Vector3()
+  const triangleA = new THREE.Vector3()
+  const triangleB = new THREE.Vector3()
+  const triangleC = new THREE.Vector3()
+  const triangleCenter = new THREE.Vector3()
+  const triangleNormal = new THREE.Vector3()
+  const triangleEdgeA = new THREE.Vector3()
+  const triangleEdgeB = new THREE.Vector3()
 
   const cellKey = (x: number, z: number): string => `${Math.floor(x / cellSize)}:${Math.floor(z / cellSize)}`
   const addPoint = (point: THREE.Vector3): void => {
@@ -947,14 +967,33 @@ export function createLowPolyShanghaiObstacleSampler(
       : materialHasObstacleSurfaceHint(target, materials[0]?.name ?? '', materials.length)
         ? [{ start: 0, count: index?.count ?? position.count, materialIndex: 0 }]
         : []
-    const eligiblePointCount = ranges.reduce((sum, range) => sum + range.count, 0)
-    const step = Math.max(1, Math.floor(eligiblePointCount / maxPointsPerMesh))
+    const eligibleTriangleCount = ranges.reduce((sum, range) => sum + Math.floor(range.count / 3), 0)
+    const triangleStep = Math.max(1, Math.ceil(eligibleTriangleCount / maxPointsPerMesh))
     for (const range of ranges) {
       const end = Math.min(range.start + range.count, index?.count ?? position.count)
-      for (let offset = range.start; offset < end; offset += step) {
-        const vertex = index ? index.getX(offset) : offset
-        tmp.fromBufferAttribute(position, vertex).applyMatrix4(target.matrixWorld)
-        if (Number.isFinite(tmp.x) && Number.isFinite(tmp.y) && Number.isFinite(tmp.z)) {
+      for (let offset = range.start; offset + 2 < end; offset += triangleStep * 3) {
+        const vertexA = index ? index.getX(offset) : offset
+        const vertexB = index ? index.getX(offset + 1) : offset + 1
+        const vertexC = index ? index.getX(offset + 2) : offset + 2
+        triangleA.fromBufferAttribute(position, vertexA).applyMatrix4(target.matrixWorld)
+        triangleB.fromBufferAttribute(position, vertexB).applyMatrix4(target.matrixWorld)
+        triangleC.fromBufferAttribute(position, vertexC).applyMatrix4(target.matrixWorld)
+        triangleEdgeA.subVectors(triangleB, triangleA)
+        triangleEdgeB.subVectors(triangleC, triangleA)
+        triangleNormal.crossVectors(triangleEdgeA, triangleEdgeB)
+        if (triangleNormal.lengthSq() < 1e-8) continue
+        triangleNormal.normalize()
+        if (Math.abs(triangleNormal.y) > 0.5) continue
+        const verticalSpan = Math.max(triangleA.y, triangleB.y, triangleC.y) - Math.min(triangleA.y, triangleB.y, triangleC.y)
+        if (verticalSpan < 0.35) continue
+        triangleCenter.copy(triangleA).add(triangleB).add(triangleC).multiplyScalar(1 / 3)
+        if (Number.isFinite(triangleCenter.x) && Number.isFinite(triangleCenter.y) && Number.isFinite(triangleCenter.z)) {
+          addPoint(triangleCenter)
+          tmp.copy(triangleA).add(triangleB).multiplyScalar(0.5)
+          addPoint(tmp)
+          tmp.copy(triangleB).add(triangleC).multiplyScalar(0.5)
+          addPoint(tmp)
+          tmp.copy(triangleC).add(triangleA).multiplyScalar(0.5)
           addPoint(tmp)
         }
       }
@@ -967,7 +1006,7 @@ export function createLowPolyShanghaiObstacleSampler(
   ): LowPolyShanghaiObstacleHit | null => {
     if (grid.size === 0) return null
     const radius = options.radius ?? 1.1
-    const queryRadius = radius + 0.85
+    const queryRadius = radius + obstaclePadding
     const queryRadiusSq = queryRadius * queryRadius
     const minCellX = Math.floor((point.x - queryRadius) / cellSize)
     const maxCellX = Math.floor((point.x + queryRadius) / cellSize)
@@ -1049,7 +1088,12 @@ export function createLowPolyShanghaiGroundSampler(
     if (cache.has(key)) {
       const cached = cache.get(key)
       return cached
-        ? { point: cached.point.clone(), normal: cached.normal.clone(), isRoad: cached.isRoad }
+        ? {
+            point: cached.point.clone(),
+            normal: cached.normal.clone(),
+            isRoad: cached.isRoad,
+            isRunoff: cached.isRunoff,
+          }
         : null
     }
 
@@ -1063,21 +1107,37 @@ export function createLowPolyShanghaiGroundSampler(
     raycaster.far = 6000
     const targets = groundTargets.length ? groundTargets : (roadTargets.length ? roadTargets : [lowPolyShanghai.group])
     const hits = raycaster.intersectObjects(targets, true)
-    const roadHit = hits.find((hit) => hitHasRoadHint(hit) && hitNormalY(hit) > 0.25)
-    const fallbackHit = roadHit ?? hits.find((hit) => hitNormalY(hit) > 0.25) ?? null
-    if (!fallbackHit) {
+    const runoffHit = hits.find((hit) =>
+      SHANGHAI_2018_ROADLIKE_RUNOFF_MATERIALS.has(materialNameForHit(hit)),
+    ) ?? null
+    const physicalSurfaceHit = hits.find((hit) =>
+      !SHANGHAI_2018_ROADLIKE_RUNOFF_MATERIALS.has(materialNameForHit(hit)) &&
+      hitHasDriveSurfaceHint(hit) &&
+      hitNormalY(hit) > 0.25,
+    ) ?? null
+    const surfaceHit = physicalSurfaceHit ??
+      (runoffHit && hitNormalY(runoffHit) > 0.25 ? runoffHit : null) ??
+      hits.find((hit) => hitNormalY(hit) > 0.25) ?? null
+    if (!surfaceHit) {
       cache.set(key, null)
       return null
     }
 
+    const surfaceMaterialName = materialNameForHit(surfaceHit)
     const result: LowPolyShanghaiGroundHit = {
-      point: fallbackHit.point.clone(),
-      normal: hitWorldNormal(fallbackHit),
-      isRoad: roadHit !== undefined,
+      point: surfaceHit.point.clone(),
+      normal: hitWorldNormal(surfaceHit),
+      isRoad: hitHasRoadHint(surfaceHit) || runoffHit !== null,
+      isRunoff: runoffHit !== null || SHANGHAI_2018_ROADLIKE_RUNOFF_MATERIALS.has(surfaceMaterialName),
     }
     if (cache.size > 16000) cache.clear()
     cache.set(key, result)
-    return { point: result.point.clone(), normal: result.normal.clone(), isRoad: result.isRoad }
+    return {
+      point: result.point.clone(),
+      normal: result.normal.clone(),
+      isRoad: result.isRoad,
+      isRunoff: result.isRunoff,
+    }
   }
 
   return { sampleGroundAt }
@@ -1105,6 +1165,7 @@ export async function createLowPolyShanghaiGroundGridSampler(
   const nz = new Float32Array(total)
   const hit = new Uint8Array(total)
   const road = new Uint8Array(total)
+  const runoff = new Uint8Array(total)
 
   const idx = (col: number, row: number): number => row * cols + col
   for (let row = 0; row < rows; row++) {
@@ -1121,6 +1182,7 @@ export async function createLowPolyShanghaiGroundGridSampler(
       }
       hit[i] = 1
       road[i] = sample.isRoad ? 1 : 0
+      runoff[i] = sample.isRunoff ? 1 : 0
       y[i] = sample.point.y
       nx[i] = sample.normal.x
       ny[i] = sample.normal.y
@@ -1166,7 +1228,9 @@ export async function createLowPolyShanghaiGroundGridSampler(
     const row0 = Math.floor(gz)
     const tx = gx - col0
     const tz = gz - row0
-    if (col0 < 0 || row0 < 0 || col0 >= cols - 1 || row0 >= rows - 1) return null
+    if (col0 < 0 || row0 < 0 || col0 >= cols - 1 || row0 >= rows - 1) {
+      return rawSampler.sampleGroundAt(x, z)
+    }
     const i00 = idx(col0, row0)
     const i10 = idx(col0 + 1, row0)
     const i01 = idx(col0, row0 + 1)
@@ -1174,12 +1238,15 @@ export async function createLowPolyShanghaiGroundGridSampler(
     const allHit = hit[i00] && hit[i10] && hit[i01] && hit[i11]
 
     if (!allHit) {
+      const exact = rawSampler.sampleGroundAt(x, z)
+      if (exact) return exact
       const nearest = nearestValid(Math.round(gx), Math.round(gz))
       if (nearest < 0) return null
       return {
         point: new THREE.Vector3(x, y[nearest], z),
         normal: new THREE.Vector3(nx[nearest], ny[nearest], nz[nearest]).normalize(),
         isRoad: road[nearest] === 1,
+        isRunoff: runoff[nearest] === 1,
       }
     }
 
@@ -1194,10 +1261,12 @@ export async function createLowPolyShanghaiGroundGridSampler(
       nz[i00] * w00 + nz[i10] * w10 + nz[i01] * w01 + nz[i11] * w11,
     ).normalize()
     const roadWeight = road[i00] * w00 + road[i10] * w10 + road[i01] * w01 + road[i11] * w11
+    const runoffWeight = runoff[i00] * w00 + runoff[i10] * w10 + runoff[i01] * w01 + runoff[i11] * w11
     return {
       point: new THREE.Vector3(x, sy, z),
       normal,
       isRoad: roadWeight >= 0.5,
+      isRunoff: runoffWeight > 0.05,
     }
   }
 

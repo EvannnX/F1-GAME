@@ -17,9 +17,9 @@ const AUTO_CRUISE_DECEL = 18
 const TURN_RATE = 2.9
 const RIDE_HEIGHT = 0.09
 const SLOPE_GRAVITY_FACTOR = 0.42
-const CAR_COLLISION_RADIUS = 1.45
-const WALL_REBOUND_SPEED = 10.5
-const WALL_REBOUND_DAMPING = 7.5
+const CAR_COLLISION_RADIUS = 0.82
+const WALL_REBOUND_SPEED = 3.2
+const WALL_REBOUND_DAMPING = 10
 const OBSTACLE_CHECK_INTERVAL = 0.045
 const CHASSIS_SAMPLE_OFFSET = 1.35
 const MAX_GROUND_SAMPLE_DELTA = 0.45
@@ -106,7 +106,12 @@ export function createGlbDrivePhysics(
     point.x = state.pos.x
     point.z = state.pos.z
     normal.normalize()
-    return { point, normal, isRoad: center.isRoad }
+    return {
+      point,
+      normal,
+      isRoad: center.isRoad,
+      isRunoff: samples.some((sample) => sample.isRunoff === true),
+    }
   }
 
   const reset = (pose: { pos: THREE.Vector3; heading: number; normal?: THREE.Vector3 }): void => {
@@ -164,22 +169,29 @@ export function createGlbDrivePhysics(
       reboundVelocity.set(0, 0, 0)
     }
 
+    const hit = sampleChassisGround(forward)
+    if (hit?.isRunoff) reboundVelocity.set(0, 0, 0)
+
     obstacleCheckTimer += dt
-    if (obstacles && obstacleCheckTimer >= OBSTACLE_CHECK_INTERVAL && was.distanceToSquared(state.pos) > 0.0004) {
+    if (obstacles && !hit?.isRunoff && obstacleCheckTimer >= OBSTACLE_CHECK_INTERVAL && was.distanceToSquared(state.pos) > 0.0004) {
       obstacleCheckTimer = 0
       const side = forward.clone().negate()
       const obstacle = obstacles.sampleObstacleBetween(was, state.pos, {
         radius: CAR_COLLISION_RADIUS,
         side,
       })
-      if (obstacle) {
-        state.pos.copy(was).addScaledVector(obstacle.normal, 0.18)
-        reboundVelocity.copy(obstacle.normal).multiplyScalar(WALL_REBOUND_SPEED)
-        state.speed *= forward.dot(obstacle.normal) < 0 ? 0.12 : 0.35
+      const impactDot = obstacle ? forward.dot(obstacle.normal) : 1
+      if (obstacle && impactDot < 0.05) {
+        state.pos.copy(was).addScaledVector(obstacle.normal, 0.04)
+        if (impactDot < -0.15) {
+          reboundVelocity.copy(obstacle.normal).multiplyScalar(WALL_REBOUND_SPEED * Math.min(1, -impactDot))
+        } else {
+          reboundVelocity.set(0, 0, 0)
+        }
+        state.speed *= impactDot < -0.35 ? 0.28 : 0.65
       }
     }
 
-    const hit = sampleChassisGround(forward)
     if (hit) {
       applyHit(hit, dt)
       lastGood = state.pos.clone()
@@ -187,11 +199,11 @@ export function createGlbDrivePhysics(
       return
     }
 
-    // No ground mesh below us: don't glue the car to an old "good" point.
-    // Stay at the previous frame's pose so the player can steer/brake out.
-    state.pos.copy(was)
+    // Keep moving across small holes in imported runoff geometry. Reverting
+    // x/z to `was` traps the car forever because every retry hits the same gap.
     state.pos.y = lastGood.y
-    state.speed *= Math.exp(-3.2 * dt)
+    state.normal.lerp(new THREE.Vector3(0, 1, 0), 1 - Math.exp(-3 * dt)).normalize()
+    state.speed *= Math.exp(-0.9 * dt)
     state.onRoad = false
   }
 

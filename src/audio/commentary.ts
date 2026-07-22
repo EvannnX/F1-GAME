@@ -77,6 +77,10 @@ const COMMENTARY_CLIPS: Record<CommentaryEvent, ClipConfig> = {
   podium_reveal:       { url: 'audio/commentary/31_podium_reveal.mp3',       priority: 95, cooldownMs: 999_999 },
 }
 
+export const COMMENTARY_ASSET_URLS = [...new Set(
+  Object.values(COMMENTARY_CLIPS).map((clip) => clip.url),
+)]
+
 // --- Detection thresholds. Tuned for this game's units (m/s, projection
 // offset metres, lapProgress 0..1). ROAD_HALF_WIDTH=7, KERB_WIDTH=2,
 // physics.HARD_OFFSET=9 triggers off-track crash, so near-miss lives in
