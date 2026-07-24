@@ -5,7 +5,11 @@ import mercedesUrl from '../assets/models/Mercedes_W13.glb?url'
 import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
 
 export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes'
-export type PlayerCarWheelStrategy = 'redbull-github-v1' | 'pending'
+export type PlayerCarWheelStrategy =
+  | 'redbull-github-v1'
+  | 'ferrari-material-v1'
+  | 'mclaren-material-v1'
+  | 'mercedes-material-v1'
 
 export interface PlayerCarDefinition {
   id: PlayerCarId
@@ -40,7 +44,7 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     reverse: true,
     teamId: 'ferrari',
     accent: '#e3202f',
-    wheelStrategy: 'pending',
+    wheelStrategy: 'ferrari-material-v1',
   },
   {
     id: 'mclaren',
@@ -51,7 +55,7 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     reverse: false,
     teamId: 'mclaren',
     accent: '#ff8700',
-    wheelStrategy: 'pending',
+    wheelStrategy: 'mclaren-material-v1',
   },
   {
     id: 'mercedes',
@@ -62,7 +66,7 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     reverse: true,
     teamId: 'merc',
     accent: '#00a99d',
-    wheelStrategy: 'pending',
+    wheelStrategy: 'mercedes-material-v1',
   },
 ] as const
 

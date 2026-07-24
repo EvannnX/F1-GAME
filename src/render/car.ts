@@ -90,6 +90,38 @@ interface RedBullWheelComponents {
   steering: Map<RedBullWheelSlot, THREE.Object3D[]>
 }
 
+interface MaterialWheelProfile {
+  materials: ReadonlySet<string>
+  lateralMinRatio: number
+  longitudinalMinRatio: number
+}
+
+const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull'>, MaterialWheelProfile> = {
+  ferrari: {
+    // `Tyre` supplies the rubber while the other four materials contain the
+    // wheel faces/rims. `base` is intentionally excluded because it also
+    // contains most of the chassis.
+    materials: new Set(['tyre', 'secondary', 'chrome', 'lambert1']),
+    lateralMinRatio: 0.35,
+    longitudinalMinRatio: 0.18,
+  },
+  mclaren: {
+    materials: new Set(['rim_png', 'tread_png', 'tyrewall_png']),
+    // These materials are wheel-only. Keep the threshold low so the inboard
+    // rim/tread vertices join the same rigid pivot instead of staying behind
+    // and making the front tyres look pinched inward while steering.
+    lateralMinRatio: 0.05,
+    longitudinalMinRatio: 0.08,
+  },
+  mercedes: {
+    // The W13 keeps all four tyre shells in one Draco mesh. Hub materials are
+    // shared with the chassis, so only the rubber is safe to animate.
+    materials: new Set(['tyre']),
+    lateralMinRatio: 0.25,
+    longitudinalMinRatio: 0.18,
+  },
+}
+
 let dracoLoader: DRACOLoader | null = null
 
 function makeMaterialInteriorVisible(material: THREE.Material): void {
@@ -892,6 +924,137 @@ function createRedBullWheelRigs(root: THREE.Object3D): WheelRig[] {
   return rigs
 }
 
+function splitMaterialWheelComponents(
+  root: THREE.Object3D,
+  profile: MaterialWheelProfile,
+): Map<RedBullWheelSlot, THREE.Object3D[]> {
+  const rolling = new Map<RedBullWheelSlot, THREE.Object3D[]>([
+    ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
+  ])
+  root.updateMatrixWorld(true)
+  const modelBox = new THREE.Box3().setFromObject(root)
+  const modelCenter = modelBox.getCenter(new THREE.Vector3())
+  const modelSize = modelBox.getSize(new THREE.Vector3())
+  const candidates: THREE.Mesh[] = []
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry || !mesh.parent) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    if (materials.some((material) => profile.materials.has((material?.name ?? '').toLowerCase()))) {
+      candidates.push(mesh)
+    }
+  })
+
+  const point = new THREE.Vector3()
+  for (const mesh of candidates) {
+    const parent = mesh.parent
+    const position = mesh.geometry.getAttribute('position')
+    if (!parent || !position) continue
+    const index = mesh.geometry.index
+    const total = index?.count ?? position.count
+    const triangleStarts = new Map<RedBullWheelSlot, number[]>([
+      ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
+    ])
+    const staticTriangles: number[] = []
+
+    for (let offset = 0; offset + 2 < total; offset += 3) {
+      let x = 0
+      let z = 0
+      for (let vertex = 0; vertex < 3; vertex++) {
+        point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+          .applyMatrix4(mesh.matrixWorld)
+        x += point.x
+        z += point.z
+      }
+      x /= 3
+      z /= 3
+      const inWheelLane = Math.abs(x - modelCenter.x) >= modelSize.x * profile.lateralMinRatio
+      const nearAxle = Math.abs(z - modelCenter.z) >= modelSize.z * profile.longitudinalMinRatio
+      if (!inWheelLane || !nearAxle) {
+        staticTriangles.push(offset)
+        continue
+      }
+      const side = x < modelCenter.x ? 'left' : 'right'
+      const axle = z >= modelCenter.z ? 'front' : 'rear'
+      triangleStarts.get(`${side}-${axle}`)?.push(offset)
+    }
+
+    const wheelGeometries = new Map<RedBullWheelSlot, THREE.BufferGeometry>()
+    for (const [slot, starts] of triangleStarts) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, starts)
+      if (geometry) wheelGeometries.set(slot, geometry)
+    }
+    const staticGeometry = buildTriangleSubsetGeometry(mesh.geometry, staticTriangles)
+    if (!wheelGeometries.size) {
+      staticGeometry?.dispose()
+      continue
+    }
+
+    if (staticGeometry) {
+      const staticMesh = new THREE.Mesh(staticGeometry, mesh.material)
+      staticMesh.name = `material-wheel-static-${mesh.name}`
+      staticMesh.position.copy(mesh.position)
+      staticMesh.quaternion.copy(mesh.quaternion)
+      staticMesh.scale.copy(mesh.scale)
+      staticMesh.castShadow = mesh.castShadow
+      staticMesh.receiveShadow = mesh.receiveShadow
+      staticMesh.frustumCulled = mesh.frustumCulled
+      parent.add(staticMesh)
+    }
+    for (const [slot, geometry] of wheelGeometries) {
+      const component = new THREE.Mesh(geometry, mesh.material)
+      component.name = `material-wheel-${slot}-${mesh.name}`
+      component.position.copy(mesh.position)
+      component.quaternion.copy(mesh.quaternion)
+      component.scale.copy(mesh.scale)
+      component.castShadow = mesh.castShadow
+      component.receiveShadow = mesh.receiveShadow
+      component.frustumCulled = mesh.frustumCulled
+      parent.add(component)
+      rolling.get(slot)?.push(component)
+    }
+    parent.remove(mesh)
+    mesh.geometry.dispose()
+  }
+  root.updateMatrixWorld(true)
+  return rolling
+}
+
+function createMaterialWheelRigs(root: THREE.Object3D, profile: MaterialWheelProfile): WheelRig[] {
+  const wheelParts = splitMaterialWheelComponents(root, profile)
+  const rigs: WheelRig[] = []
+  for (const [name, rollingParts] of wheelParts) {
+    if (!rollingParts.length) continue
+    const axleWorld = smallestPrincipalAxisForObjects(rollingParts)
+    const wheelCenter = renderedBoxForObjects(rollingParts).getCenter(new THREE.Vector3())
+    const steerPivot = createPivotForObjects(
+      root,
+      rollingParts,
+      `player-${name}-steer-pivot`,
+      wheelCenter,
+    )
+    if (!steerPivot) continue
+    const spinPivot = createPivotForObjects(
+      steerPivot.pivot,
+      rollingParts,
+      `player-${name}-spin-pivot`,
+      wheelCenter,
+    )
+    if (!spinPivot) continue
+    const pivotWorldQuaternion = spinPivot.pivot.getWorldQuaternion(new THREE.Quaternion())
+    const axleLocal = axleWorld.clone().applyQuaternion(pivotWorldQuaternion.invert()).normalize()
+    rigs.push({
+      name,
+      steerable: name.endsWith('-front'),
+      steerPivot,
+      spinPivots: [spinPivot],
+      spinAxis: axleLocal,
+      spin: 0,
+    })
+  }
+  return rigs
+}
+
 function createSteerOnlyRig(
   root: THREE.Object3D,
   name: string,
@@ -944,10 +1107,8 @@ function fitGltfToTrack(model: THREE.Object3D): void {
 function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): WheelRig[] {
   const strategy = playerCarById(carId).wheelStrategy
   if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
-
-  // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
-  // static wheels until their own mesh mapping and pivots have been verified.
-  return []
+  if (carId === 'redbull') return []
+  return createMaterialWheelRigs(model, MATERIAL_WHEEL_PROFILES[carId])
 }
 
 export function createCar(options: CarOptions = {}): CarBundle {
@@ -1075,6 +1236,13 @@ export function createCar(options: CarOptions = {}): CarBundle {
       log(`parsed OK, meshes=${meshCount}, fitting…`)
 
       fitGltfToTrack(model)
+      if (definition.reverse) {
+        // Ferrari and Mercedes are authored tail-first relative to the game's
+        // +Z forward convention. Rotate the complete model before extracting
+        // wheel slots so their front axle is classified correctly as well.
+        model.rotation.y += Math.PI
+        model.updateMatrixWorld(true)
+      }
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
