@@ -76,7 +76,10 @@ import {
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
-import { SHANGHAI_OPTIMAL_RACING_LINE } from './data/shanghaiOptimalRacingLine'
+import {
+  SHANGHAI_FINISH_LINE_INDEX,
+  SHANGHAI_OPTIMAL_RACING_LINE,
+} from './data/shanghaiOptimalRacingLine'
 import { warmRuntimeAssetCache } from './cache/runtimeAssets'
 import { createRacingGuideLine } from './render/racingGuideLine'
 
@@ -99,6 +102,26 @@ const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
 const GLB_VISUAL_GROUND_SINK = 0.06
 const GLB_PLAYER_VISUAL_SCALE = 1
 const GLB_PLAYER_TARGET_LENGTH_M = 4
+const GLB_LAP_ROUTE = [
+  SHANGHAI_OPTIMAL_RACING_LINE[SHANGHAI_FINISH_LINE_INDEX],
+  ...SHANGHAI_OPTIMAL_RACING_LINE.slice(0, SHANGHAI_FINISH_LINE_INDEX).reverse(),
+  ...SHANGHAI_OPTIMAL_RACING_LINE.slice(SHANGHAI_FINISH_LINE_INDEX + 1).reverse(),
+]
+const GLB_FINISH_SAMPLE = GLB_LAP_ROUTE[0]
+const GLB_FINISH_X = GLB_FINISH_SAMPLE[0]
+const GLB_FINISH_Z = GLB_FINISH_SAMPLE[2]
+// The raceline mesh is stored opposite to the cars' actual race direction.
+const GLB_FINISH_FORWARD_X = -GLB_FINISH_SAMPLE[6]
+const GLB_FINISH_FORWARD_Z = -GLB_FINISH_SAMPLE[8]
+const GLB_FINISH_GATE_HALF_WIDTH_M = 18
+const GLB_FINISH_ARM_DISTANCE_M = 3500
+const GLB_LAP_CHECKPOINT_RADIUS_M = 28
+const GLB_LAP_CHECKPOINTS = [0.25, 0.5, 0.75].map((progress) => {
+  const sample = GLB_LAP_ROUTE[
+    Math.floor(GLB_LAP_ROUTE.length * progress)
+  ]
+  return { x: sample[0], z: sample[2] }
+})
 const GLB_START_POSE_STORAGE_KEY = 'f1s_shanghai2018_start_pose_v1'
 const GLB_GRID_STORAGE_KEY = 'f1s_shanghai2018_grid_placements_v2'
 const GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY = 'f1s_shanghai2018_allianz_grid_anchor_v1'
@@ -532,7 +555,7 @@ function createGlbGridOpponentStates(
 }
 
 function createGlbTelemetryRouteMap(): TelemetryMapSource {
-  const routePoints: TelemetryMapPoint[] = SHANGHAI_OPTIMAL_RACING_LINE.map((sample) => ({
+  const routePoints: TelemetryMapPoint[] = GLB_LAP_ROUTE.map((sample) => ({
     x: sample[0],
     z: sample[2],
   }))
@@ -786,9 +809,9 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let started = false
   let countdownActive = false
   let glbRaceStartTime = 0
-  let glbRaceStartPose: THREE.Vector3 | null = null
   let glbRaceDistance = 0
   let glbRaceArmed = false
+  let glbLapCheckpointStage = 0
   let glbPreviousGateCoordinate = 0
   let glbFinishing = false
   let glbResultVisible = false
@@ -797,6 +820,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
   let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
   let telemetryUpdateTimer = 0
+
+  const finishGateCoordinate = (position: THREE.Vector3): number =>
+    (position.x - GLB_FINISH_X) * GLB_FINISH_FORWARD_X +
+    (position.z - GLB_FINISH_Z) * GLB_FINISH_FORWARD_Z
 
   const applyCameraModeVisibility = (): void => {
     firstPersonRig.visible = cameraMode === 'first'
@@ -955,10 +982,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const resetGlbRaceGrid = (): void => {
       if (!drive) return
       drive.reset(pose)
-      glbRaceStartPose = pose.pos.clone()
       glbRaceDistance = 0
       glbRaceArmed = false
-      glbPreviousGateCoordinate = 0
+      glbLapCheckpointStage = 0
+      glbPreviousGateCoordinate = finishGateCoordinate(pose.pos)
       glbFinishing = false
       glbResultVisible = false
       setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
@@ -1016,7 +1043,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
           glbRaceStartTime = performance.now()
           glbRaceDistance = 0
           glbRaceArmed = false
-          glbPreviousGateCoordinate = 0
+          glbLapCheckpointStage = 0
+          glbPreviousGateCoordinate = finishGateCoordinate(drive.state.pos)
           glbFinishing = false
           glbResultVisible = false
           countdownOverlay.flash('GO!', '#00d2be', 820)
@@ -1101,24 +1129,34 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })()
     }
     updateGlbRaceProgress = (dt: number): void => {
-      if (!drive || !glbRaceStartPose) return
+      if (!drive) return
       glbRaceDistance += drive.state.speed * dt
-      const dx = drive.state.pos.x - glbRaceStartPose.x
-      const dz = drive.state.pos.z - glbRaceStartPose.z
-      const forwardX = Math.sin(drive.state.heading)
-      const forwardZ = Math.cos(drive.state.heading)
-      const gateCoordinate = dx * forwardX + dz * forwardZ
-      const lateralCoordinate = Math.abs(dx * forwardZ - dz * forwardX)
-      if (!glbRaceArmed && glbRaceDistance >= 35) glbRaceArmed = true
+      const dx = drive.state.pos.x - GLB_FINISH_X
+      const dz = drive.state.pos.z - GLB_FINISH_Z
+      const gateCoordinate = finishGateCoordinate(drive.state.pos)
+      const lateralCoordinate = Math.abs(
+        dx * GLB_FINISH_FORWARD_Z - dz * GLB_FINISH_FORWARD_X,
+      )
+      const nextCheckpoint = GLB_LAP_CHECKPOINTS[glbLapCheckpointStage]
+      if (nextCheckpoint && Math.hypot(
+        drive.state.pos.x - nextCheckpoint.x,
+        drive.state.pos.z - nextCheckpoint.z,
+      ) <= GLB_LAP_CHECKPOINT_RADIUS_M) {
+        glbLapCheckpointStage++
+      }
+      if (
+        !glbRaceArmed &&
+        glbLapCheckpointStage === GLB_LAP_CHECKPOINTS.length &&
+        glbRaceDistance >= GLB_FINISH_ARM_DISTANCE_M
+      ) {
+        glbRaceArmed = true
+      }
       const crossedGate = glbRaceArmed
-        && glbPreviousGateCoordinate < -1
+        && glbPreviousGateCoordinate < 0
         && gateCoordinate >= 0
-        && lateralCoordinate <= 12
-      const returnedToFinishArea = glbRaceArmed
-        && glbRaceDistance >= 1000
-        && Math.hypot(dx, dz) <= 22
+        && lateralCoordinate <= GLB_FINISH_GATE_HALF_WIDTH_M
       glbPreviousGateCoordinate = gateCoordinate
-      if (crossedGate || returnedToFinishArea) finishGlbRace()
+      if (crossedGate) finishGlbRace()
     }
     glbMenuStartHandler = (cfg): void => {
         startGlbAudio()
