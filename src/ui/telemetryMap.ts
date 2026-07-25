@@ -1,6 +1,6 @@
-const MAP_W = 220
-const MAP_H = 160
-const PADDING = 12
+const MAP_W = 270
+const MAP_H = 205
+const PADDING = 16
 const TRAIL_MAX = 520
 const TRAIL_STEP_SQ = 4 * 4
 
@@ -124,10 +124,10 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
   const worldW = maxX - minX || 1
   const worldH = maxZ - minZ || 1
   const fitW = MAP_W - PADDING * 2
-  const fitH = MAP_H - PADDING * 2 - 18
+  const fitH = MAP_H - PADDING * 2
   const scale = Math.min(fitW / worldW, fitH / worldH)
   const offX = PADDING + (fitW - worldW * scale) / 2 - minX * scale
-  const offY = PADDING + 18 + (fitH - worldH * scale) / 2 - minZ * scale
+  const offY = PADDING + (fitH - worldH * scale) / 2 - minZ * scale
 
   const project = (x: number, z: number): [number, number] => [
       x * scale + offX,
@@ -195,8 +195,9 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
   const drawRouteLineFallback = (): void => {
     if (!staticCtx || trackPoints.length <= 1) return
     for (const pass of [
-      { stroke: 'rgba(0,0,0,0.78)', width: 9 },
-      { stroke: 'rgba(255,255,255,0.96)', width: 5.5 },
+      { stroke: 'rgba(0,0,0,0.82)', width: 10 },
+      { stroke: 'rgba(224,226,228,0.94)', width: 6.5 },
+      { stroke: 'rgba(42,43,45,0.94)', width: 3.1 },
     ]) {
       staticCtx.strokeStyle = pass.stroke
       staticCtx.lineWidth = pass.width
@@ -221,10 +222,6 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
   const drawStatic = (): void => {
     if (!staticCtx) return
     staticCtx.clearRect(0, 0, MAP_W, MAP_H)
-    staticCtx.fillStyle = 'rgba(5, 9, 16, 0.72)'
-    staticCtx.beginPath()
-    staticCtx.roundRect(0, 0, MAP_W, MAP_H, 8)
-    staticCtx.fill()
 
     if (roadMask) {
       drawRoadMask()
@@ -237,15 +234,35 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     if (trackPoints.length > 0) {
       const start = trackPoints[0]
       const [sx, sy] = project(start.x, start.z)
-      staticCtx.fillStyle = '#25f4ee'
+      const square = 3
+      staticCtx.strokeStyle = 'rgba(255,255,255,0.95)'
+      staticCtx.lineWidth = 1.5
       staticCtx.beginPath()
-      staticCtx.arc(sx, sy, 3, 0, Math.PI * 2)
-      staticCtx.fill()
-    }
+      staticCtx.moveTo(sx - 1, sy + 8)
+      staticCtx.lineTo(sx - 1, sy - 8)
+      staticCtx.stroke()
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 4; col++) {
+          staticCtx.fillStyle = (row + col) % 2 === 0 ? '#ffffff' : '#111214'
+          staticCtx.fillRect(sx + col * square - 1, sy - 8 + row * square, square, square)
+        }
+      }
 
-    staticCtx.fillStyle = 'rgba(37,244,238,0.95)'
-    staticCtx.font = '700 10px -apple-system, BlinkMacSystemFont, sans-serif'
-    staticCtx.fillText('TELEMETRY', 10, 14)
+      staticCtx.font = '800 18px -apple-system, BlinkMacSystemFont, sans-serif'
+      staticCtx.textAlign = 'center'
+      staticCtx.textBaseline = 'middle'
+      staticCtx.lineWidth = 3
+      for (let sector = 0; sector < 3; sector++) {
+        const point = trackPoints[Math.floor(trackPoints.length * sector / 3)]
+        const [px, py] = project(point.x, point.z)
+        const labelX = px + (sector === 1 ? 13 : -11)
+        const labelY = py + (sector === 2 ? -13 : -11)
+        staticCtx.strokeStyle = 'rgba(0,0,0,0.75)'
+        staticCtx.strokeText(String(sector + 1), labelX, labelY)
+        staticCtx.fillStyle = 'rgba(255,255,255,0.98)'
+        staticCtx.fillText(String(sector + 1), labelX, labelY)
+      }
+    }
   }
 
   const drawDot = (x: number, z: number, color: string, r: number, stroke = '#05070c'): void => {
@@ -272,8 +289,11 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     }
 
     if (trail.length > 1) {
-      ctx.strokeStyle = 'rgba(37,244,238,0.72)'
-      ctx.lineWidth = 2
+      ctx.save()
+      ctx.shadowColor = 'rgba(74,255,102,0.9)'
+      ctx.shadowBlur = 7
+      ctx.strokeStyle = 'rgba(69,238,91,0.82)'
+      ctx.lineWidth = 3.2
       ctx.lineCap = 'round'
       ctx.lineJoin = 'round'
       ctx.beginPath()
@@ -283,25 +303,32 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
         else ctx.lineTo(px, py)
       }
       ctx.stroke()
+      ctx.restore()
     }
 
     for (const opp of opponents) {
-      drawDot(opp.x, opp.z, opp.color, 3.5)
+      drawDot(opp.x, opp.z, opp.color, 4.2, 'rgba(255,255,255,0.9)')
     }
 
     const [px, py] = project(player.x, player.z)
-    drawDot(player.x, player.z, '#ffffff', 5, '#ff1801')
-    if (player.heading !== undefined) {
-      const len = 13
-      const dx = Math.sin(player.heading) * len
-      const dy = Math.cos(player.heading) * len
-      ctx.strokeStyle = '#ff1801'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(px, py)
-      ctx.lineTo(px + dx, py + dy)
-      ctx.stroke()
-    }
+    const heading = player.heading ?? 0
+    ctx.save()
+    ctx.translate(px, py)
+    ctx.rotate(Math.PI - heading)
+    ctx.shadowColor = 'rgba(255,165,34,0.72)'
+    ctx.shadowBlur = 8
+    ctx.fillStyle = '#ffad27'
+    ctx.strokeStyle = '#2b2112'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(0, -10)
+    ctx.lineTo(7.5, 8)
+    ctx.lineTo(0, 5)
+    ctx.lineTo(-7.5, 8)
+    ctx.closePath()
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
 
   }
 
@@ -311,9 +338,9 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
     if (host) return
     host = document.createElement('div')
     host.style.cssText = `
-      position: fixed; right: 16px; top: 72px; z-index: 58;
+      position: fixed; right: 18px; top: 68px; z-index: 58;
       pointer-events: none;
-      filter: drop-shadow(0 5px 14px rgba(0,0,0,0.58));
+      filter: drop-shadow(0 4px 5px rgba(0,0,0,0.72));
     `
     canvas = document.createElement('canvas')
     canvas.width = MAP_W

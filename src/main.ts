@@ -76,8 +76,9 @@ import {
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
-import { SHANGHAI_GLB_ROAD_ROUTE } from './data/shanghaiGlbRoadRoute'
+import { SHANGHAI_OPTIMAL_RACING_LINE } from './data/shanghaiOptimalRacingLine'
 import { warmRuntimeAssetCache } from './cache/runtimeAssets'
+import { createRacingGuideLine } from './render/racingGuideLine'
 
 THREE.Cache.enabled = true
 
@@ -530,44 +531,11 @@ function createGlbGridOpponentStates(
     })
 }
 
-function createGlbTelemetryRouteMap(
-  lowPolyShanghai: LowPolyShanghaiBundle,
-  startAnchor?: THREE.Vector3,
-): TelemetryMapSource {
-  const roadBounds = new THREE.Box3()
-  lowPolyShanghai.group.updateMatrixWorld(true)
-  lowPolyShanghai.group.traverse((obj) => {
-    if (!(obj instanceof THREE.Mesh)) return
-    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
-    if (!materials.some((material) => material.name === 'tarmac')) return
-    roadBounds.expandByObject(obj)
-  })
-  if (roadBounds.isEmpty()) return { routePoints: [] }
-
-  let sourceMinX = Infinity
-  let sourceMaxX = -Infinity
-  let sourceMinZ = Infinity
-  let sourceMaxZ = -Infinity
-  for (const [x, z] of SHANGHAI_GLB_ROAD_ROUTE) {
-    sourceMinX = Math.min(sourceMinX, x)
-    sourceMaxX = Math.max(sourceMaxX, x)
-    sourceMinZ = Math.min(sourceMinZ, z)
-    sourceMaxZ = Math.max(sourceMaxZ, z)
-  }
-  const sourceWidth = Math.max(1, sourceMaxX - sourceMinX)
-  const sourceHeight = Math.max(1, sourceMaxZ - sourceMinZ)
-  const routePoints: TelemetryMapPoint[] = SHANGHAI_GLB_ROAD_ROUTE.map(([x, z]) => ({
-    x: THREE.MathUtils.lerp(roadBounds.min.x, roadBounds.max.x, (x - sourceMinX) / sourceWidth),
-    z: THREE.MathUtils.lerp(roadBounds.min.z, roadBounds.max.z, (z - sourceMinZ) / sourceHeight),
+function createGlbTelemetryRouteMap(): TelemetryMapSource {
+  const routePoints: TelemetryMapPoint[] = SHANGHAI_OPTIMAL_RACING_LINE.map((sample) => ({
+    x: sample[0],
+    z: sample[2],
   }))
-  if (startAnchor && routePoints.length > 0) {
-    const dx = startAnchor.x - routePoints[0].x
-    const dz = startAnchor.z - routePoints[0].z
-    for (const point of routePoints) {
-      point.x += dx
-      point.z += dz
-    }
-  }
   return { routePoints }
 }
 
@@ -827,6 +795,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let finishGlbRace: () => void = () => { /* GLB race is not ready yet. */ }
   let updateGlbRaceProgress: (dt: number) => void = () => { /* GLB race is not ready yet. */ }
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
+  let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
   let telemetryUpdateTimer = 0
 
   const applyCameraModeVisibility = (): void => {
@@ -884,6 +853,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.update(dt, speed01, rawInput.steer)
     firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
+    racingGuideLine?.update(drive.state.speed, performance.now() * 0.001)
     if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
     if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
       if (cameraMode === 'first') {
@@ -977,6 +947,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
     const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
     const pose = findGlbStartPose(ground, gridPlacements)
+    racingGuideLine = createRacingGuideLine(bundle.scene)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
@@ -1222,7 +1193,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })
     }
     applySavedCarVisualTuning()
-    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap(lowPolyShanghai, pose.pos))
+    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap())
     telemetryMap.resetTrail()
     telemetryMap.show()
     updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
