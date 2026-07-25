@@ -1,11 +1,14 @@
 import type { TeamId } from '../utils/storage'
 import ferrariUrl from '../assets/models/Ferrari_26.opt.glb?url'
 import mclarenUrl from '../assets/models/McLaren_MCL35M.opt.glb?url'
-import mercedesUrl from '../assets/models/Mercedes_W13.glb?url'
+import mercedesUrl from '../assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb?url'
 import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
 
 export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes'
-export type PlayerCarWheelStrategy = 'redbull-github-v1' | 'pending'
+export type PlayerCarWheelStrategy =
+  | 'redbull-github-v1'
+  | 'mercedes-w15-compressed-v1'
+  | 'pending'
 
 export interface PlayerCarDefinition {
   id: PlayerCarId
@@ -57,12 +60,12 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     id: 'mercedes',
     name: 'Mercedes-AMG',
     team: 'Mercedes-AMG Petronas',
-    model: 'W13',
+    model: 'W15',
     url: mercedesUrl,
     reverse: true,
     teamId: 'merc',
     accent: '#00a99d',
-    wheelStrategy: 'pending',
+    wheelStrategy: 'mercedes-w15-compressed-v1',
   },
 ] as const
 

@@ -17,6 +17,7 @@
  */
 
 const COMMENTARY_DEBUG = false
+const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
 
 export type CommentaryEvent =
   | 'countdown'
@@ -77,9 +78,9 @@ const COMMENTARY_CLIPS: Record<CommentaryEvent, ClipConfig> = {
   podium_reveal:       { url: 'audio/commentary/31_podium_reveal.mp3',       priority: 95, cooldownMs: 999_999 },
 }
 
-export const COMMENTARY_ASSET_URLS = [...new Set(
-  Object.values(COMMENTARY_CLIPS).map((clip) => clip.url),
-)]
+export const COMMENTARY_ASSET_URLS = OFFLINE_8M
+  ? []
+  : [...new Set(Object.values(COMMENTARY_CLIPS).map((clip) => clip.url))]
 
 // --- Detection thresholds. Tuned for this game's units (m/s, projection
 // offset metres, lapProgress 0..1). ROAD_HALF_WIDTH=7, KERB_WIDTH=2,
@@ -181,6 +182,7 @@ export class CommentarySystem {
   /** Build an `Audio` per clip and start preloading. Failures here are
    *  non-fatal — the clip just stays missing and `trigger()` will skip. */
   preload(): Promise<void> {
+    if (OFFLINE_8M) return Promise.resolve()
     const tasks: Array<Promise<void>> = []
     for (const key of Object.keys(COMMENTARY_CLIPS) as CommentaryEvent[]) {
       const cfg = COMMENTARY_CLIPS[key]

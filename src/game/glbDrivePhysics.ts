@@ -22,11 +22,14 @@ const WALL_REBOUND_SPEED = 3.2
 const WALL_REBOUND_DAMPING = 10
 const OBSTACLE_CHECK_INTERVAL = 0.045
 const CHASSIS_SAMPLE_OFFSET = 1.35
-const MAX_GROUND_SAMPLE_DELTA = 0.45
-const HEIGHT_RISE_RESPONSE = 24
-const HEIGHT_FALL_RESPONSE = 10
-const NORMAL_RESPONSE = 8
-const CREST_CENTER_RECOVERY = 0.75
+const CHASSIS_HALF_WIDTH = 0.68
+const MAX_GROUND_SAMPLE_DELTA = 0.28
+const GROUND_OUTLIER_TOLERANCE = 0.34
+const HEIGHT_RISE_RESPONSE = 10
+const HEIGHT_FALL_RESPONSE = 9
+const HEIGHT_SPEED_RESPONSE = 0.05
+const NORMAL_RESPONSE = 7
+const NORMAL_SPEED_RESPONSE = 0.04
 
 export interface GlbDriveState {
   pos: THREE.Vector3
@@ -60,6 +63,7 @@ export function createGlbDrivePhysics(
   let lastGood = state.pos.clone()
   const reboundVelocity = new THREE.Vector3()
   const sampleOffset = new THREE.Vector3()
+  const chassisSide = new THREE.Vector3()
   let obstacleCheckTimer = 0
 
   const applyHit = (hit: LowPolyShanghaiGroundHit, dt = 0, immediate = false): void => {
@@ -69,9 +73,14 @@ export function createGlbDrivePhysics(
       state.normal.copy(hit.normal).normalize()
     } else {
       const boundedTargetY = state.pos.y + clamp(targetY - state.pos.y, -MAX_GROUND_SAMPLE_DELTA, MAX_GROUND_SAMPLE_DELTA)
-      const heightResponse = boundedTargetY > state.pos.y ? HEIGHT_RISE_RESPONSE : HEIGHT_FALL_RESPONSE
+      const baseHeightResponse = boundedTargetY > state.pos.y
+        ? HEIGHT_RISE_RESPONSE
+        : HEIGHT_FALL_RESPONSE
+      const heightResponse = baseHeightResponse + state.speed * HEIGHT_SPEED_RESPONSE
       const heightAlpha = 1 - Math.exp(-heightResponse * dt)
-      const normalAlpha = 1 - Math.exp(-NORMAL_RESPONSE * dt)
+      const normalAlpha = 1 - Math.exp(
+        -(NORMAL_RESPONSE + state.speed * NORMAL_SPEED_RESPONSE) * dt,
+      )
       state.pos.y += (boundedTargetY - state.pos.y) * heightAlpha
       state.normal.lerp(hit.normal, normalAlpha).normalize()
     }
@@ -81,31 +90,68 @@ export function createGlbDrivePhysics(
   const sampleChassisGround = (forward: THREE.Vector3): LowPolyShanghaiGroundHit | null => {
     const center = ground.sampleGroundAt(state.pos.x, state.pos.z)
     if (!center) return null
-    const samples = [center]
-    for (const direction of [-1, 1]) {
-      sampleOffset.copy(forward).multiplyScalar(CHASSIS_SAMPLE_OFFSET * direction)
-      const sample = ground.sampleGroundAt(state.pos.x + sampleOffset.x, state.pos.z + sampleOffset.z)
-      if (!sample) continue
-      if (Math.abs(sample.point.y - center.point.y) > MAX_GROUND_SAMPLE_DELTA) continue
-      if (sample.normal.y < 0.55) continue
-      samples.push(sample)
+    const candidates = [center]
+    const chassisForward = new THREE.Vector3(forward.x, 0, forward.z).normalize()
+    chassisSide.set(-chassisForward.z, 0, chassisForward.x).normalize()
+    const sampleAtOffset = (
+      axis: THREE.Vector3,
+      distance: number,
+    ): LowPolyShanghaiGroundHit | null => {
+      sampleOffset.copy(axis).multiplyScalar(distance)
+      const sample = ground.sampleGroundAt(
+        state.pos.x + sampleOffset.x,
+        state.pos.z + sampleOffset.z,
+      )
+      if (!sample || sample.normal.y < 0.55) return null
+      candidates.push(sample)
+      return sample
     }
-    if (samples.length === 1) return center
-    const point = center.point.clone().multiplyScalar(2)
-    const normal = center.normal.clone().multiplyScalar(2)
-    let weight = 2
-    for (let index = 1; index < samples.length; index++) {
-      point.add(samples[index].point)
-      normal.add(samples[index].normal)
-      weight++
+    const front = sampleAtOffset(chassisForward, CHASSIS_SAMPLE_OFFSET)
+    const rear = sampleAtOffset(chassisForward, -CHASSIS_SAMPLE_OFFSET)
+    const left = sampleAtOffset(chassisSide, CHASSIS_HALF_WIDTH)
+    const right = sampleAtOffset(chassisSide, -CHASSIS_HALF_WIDTH)
+
+    const sortedHeights = candidates.map((sample) => sample.point.y).sort((a, b) => a - b)
+    const medianHeight = sortedHeights[Math.floor(sortedHeights.length / 2)]
+    const samples = candidates.filter(
+      (sample) => Math.abs(sample.point.y - medianHeight) <= GROUND_OUTLIER_TOLERANCE,
+    )
+    if (samples.length === 0) samples.push(center)
+
+    const point = new THREE.Vector3(state.pos.x, 0, state.pos.z)
+    const normal = new THREE.Vector3()
+    for (const sample of samples) {
+      point.y += sample.point.y
+      normal.add(sample.normal)
     }
-    point.multiplyScalar(1 / weight)
-    // A planar incline averages back to the center height. Only recover the
-    // residual on a convex crest, where the rigid chassis would otherwise sink.
-    point.y += Math.max(0, center.point.y - point.y) * CREST_CENTER_RECOVERY
-    point.x = state.pos.x
-    point.z = state.pos.z
-    normal.normalize()
+    point.y /= samples.length
+
+    // Preserve broad crests without letting one noisy center triangle snap the
+    // whole chassis upward between neighboring ground-grid samples.
+    point.y = Math.max(point.y, Math.min(center.point.y, medianHeight + 0.14))
+
+    const accepted = new Set(samples)
+    const longitudinal = chassisForward.clone()
+    const lateralRight = chassisSide.clone().negate()
+    let hasFittedSlope = false
+    if (front && rear && accepted.has(front) && accepted.has(rear)) {
+      longitudinal.y = (front.point.y - rear.point.y) / (CHASSIS_SAMPLE_OFFSET * 2)
+      hasFittedSlope = true
+    }
+    if (left && right && accepted.has(left) && accepted.has(right)) {
+      lateralRight.y = (right.point.y - left.point.y) / (CHASSIS_HALF_WIDTH * 2)
+      hasFittedSlope = true
+    }
+    if (hasFittedSlope) {
+      const fittedNormal = longitudinal.cross(lateralRight).normalize()
+      if (fittedNormal.y < 0) fittedNormal.negate()
+      // Contact heights define the chassis pitch and roll more reliably than
+      // interpolated vertex normals on imported, triangulated road surfaces.
+      normal.normalize().lerp(fittedNormal, 0.88).normalize()
+    } else {
+      normal.normalize()
+    }
+
     return {
       point,
       normal,

@@ -750,7 +750,7 @@ function installCockpitPlacementGui(
       `  scale: ${placement.scale.toFixed(2)},`,
       '}',
       '',
-      '// GUI 视角读数:第一视角相机',
+      'GUI 视角读数:第一视角相机',
       `Eye X ${(-placement.x).toFixed(2)}  Eye Y ${(-placement.y).toFixed(2)}  Eye Z ${(-placement.z).toFixed(2)}`,
       `Eye Yaw ${(-placement.yawDeg).toFixed(1)}°`,
       `GLB Front ${getForwardFaceLabel()} (${placement.forwardYawDeg.toFixed(0)}°)`,

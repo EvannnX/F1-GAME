@@ -3,15 +3,29 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
+import shanghaiModelUrl from '../shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb?url'
+import { loadLocalAsset } from '../utils/localAsset'
 
-const SHANGHAI_2018_ROOT = 'src/shanghai-international-circuit-2018-layout'
-const lowPolyShanghaiUrl = `${SHANGHAI_2018_ROOT}/source/shanghai_meshopt.glb`
+const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const SHANGHAI_CANONICAL_CENTER = new THREE.Vector3(
+  195.47552490234375,
+  40.55998707532034,
+  -147.96149939140832,
+)
+const SHANGHAI_CANONICAL_MIN_Y = -64.77343086012478
+const SHANGHAI_2018_ROOT = OFFLINE_8M
+  ? 'offline'
+  : 'src/shanghai-international-circuit-2018-layout'
+const lowPolyShanghaiUrl = shanghaiModelUrl
+const textureUrl = (fullName: string, mobileName: string): string => OFFLINE_8M
+  ? `${SHANGHAI_2018_ROOT}/textures/${mobileName}`
+  : `${SHANGHAI_2018_ROOT}/textures/${fullName}`
 const SHANGHAI_2018_TEXTURE_OVERRIDES: Record<string, string> = {
-  Prato: `${SHANGHAI_2018_ROOT}/textures/Meshesgrassxgrass0171_diff_18.png`,
-  tarmac: `${SHANGHAI_2018_ROOT}/textures/asphalt-new.png`,
-  '14': `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
-  '15': `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
-  Pit_lane: `${SHANGHAI_2018_ROOT}/textures/PAT_asf_out_123.png`,
+  Prato: textureUrl('Meshesgrassxgrass0171_diff_18.png', 'grass.jpg'),
+  tarmac: textureUrl('asphalt-new.png', 'asphalt.jpg'),
+  '14': textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
+  '15': textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
+  Pit_lane: textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
 }
 export const LOW_POLY_SHANGHAI_RUNTIME_URLS = [
   lowPolyShanghaiUrl,
@@ -47,7 +61,7 @@ const SHANGHAI_2018_DECAL_DEPTH_ORDER: Record<string, number> = {
 }
 const SHANGHAI_2018_DRIVE_SURFACE_MATERIALS = new Set([
   'tarmac', '14', '15', 'Pit_lane', 'Out', 'Prato', '28', '35', '32',
-  '17', '16', '13', '9!0', '12', 'Pirelli_terra', 'Petronas_out',
+  '17', '16', '13', '9!0', '12', '10', 'Pirelli_terra', 'Petronas_out',
   'Out_rolex', '2!0', '24', '22', '23', '20', '21', 'Kerb_giallo',
   'RUG_blu', 'Spec_glill',
 ])
@@ -163,6 +177,9 @@ export const LOW_POLY_SHANGHAI_PLACEMENT: LowPolyShanghaiPlacement = {
 }
 
 let dracoLoader: DRACOLoader | null = null
+type EmbeddedDracoScope = typeof globalThis & {
+  __F1TI_DRACO_DECODER__?: string
+}
 
 function materialNamesForMesh(mesh: THREE.Mesh): string[] {
   if (!mesh.material) return []
@@ -206,7 +223,7 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
         blueRunoffContinuation.push({ material, object: obj })
       }
       if (material.map) {
-        material.map.anisotropy = 8
+        material.map.anisotropy = 16
         material.map.needsUpdate = true
       }
       if (SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS.has(material.name)) {
@@ -781,7 +798,12 @@ function getDracoLoader(): DRACOLoader {
     ;(dracoLoader as unknown as {
       _loadLibrary: (url: string, responseType: string) => Promise<string | ArrayBuffer>
     })._loadLibrary = async (url: string) => {
-      if (url.endsWith('draco_decoder.js')) return dracoDecoderJs
+      if (url.endsWith('draco_decoder.js')) {
+        if (!OFFLINE_8M) return dracoDecoderJs
+        const embeddedDecoder = (globalThis as EmbeddedDracoScope).__F1TI_DRACO_DECODER__
+        if (!embeddedDecoder) throw new Error('Offline Draco decoder is unavailable')
+        return embeddedDecoder
+      }
       throw new Error(`Unsupported Draco decoder asset: ${url}`)
     }
   }
@@ -812,8 +834,9 @@ export function addLowPolyShanghai(
   loader.setMeshoptDecoder(MeshoptDecoder)
   loader.setDRACOLoader(getDracoLoader())
   const ready = new Promise<LowPolyShanghaiLoadResult>((resolve, reject) => {
-    loader.load(
-      lowPolyShanghaiUrl,
+    void loadLocalAsset(lowPolyShanghaiUrl).then((modelBytes) => loader.parse(
+      modelBytes,
+      '',
       async (gltf) => {
         const model = gltf.scene
         model.name = 'shanghai-international-circuit-full-model'
@@ -834,9 +857,10 @@ export function addLowPolyShanghai(
 
         const initialBox = new THREE.Box3().setFromObject(model)
         const initialCenter = initialBox.getCenter(new THREE.Vector3())
-        model.position.x -= initialCenter.x
-        model.position.z -= initialCenter.z
-        model.position.y -= initialBox.min.y
+        const alignmentCenter = OFFLINE_8M ? SHANGHAI_CANONICAL_CENTER : initialCenter
+        model.position.x -= alignmentCenter.x
+        model.position.z -= alignmentCenter.z
+        model.position.y -= OFFLINE_8M ? SHANGHAI_CANONICAL_MIN_Y : initialBox.min.y
         group.add(model)
 
         const box = new THREE.Box3().setFromObject(model)
@@ -844,9 +868,10 @@ export function addLowPolyShanghai(
         const center = box.getCenter(new THREE.Vector3())
         resolve({ model, box, size, center })
       },
-      undefined,
-      reject,
-    )
+      (error) => {
+        reject(error)
+      },
+    )).catch(reject)
   })
 
   return {

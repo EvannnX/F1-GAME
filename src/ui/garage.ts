@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
@@ -12,6 +13,7 @@ import {
   type PlayerCarDefinition,
   type PlayerCarId,
 } from '../data/playerCars'
+import { loadLocalAsset } from '../utils/localAsset'
 
 export interface GarageController {
   destroy: () => void
@@ -231,7 +233,13 @@ function fitForGarage(model: THREE.Object3D, definition: PlayerCarDefinition): v
   bbox = new THREE.Box3().setFromObject(model)
   size = bbox.getSize(new THREE.Vector3())
   if (size.x > size.z * 1.1) model.rotation.y = -Math.PI / 2
-  if (definition.reverse) model.rotation.y += Math.PI
+  // The compressed W15 is authored with the opposite garage-facing
+  // direction from its on-track orientation. Keep this correction local to
+  // the showroom so the calibrated race model remains unchanged.
+  const reverseForGarage = definition.id === 'mercedes'
+    ? !definition.reverse
+    : definition.reverse
+  if (reverseForGarage) model.rotation.y += Math.PI
 
   bbox = new THREE.Box3().setFromObject(model)
   const center = bbox.getCenter(new THREE.Vector3())
@@ -242,6 +250,13 @@ function fitForGarage(model: THREE.Object3D, definition: PlayerCarDefinition): v
     mesh.castShadow = true
     mesh.receiveShadow = true
     mesh.frustumCulled = true
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      if (material instanceof THREE.MeshStandardMaterial) {
+        material.envMapIntensity = 0.9
+        material.needsUpdate = true
+      }
+    }
   })
 }
 
@@ -294,11 +309,19 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
 
   const renderer = new THREE.WebGLRenderer({ antialias: !mobileGpu, powerPreference: 'high-performance' })
   renderer.outputColorSpace = THREE.SRGBColorSpace
-  renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.15
+  renderer.toneMapping = THREE.AgXToneMapping
+  renderer.toneMappingExposure = 1.02
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   canvasHost.appendChild(renderer.domElement)
+
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  const roomEnvironment = new RoomEnvironment()
+  const environmentTarget = pmrem.fromScene(roomEnvironment, 0.04)
+  scene.environment = environmentTarget.texture
+  scene.environmentIntensity = mobileGpu ? 0.62 : 0.72
+  roomEnvironment.dispose()
+  pmrem.dispose()
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.target.set(0, 0.72, 0)
@@ -313,10 +336,10 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
 
   const floorMaterial = new THREE.MeshPhysicalMaterial({
     color: '#eef0f3',
-    roughness: 0.22,
+    roughness: 0.36,
     metalness: 0.08,
-    clearcoat: 0.75,
-    clearcoatRoughness: 0.18,
+    clearcoat: 0.42,
+    clearcoatRoughness: 0.32,
   })
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(34, 26), floorMaterial)
   floor.rotation.x = -Math.PI / 2
@@ -324,25 +347,50 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   floor.receiveShadow = true
   scene.add(floor)
 
-  const platformMaterial = new THREE.MeshStandardMaterial({ color: '#f8f9fa', roughness: 0.34, metalness: 0.1 })
+  const platformMaterial = new THREE.MeshStandardMaterial({
+    color: '#f8f9fa',
+    roughness: 0.38,
+    metalness: 0.1,
+  })
   const platform = new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.5, 0.08, 96), platformMaterial)
   platform.position.y = -0.02
   platform.receiveShadow = true
   scene.add(platform)
 
-  const key = new THREE.DirectionalLight('#ffffff', 4.5)
-  key.position.set(-5, 10, 8)
+  const key = new THREE.DirectionalLight('#fff4e8', 1.7)
+  key.position.set(-6, 10, 7)
   key.castShadow = true
   key.shadow.mapSize.set(mobileGpu ? 512 : 1024, mobileGpu ? 512 : 1024)
   key.shadow.camera.left = -8
   key.shadow.camera.right = 8
   key.shadow.camera.top = 7
   key.shadow.camera.bottom = -6
+  key.shadow.bias = -0.00035
+  key.shadow.normalBias = 0.025
+  key.shadow.radius = 3
   scene.add(key)
-  const rim = new THREE.DirectionalLight('#9fc7ff', 2.4)
-  rim.position.set(8, 5, -6)
-  scene.add(rim)
-  scene.add(new THREE.HemisphereLight('#ffffff', '#7d828c', 2.25))
+
+  const keyPanel = new THREE.RectAreaLight('#fff2e5', 11, 7.5, 4.2)
+  keyPanel.position.set(-4.8, 6.2, 6.5)
+  keyPanel.lookAt(0, 0.75, 0)
+  scene.add(keyPanel)
+
+  const fillPanel = new THREE.RectAreaLight('#cde3ff', 5.5, 4.8, 3)
+  fillPanel.position.set(5.5, 3.6, 5.2)
+  fillPanel.lookAt(0, 0.65, 0)
+  scene.add(fillPanel)
+
+  const rimPanel = new THREE.RectAreaLight('#8fc8ff', 9, 5.5, 2.2)
+  rimPanel.position.set(5.2, 4.5, -5.8)
+  rimPanel.lookAt(0, 0.9, 0)
+  scene.add(rimPanel)
+
+  const topPanel = new THREE.RectAreaLight('#ffffff', 7, 6.5, 3)
+  topPanel.position.set(0, 8.5, 0.4)
+  topPanel.lookAt(0, 0, 0)
+  scene.add(topPanel)
+
+  scene.add(new THREE.HemisphereLight('#dce7f4', '#111216', 0.38))
 
   const loader = new GLTFLoader()
   const dracoLoader = new DRACOLoader()
@@ -369,14 +417,15 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     const target = new THREE.Vector3(0, box.min.y + size.y * 0.46, 0)
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const fitDistance = sphere.radius / Math.max(0.1, Math.sin(halfVerticalFov)) * 1.12
+    const displayDistance = fitDistance * 0.7
     const viewDirection = new THREE.Vector3(0.58, 0.24, 0.78).normalize()
 
     controls.target.copy(target)
-    camera.position.copy(target).addScaledVector(viewDirection, fitDistance)
-    camera.near = Math.max(0.05, fitDistance * 0.02)
+    camera.position.copy(target).addScaledVector(viewDirection, displayDistance)
+    camera.near = Math.max(0.05, displayDistance * 0.02)
     camera.far = Math.max(80, fitDistance * 8)
     camera.updateProjectionMatrix()
-    controls.minDistance = fitDistance * 0.68
+    controls.minDistance = fitDistance * 0.66
     controls.maxDistance = fitDistance * 1.55
     controls.update()
   }
@@ -386,21 +435,22 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     if (cached) return Promise.resolve(cached)
     const pending = loading.get(definition.id)
     if (pending) return pending
-    const promise = new Promise<THREE.Group>((resolve, reject) => {
-      loader.load(definition.url, (gltf) => {
-        fitForGarage(gltf.scene, definition)
-        if (destroyed) {
-          disposeModel(gltf.scene)
-          reject(new Error('Garage closed before the car finished loading'))
-          return
-        }
-        loaded.set(definition.id, gltf.scene)
-        loading.delete(definition.id)
-        resolve(gltf.scene)
-      }, undefined, (error) => {
-        loading.delete(definition.id)
-        reject(error)
+    const promise = (async (): Promise<THREE.Group> => {
+      const modelBytes = await loadLocalAsset(definition.url)
+      const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
+        loader.parse(modelBytes, '', (result) => resolve(result as unknown as { scene: THREE.Group }), reject)
       })
+      fitForGarage(gltf.scene, definition)
+      if (destroyed) {
+        disposeModel(gltf.scene)
+        throw new Error('Garage closed before the car finished loading')
+      }
+      loaded.set(definition.id, gltf.scene)
+      loading.delete(definition.id)
+      return gltf.scene
+    })().catch((error) => {
+      loading.delete(definition.id)
+      throw error
     })
     loading.set(definition.id, promise)
     return promise
@@ -496,6 +546,7 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     floorMaterial.dispose()
     platform.geometry.dispose()
     platformMaterial.dispose()
+    environmentTarget.dispose()
     dracoLoader.dispose()
     renderer.dispose()
     document.body.classList.remove('f1s-garage-active')

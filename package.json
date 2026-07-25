@@ -11,7 +11,9 @@
     "metadata": "node scripts/capture-release-metadata.mjs",
     "release:check": "npm run verify:redbull-wheels && npm run build && npm run metadata",
     "size": "ls -lh dist/index.html 2>/dev/null",
-    "zip": "npm run release:check && cd dist && zip -FS -r ../submission.zip . && cd .. && node scripts/capture-release-metadata.mjs --include-zip"
+    "zip": "npm run release:check && cd dist && zip -FS -r ../submission.zip . && cd .. && node scripts/capture-release-metadata.mjs --include-zip",
+    "package:offline8m": "node scripts/prepare-offline8m-assets.mjs && node scripts/diagnose-offline-start.mjs && VITE_F1TI_OFFLINE_8M=1 vite build --outDir dist-offline8m && node scripts/package-offline8m.mjs && node scripts/h5-validator.mjs f1ti-offline-8mb.zip",
+    "validate:offline8m": "node scripts/h5-validator.mjs f1ti-offline-8mb.zip"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

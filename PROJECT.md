@@ -270,18 +270,43 @@ F1 25、iRacing 等正版模拟器装机包 80 GB 以上,需要方向盘外设,�
 
 ### Red Bull 车轮锁定档案
 
-当前确认正确的 Red Bull 轮胎方案标记为 `redbull-github-v1`，只允许应用于 `RB19_REDBULL.opt.glb`。其他车型保持独立的 `pending` 策略，禁止复用 Red Bull 的轮组识别。
+当前确认正确的 Red Bull 轮胎方案标记为 `redbull-github-v1`，只允许应用于 `RB19_REDBULL.opt.glb`。2026-07-25 校准两个后轮：后轮轴线只使用 `Material_105`、`Material_97`、`Material_102` 的轮胎环形几何分别计算，排除最小主轴接近竖直方向、会污染 PCA 的 `REAR_RIMS` 网格。模型测得左后轮内倾约 `-1.49°`，右后轮约 `+1.49°`，两侧均保留各自真实的单轴方向和圆心。前轮逻辑保持不变。其他车型保持独立策略，禁止复用 Red Bull 的轮组识别。
+
+完整参数、材质筛选规则和回归步骤记录在
+`RED_BULL_RB19_WHEEL_PROFILE.md`。
 
 | 锁定项 | 当前值 |
 |---|---|
 | GitHub 基准提交 | `ccc253bf5cbd7e2f09d981eb813ac69071bffc26` |
 | Red Bull GLB SHA-1 | `66c78ca97b11d3cbaf20f2bf9c7eec7a2614d3ae` |
-| `createRedBullWheelRigs` SHA-1 | `9f4217b13761e023416082195eb44a6fdfe3a9c0` |
+| `createRedBullWheelRigs` SHA-1 | `a617e4b221e1e51090e3272b1d0171bfbda3518e` |
+| 后轮轴 | 左右轮胎环独立拟合；约 `-1.49° / +1.49°` 内倾；排除 `REAR_RIMS` |
 | 旋转速度参数 | `WHEEL_SPIN_RATE = 42` |
 | 前轮最大转向角 | `18deg` |
-| 轮组策略 | `redbull -> redbull-github-v1`; 其他车辆 `-> pending` |
+| 轮组策略 | `redbull -> redbull-github-v1`; AMG 与其他车辆使用各自策略 |
 
 修改车辆、车库或模型加载流程后，必须执行 `npm run verify:redbull-wheels`。校验失败时不得继续用其他车型参数覆盖 Red Bull 逻辑。
+
+### 互动空间离线包锁定基线
+
+2026-07-23 已确认 `F1TI_COMPLETE_OFFLINE.zip` 可以被互动空间服务器正常接收。后续版本必须保持相同目录架构，只允许替换文件内容，不得增加目录层级、修改固定资源名或改变入口位置。
+
+| 锁定项 | 已验证值 |
+|---|---|
+| ZIP SHA-256 | `1ddc0d184ce90cd340944f70603a9d093f143e3a179a673080e841f71fe992a8` |
+| ZIP 大小 | `7,155,166 bytes` |
+| 解压后大小 | `7,935,295 bytes` |
+| 文件项数量 | `50` |
+| 唯一入口 | 根目录 `index.html` |
+| 顶层结构 | `index.html` + `dist/` |
+| 固定程序文件 | `dist/assets/index-f1ti-v11.js` |
+| 固定模型容器 | `asset-shanghai.png`、`asset-redbull.png`、`asset-ferrari.png`、`asset-mercedes.png`、`asset-mclaren.png` |
+| 禁止内容 | 额外套层、`dist/index.html`、隐藏文件、`__MACOSX`、非 ASCII 路径、外链和网络请求 |
+| 大小上限 | ZIP 与解压后内容均严格小于 `8,000,000 bytes` |
+
+`scripts/package-offline8m.mjs` 会强制校验上述结构。离线上海地图固定以 `src/assets/shanghai_compressed-optimized.glb` 为唯一来源；不得再次进行几何简化、网格焊接或 Draco 重编码。8 MB 包只允许将大于 96px 的内嵌纹理缩至 96px，全部 Draco 几何数据、三角形数量、材质索引、坐标和 buffer offset 必须保持不变。源文件当前 SHA-256 为 `a491ed564b5e859c73625a81f30797d1dd621811a7fa27eeb189351086b9c608`。
+
+当前双 8 MB 上海优化地图候选包为 `F1TI_COMPLETE_OFFLINE_NO_COMMENTARY.zip`：ZIP 大小 `7,166,823 bytes`，解压后文件总量 `7,877,448 bytes`，SHA-256 为 `4845fe84235b30d27be429418b314581083f82cfd63bf1b0e6fb82fad43e997a`。离线包不包含解说目录或解说 MP3，设置页固定为语音关闭，桌面完整版的解说功能不受影响。自动检查确认地图仍含 `842,285` 个三角形和 `1,598,351` 个上传顶点，161 个非纹理 bufferView 与指定源 GLB 逐字节一致；固定发车位仍命中 `tarmac`。
 
 F1TI 不仅是一款赛车小游戏,也是一次通过驾驶表现测出玩家 F1TI 人格的互动体验。我们希望:
 
