@@ -3,13 +3,15 @@ import ferrariUrl from '../assets/models/Ferrari_26.opt.glb?url'
 import mclarenUrl from '../assets/models/McLaren_MCL35M.opt.glb?url'
 import mercedesUrl from '../assets/models/Mercedes_W13.glb?url'
 import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
+import saberLionUrl from '../assets/models/SaberLion.glb?url'
 
-export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes'
+export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes' | 'lion'
 export type PlayerCarWheelStrategy =
   | 'redbull-github-v1'
   | 'ferrari-material-v1'
   | 'mclaren-material-v1'
   | 'mercedes-material-v1'
+  | 'saber-lion-named-v1'
 
 export interface PlayerCarDefinition {
   id: PlayerCarId
@@ -67,6 +69,17 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     teamId: 'merc',
     accent: '#00a99d',
     wheelStrategy: 'mercedes-material-v1',
+  },
+  {
+    id: 'lion',
+    name: 'Lion King Express',
+    team: 'Holy Grail Racing',
+    model: 'SABER LION',
+    url: saberLionUrl,
+    reverse: false,
+    teamId: 'redbull',
+    accent: '#d9911b',
+    wheelStrategy: 'saber-lion-named-v1',
   },
 ] as const
 

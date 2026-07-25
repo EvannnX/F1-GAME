@@ -96,7 +96,7 @@ interface MaterialWheelProfile {
   longitudinalMinRatio: number
 }
 
-const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull'>, MaterialWheelProfile> = {
+const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull' | 'lion'>, MaterialWheelProfile> = {
   ferrari: {
     // `Tyre` supplies the rubber while the other four materials contain the
     // wheel faces/rims. `base` is intentionally excluded because it also
@@ -1107,7 +1107,29 @@ function fitGltfToTrack(model: THREE.Object3D): void {
 function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): WheelRig[] {
   const strategy = playerCarById(carId).wheelStrategy
   if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
-  if (carId === 'redbull') return []
+  if (strategy === 'saber-lion-named-v1') {
+    const rigs: WheelRig[] = []
+    for (const [name, steerable] of [
+      ['LionWheelLF', true],
+      ['LionWheelRF', true],
+      ['LionWheelLR', false],
+      ['LionWheelRR', false],
+    ] as [string, boolean][]) {
+      const steerPivot = model.getObjectByName(`${name}_STEER`)
+      const spinPivot = model.getObjectByName(`${name}_SPIN`)
+      if (!steerPivot || !spinPivot) continue
+      rigs.push({
+        name,
+        steerable,
+        steerPivot: { pivot: steerPivot as THREE.Group, baseQuaternion: steerPivot.quaternion.clone() },
+        spinPivots: [{ pivot: spinPivot as THREE.Group, baseQuaternion: spinPivot.quaternion.clone() }],
+        spinAxis: new THREE.Vector3(1, 0, 0),
+        spin: 0,
+      })
+    }
+    return rigs
+  }
+  if (carId === 'redbull' || carId === 'lion') return []
   return createMaterialWheelRigs(model, MATERIAL_WHEEL_PROFILES[carId])
 }
 
