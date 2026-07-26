@@ -225,11 +225,11 @@ export function showHowToPlay(onContinue: ContinueHandler): HowToPlayController 
         <div class="f1s-guide__visual">
           ${touchDevice ? '↔' : '<div class="f1s-guide__keys"><span class="f1s-guide__key">W</span><span class="f1s-guide__key">A</span><span class="f1s-guide__key">S</span><span class="f1s-guide__key">D</span></div>'}
         </div>
-        <div class="f1s-guide__copy"><h2>驾驶赛车</h2><p>${touchDevice ? '使用屏幕驾驶按键，或在设置中选择手机体感操控。' : '使用 WASD 或方向键完成加速、刹车和左右转向。'}</p></div>
+        <div class="f1s-guide__copy"><h2>${touchDevice ? '左右倾斜驾驶' : '键盘驾驶'}</h2><p>${touchDevice ? '横握手机并左右倾斜控制方向；保持平稳，赛车会持续向前。' : '使用 WASD 或方向键完成加速、刹车和左右转向。'}</p></div>
       </div>
       <div class="f1s-guide__item">
         <div class="f1s-guide__visual">◀ ▶</div>
-        <div class="f1s-guide__copy"><h2>平稳转向</h2><p>入弯前减速，驶离赛道路面会明显降低抓地力和速度。</p></div>
+        <div class="f1s-guide__copy"><h2>跟随最优轨迹</h2><p>闪烁引导线代表更快走法；入弯前收油，出弯后加速。</p></div>
       </div>
       <div class="f1s-guide__item">
         <div class="f1s-guide__visual">◎</div>

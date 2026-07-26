@@ -48,6 +48,17 @@ function installStyles(): void {
       width: min(500px, calc(100vw - 36px));
       transform: translateX(-50%);
     }
+    .f1s-home__mission {
+      margin: 0 0 12px;
+      color: rgba(255, 255, 255, .96);
+      text-align: center;
+      font-size: clamp(13px, 1.7vw, 17px);
+      font-weight: 750;
+      line-height: 1.45;
+      letter-spacing: .04em;
+      text-shadow: 0 3px 14px rgba(0, 0, 0, .9);
+    }
+    .f1s-home__mission strong { color: #ff3348; }
     .f1s-home__start {
       position: relative;
       width: 100%;
@@ -133,6 +144,7 @@ export function showHomeScreen(onStart: StartHandler): HomeScreenController {
     <video class="f1s-home__video" autoplay muted loop playsinline preload="auto" aria-hidden="true"></video>
     <div class="f1s-home__shade"></div>
     <div class="f1s-home__footer">
+      <p class="f1s-home__mission"><strong>左右倾斜</strong>控制赛车 · 沿最优路线冲过终点 · 刷新最快纪录</p>
       <button class="f1s-home__start" type="button">开始比赛</button>
     </div>
   `

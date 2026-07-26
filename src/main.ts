@@ -80,7 +80,6 @@ import {
   SHANGHAI_FINISH_LINE_INDEX,
   SHANGHAI_OPTIMAL_RACING_LINE,
 } from './data/shanghaiOptimalRacingLine'
-import { warmRuntimeAssetCache } from './cache/runtimeAssets'
 import { createRacingGuideLine } from './render/racingGuideLine'
 
 THREE.Cache.enabled = true
@@ -239,8 +238,6 @@ function bootWithHomeScreen(): void {
       showGarageSelection(() => { /* The prepared race settings menu is underneath. */ })
     })
   })
-
-  void warmRuntimeAssetCache()
 
   const bootInBackground = (): void => {
     try {
@@ -1076,6 +1073,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       hud.hide()
       const lapMs = Math.max(0, performance.now() - glbRaceStartTime)
       const topSpeedKmh = drive.state.topSpeed * 3.6
+      const previousBestMs = storage.getBestLap()
+      const isPB = lapMs > 0 && (previousBestMs === null || lapMs < previousBestMs)
+      if (isPB) storage.setBestLap(lapMs)
+      storage.incRuns()
       countdownOverlay.flash('FINISH!', '#00d2be', 1400)
       showToast('冲线完成，正在生成比赛结果', 1800)
       const telemetry = {
@@ -1112,7 +1113,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
           opponentHits: telemetry.carHits,
           position: telemetry.finalPosition,
           fieldSize: telemetry.fieldSize,
-          isPB: false,
+          isPB,
+          previousBestMs,
           onRestart: () => {
             result.hide()
             glbResultVisible = false
@@ -2163,6 +2165,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
         position: ctx.raceData.finalPosition || world.opponents.length + 1,
         fieldSize: world.opponents.length + 1,
         isPB,
+        previousBestMs: prev,
         onRestart: () => {
           result.hide()
           world.jumpStartPenaltyMs = 0

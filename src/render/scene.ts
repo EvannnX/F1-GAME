@@ -1,12 +1,10 @@
 import * as THREE from 'three'
-import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import type { WeatherPreset } from './weather'
-import skyboxHdrUrl from '../assets/background/Cloudymorning2k.hdr?url'
 
 export interface SceneBundle {
   scene: THREE.Scene
@@ -331,7 +329,6 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   // --- Procedural sky env map: gives PBR materials proper reflections.
   let environmentRT: THREE.WebGLRenderTarget | null = null
-  let hdrBackgroundTexture: THREE.Texture | null = null
   let currentWeather: WeatherPreset | null = null
   const pmrem = new THREE.PMREMGenerator(renderer)
   pmrem.compileEquirectangularShader()
@@ -341,42 +338,11 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   skyTex.dispose()
   pmrem.dispose()
 
-  const loadHdrSkybox = (): void => {
-    const loader = new RGBELoader()
-    loader.load(
-      skyboxHdrUrl,
-      (texture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping
-        const hdrPmrem = new THREE.PMREMGenerator(renderer)
-        const hdrRT = hdrPmrem.fromEquirectangular(texture)
-        environmentRT?.dispose()
-        hdrBackgroundTexture?.dispose()
-        environmentRT = hdrRT
-        hdrBackgroundTexture = texture
-        scene.background = currentWeather?.precipitation === 'rain'
-          ? new THREE.Color(currentWeather.sky)
-          : texture
-        scene.environment = hdrRT.texture
-        const rainy = currentWeather?.precipitation === 'rain'
-        scene.backgroundIntensity = rainy ? 0.58 : 1
-        scene.environmentIntensity = rainy ? 0.68 : 1
-        hdrPmrem.dispose()
-      },
-      undefined,
-      (err) => {
-        console.warn('[F1S] HDR skybox failed to load:', err)
-      },
-    )
-  }
-  loadHdrSkybox()
-
   const applyWeather = (preset: WeatherPreset): void => {
     currentWeather = preset
     const rainy = preset.precipitation === 'rain'
     if (rainy) {
       scene.background = new THREE.Color(preset.sky)
-    } else if (hdrBackgroundTexture) {
-      scene.background = hdrBackgroundTexture
     } else if (scene.background instanceof THREE.Color) {
       scene.background.set(preset.sky)
     }
@@ -483,7 +449,6 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   const dispose = (): void => {
     environmentRT?.dispose()
-    hdrBackgroundTexture?.dispose()
     rain.dispose()
     disposePostProcessing()
     renderer.dispose()

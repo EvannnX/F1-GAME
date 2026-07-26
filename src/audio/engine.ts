@@ -1,8 +1,6 @@
 import engineUrl from '../assets/audio/engine.mp3?url'
-import bgmUrl from '../assets/audio/Don Toliver - Lose My Mind (feat. Doja Cat) [From F1® The Movie] [Official Audio].mp3?url'
 
-/** Looping engine sample whose volume + playback rate scale with throttle/speed,
- *  plus a constant-volume BGM track. Both decoded once at boot, no streaming. */
+/** Looping engine sample whose volume + playback rate scale with throttle/speed. */
 export interface AudioRig {
   start: () => void
   setEngine: (throttle01: number, speed01: number) => void
@@ -27,7 +25,7 @@ export async function createAudioRig(): Promise<AudioRig> {
     }
   }
 
-  const [engineBuf, bgmBuf] = await Promise.all([fetchBuffer(engineUrl), fetchBuffer(bgmUrl)])
+  const engineBuf = await fetchBuffer(engineUrl)
 
   // ---- Engine: looping AudioBufferSourceNode + dedicated gain.
   const engineGain = ctx.createGain()
@@ -49,31 +47,11 @@ export async function createAudioRig(): Promise<AudioRig> {
     }
   }
 
-  // ---- BGM: separate loop, lower default volume.
-  const bgmGain = ctx.createGain()
-  bgmGain.gain.value = 0.8
-  bgmGain.connect(ctx.destination)
-  let bgmSource: AudioBufferSourceNode | null = null
-
-  const startBgm = (): void => {
-    if (!bgmBuf || bgmSource) return
-    bgmSource = ctx.createBufferSource()
-    bgmSource.buffer = bgmBuf
-    bgmSource.loop = true
-    bgmSource.connect(bgmGain)
-    try {
-      bgmSource.start()
-    } catch (e) {
-      console.warn('[F1S] bgm start failed', e)
-    }
-  }
-
   const start = (): void => {
     if (ctx.state === 'suspended') {
       void ctx.resume().catch(() => {})
     }
     startEngine()
-    startBgm()
   }
 
   const setEngine = (throttle01: number, speed01: number): void => {
@@ -88,14 +66,11 @@ export async function createAudioRig(): Promise<AudioRig> {
     engineSource.playbackRate.setTargetAtTime(targetRate, ctx.currentTime, 0.05)
   }
 
-  const setBgmVolume = (v: number): void => {
-    bgmGain.gain.setTargetAtTime(v, ctx.currentTime, 0.1)
-  }
+  const setBgmVolume = (_v: number): void => { /* submission build has no licensed BGM */ }
 
   const destroy = (): void => {
     try {
       engineSource?.stop()
-      bgmSource?.stop()
     } catch {
       /* noop */
     }
