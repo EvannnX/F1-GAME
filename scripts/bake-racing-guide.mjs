@@ -45,6 +45,23 @@ function targetSpeedAt(curve, t) {
   return THREE.MathUtils.clamp(55 - maxTurn * 105, 13, 55)
 }
 
+function smoothClosedSpeedProfile(samples, distanceStep) {
+  const braking = 10.5
+  const acceleration = 5.5
+  for (let pass = 0; pass < 5; pass++) {
+    for (let i = samples.length - 1; i >= 0; i--) {
+      const next = (i + 1) % samples.length
+      const brakingLimit = Math.sqrt(samples[next].speed ** 2 + 2 * braking * distanceStep)
+      samples[i].speed = Math.min(samples[i].speed, brakingLimit)
+    }
+    for (let i = 0; i < samples.length; i++) {
+      const next = (i + 1) % samples.length
+      const accelerationLimit = Math.sqrt(samples[i].speed ** 2 + 2 * acceleration * distanceStep)
+      samples[next].speed = Math.min(samples[next].speed, accelerationLimit)
+    }
+  }
+}
+
 function optimalLineFactor(curve, t) {
   const previous = signedTurn(curve, t - 0.022)
   const here = signedTurn(curve, t)
@@ -204,26 +221,54 @@ const route = [...rows.values()]
   .map((row) => new THREE.Vector3()
     .fromBufferAttribute(position, row.index)
     .applyMatrix4(racelineMesh.matrixWorld))
-const curve = new THREE.CatmullRomCurve3(route, true, 'centripetal', 0.5)
-const routeLength = curve.getLength()
+// The source raceline is stored opposite to the actual race direction.
+// Build the optimisation curve in driving order so braking look-ahead and
+// outside-apex-outside offsets are calculated in the direction the car moves.
+const driveCurve = new THREE.CatmullRomCurve3([...route].reverse(), true, 'centripetal', 0.5)
+const routeLength = driveCurve.getLength()
 const dashCount = Math.floor(routeLength / (DASH_LENGTH + DASH_GAP))
-const output = []
+const driveSamples = []
 for (let index = 0; index < dashCount; index++) {
   const t = (index * (DASH_LENGTH + DASH_GAP) + DASH_LENGTH * 0.5) / routeLength
-  const routePoint = curve.getPointAt(t)
-  const hit = sample(routePoint.x, routePoint.z)
+  const routePoint = driveCurve.getPointAt(t)
+  const driveForward = driveCurve.getTangentAt(t).setY(0).normalize()
+  const right = new THREE.Vector3(driveForward.z, 0, -driveForward.x)
+  const optimalPoint = findOptimalRoadPoint(
+    sample,
+    routePoint,
+    right,
+    optimalLineFactor(driveCurve, t),
+  )
+  const linePoint = optimalPoint
+    ? new THREE.Vector3(optimalPoint.x, optimalPoint.y, optimalPoint.z)
+    : routePoint
+  const hit = optimalPoint ?? sample(linePoint.x, linePoint.z)
   const normal = hit
     ? new THREE.Vector3(hit.nx, hit.ny, hit.nz)
     : new THREE.Vector3(0, 1, 0)
-  const forward = curve.getTangentAt(t)
+  const forward = driveCurve.getTangentAt(t)
   forward.addScaledVector(normal, -forward.dot(normal)).normalize()
-  output.push([
-    routePoint.x, (hit?.y ?? routePoint.y) + 0.035, routePoint.z,
+  driveSamples.push({
+    point: linePoint,
+    normal,
+    forward,
+    speed: targetSpeedAt(driveCurve, t),
+  })
+}
+smoothClosedSpeedProfile(driveSamples, DASH_LENGTH + DASH_GAP)
+
+// Preserve the historical data order expected by lap/finish code. Forward is
+// stored in that same source order, while speed remains associated with the
+// correctly calculated physical position.
+const output = driveSamples.reverse().map(({ point, normal, forward, speed }) => {
+  forward.negate()
+  return [
+    point.x, point.y + 0.055, point.z,
     normal.x, normal.y, normal.z,
     forward.x, forward.y, forward.z,
-    targetSpeedAt(curve, t),
-  ].map((value) => Number(value.toFixed(4))))
-}
+    speed,
+  ].map((value) => Number(value.toFixed(4)))
+})
 
 let startFinishMarker = null
 model.traverse((obj) => {

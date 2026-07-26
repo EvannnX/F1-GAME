@@ -6,7 +6,7 @@ const DASH_WIDTH = 1.05
 
 export interface RacingGuideLineBundle {
   group: THREE.Group
-  update: (playerSpeed: number, elapsedSeconds: number) => void
+  update: (_playerSpeed: number, elapsedSeconds: number) => void
 }
 
 /**
@@ -41,7 +41,7 @@ export function createRacingGuideLine(scene: THREE.Scene): RacingGuideLineBundle
         '#include <begin_vertex>',
         `#include <begin_vertex>
         float guidePhase = dot(instanceMatrix[3].xz, vec2(0.032, 0.027));
-        vGuidePulse = 0.68 + 0.32 * sin(guidePulseTime * 5.4 - guidePhase);`,
+        vGuidePulse = 0.68 + 0.32 * sin(guidePulseTime * 5.4 + guidePhase);`,
       )
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -87,20 +87,29 @@ export function createRacingGuideLine(scene: THREE.Scene): RacingGuideLineBundle
   mesh.instanceMatrix.needsUpdate = true
   group.add(mesh)
 
-  let lastSpeedBand = -1
   const green = new THREE.Color(0x7dff70)
   const yellow = new THREE.Color(0xffc928)
   const red = new THREE.Color(0xff2f24)
-  const update = (playerSpeed: number, elapsedSeconds: number): void => {
+  SHANGHAI_OPTIMAL_RACING_LINE.forEach((sample, index) => {
+    // The array is stored opposite to driving direction, so the next physical
+    // dash is index - 1. Colour describes the road ahead, not current speed:
+    // green = accelerate, yellow = lift/prepare, red = brake.
+    const next = SHANGHAI_OPTIMAL_RACING_LINE[
+      (index - 1 + SHANGHAI_OPTIMAL_RACING_LINE.length) %
+      SHANGHAI_OPTIMAL_RACING_LINE.length
+    ]
+    const speedDrop = sample[9] - next[9]
+    const color = next[9] < 28 || speedDrop > 2.4
+      ? red
+      : next[9] < 43 || speedDrop > 0.7
+        ? yellow
+        : green
+    mesh.setColorAt(index, color)
+  })
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+
+  const update = (_playerSpeed: number, elapsedSeconds: number): void => {
     pulseTime.value = elapsedSeconds
-    const speedBand = Math.round(playerSpeed / 2)
-    if (speedBand === lastSpeedBand) return
-    lastSpeedBand = speedBand
-    SHANGHAI_OPTIMAL_RACING_LINE.forEach((sample, index) => {
-      const ratio = playerSpeed / sample[9]
-      mesh.setColorAt(index, ratio > 1.04 ? red : ratio > 0.82 ? yellow : green)
-    })
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
   }
   update(0, 0)
 
