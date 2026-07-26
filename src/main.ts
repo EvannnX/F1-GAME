@@ -76,18 +76,24 @@ import {
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
-import { SHANGHAI_GLB_ROAD_ROUTE } from './data/shanghaiGlbRoadRoute'
+import {
+  SHANGHAI_FINISH_LINE_INDEX,
+  SHANGHAI_OPTIMAL_RACING_LINE,
+} from './data/shanghaiOptimalRacingLine'
 import { warmRuntimeAssetCache } from './cache/runtimeAssets'
+import { createRacingGuideLine } from './render/racingGuideLine'
 
 THREE.Cache.enabled = true
 
+const OFFLINE_8M_BUILD = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const OFFLINE_STORAGE_PREFIX = 'f1ti_offline_20260722_r12'
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
-const GLB_THIRD_BACK_DISTANCE = 4.84
-const GLB_THIRD_UP_DISTANCE = 1.54
-const GLB_THIRD_LOOK_AHEAD = 8.4
-const GLB_THIRD_LOOK_UP = -0.23
-const GLB_THIRD_FOV = 48
+const GLB_THIRD_BACK_DISTANCE = 4.5
+const GLB_THIRD_UP_DISTANCE = 1.4
+const GLB_THIRD_LOOK_AHEAD = 13
+const GLB_THIRD_LOOK_UP = -0.75
+const GLB_THIRD_FOV = 35
 const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
   backDistance: GLB_THIRD_BACK_DISTANCE,
   upDistance: GLB_THIRD_UP_DISTANCE,
@@ -98,12 +104,33 @@ const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
 const GLB_VISUAL_GROUND_SINK = 0.06
 const GLB_PLAYER_VISUAL_SCALE = 1
 const GLB_PLAYER_TARGET_LENGTH_M = 4
-const GLB_START_POSE_STORAGE_KEY = 'f1s_shanghai2018_start_pose_v1'
-const GLB_GRID_STORAGE_KEY = 'f1s_shanghai2018_grid_placements_v2'
-const GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY = 'f1s_shanghai2018_allianz_grid_anchor_v1'
-const GLB_SIGN_DELETIONS_STORAGE_KEY = 'f1s_shanghai2018_object_deletions_v1'
-const CAR_VISUAL_TUNING_STORAGE_KEY = 'f1s_car_visual_tuning_v3'
-const GLB_CAMERA_TUNING_STORAGE_KEY = 'f1s_shanghai2018_camera_tuning_v2'
+const GLB_LAP_ROUTE = [
+  SHANGHAI_OPTIMAL_RACING_LINE[SHANGHAI_FINISH_LINE_INDEX],
+  ...SHANGHAI_OPTIMAL_RACING_LINE.slice(0, SHANGHAI_FINISH_LINE_INDEX).reverse(),
+  ...SHANGHAI_OPTIMAL_RACING_LINE.slice(SHANGHAI_FINISH_LINE_INDEX + 1).reverse(),
+]
+const GLB_FINISH_SAMPLE = GLB_LAP_ROUTE[0]
+const GLB_FINISH_X = GLB_FINISH_SAMPLE[0]
+const GLB_FINISH_Z = GLB_FINISH_SAMPLE[2]
+// The baked racing line runs opposite to the cars' actual race direction.
+const GLB_FINISH_FORWARD_X = -GLB_FINISH_SAMPLE[6]
+const GLB_FINISH_FORWARD_Z = -GLB_FINISH_SAMPLE[8]
+const GLB_FINISH_GATE_HALF_WIDTH_M = 18
+const GLB_FINISH_ARM_DISTANCE_M = 3500
+const GLB_LAP_CHECKPOINT_RADIUS_M = 28
+const GLB_LAP_CHECKPOINTS = [0.25, 0.5, 0.75].map((progress) => {
+  const sample = GLB_LAP_ROUTE[Math.floor(GLB_LAP_ROUTE.length * progress)]
+  return { x: sample[0], z: sample[2] }
+})
+const buildStorageKey = (desktopKey: string, offlineSuffix: string): string => OFFLINE_8M_BUILD
+  ? `${OFFLINE_STORAGE_PREFIX}_${offlineSuffix}`
+  : desktopKey
+const GLB_START_POSE_STORAGE_KEY = buildStorageKey('f1s_shanghai2018_start_pose_v1', 'start_pose')
+const GLB_GRID_STORAGE_KEY = buildStorageKey('f1s_shanghai2018_grid_placements_v2', 'grid_placements')
+const GLB_ALLIANZ_GRID_ANCHOR_STORAGE_KEY = buildStorageKey('f1s_shanghai2018_allianz_grid_anchor_v1', 'allianz_grid_anchor')
+const GLB_SIGN_DELETIONS_STORAGE_KEY = buildStorageKey('f1s_shanghai2018_object_deletions_v1', 'object_deletions')
+const CAR_VISUAL_TUNING_STORAGE_KEY = buildStorageKey('f1s_car_visual_tuning_v3', 'car_visual_tuning')
+const GLB_CAMERA_TUNING_STORAGE_KEY = buildStorageKey('f1s_shanghai2018_camera_tuning_v3', 'camera_tuning_v3')
 const SCENE_CACHE_RESET_PARAMS = ['resetSceneCache', 'clearSceneCache', 'resetMapCache']
 const SCENE_CACHE_STORAGE_KEYS = [
   GLB_START_POSE_STORAGE_KEY,
@@ -131,7 +158,9 @@ const SCENE_CACHE_STORAGE_KEYS = [
   'f1s_car_visual_tuning_v2',
   'f1s_car_visual_tuning_v1',
   GLB_CAMERA_TUNING_STORAGE_KEY,
+  'f1s_shanghai2018_camera_tuning_v2',
   'f1s_shanghai2018_camera_tuning_v1',
+  `${OFFLINE_STORAGE_PREFIX}_camera_tuning`,
 ]
 
 interface GlbGridPlacement {
@@ -530,44 +559,11 @@ function createGlbGridOpponentStates(
     })
 }
 
-function createGlbTelemetryRouteMap(
-  lowPolyShanghai: LowPolyShanghaiBundle,
-  startAnchor?: THREE.Vector3,
-): TelemetryMapSource {
-  const roadBounds = new THREE.Box3()
-  lowPolyShanghai.group.updateMatrixWorld(true)
-  lowPolyShanghai.group.traverse((obj) => {
-    if (!(obj instanceof THREE.Mesh)) return
-    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
-    if (!materials.some((material) => material.name === 'tarmac')) return
-    roadBounds.expandByObject(obj)
-  })
-  if (roadBounds.isEmpty()) return { routePoints: [] }
-
-  let sourceMinX = Infinity
-  let sourceMaxX = -Infinity
-  let sourceMinZ = Infinity
-  let sourceMaxZ = -Infinity
-  for (const [x, z] of SHANGHAI_GLB_ROAD_ROUTE) {
-    sourceMinX = Math.min(sourceMinX, x)
-    sourceMaxX = Math.max(sourceMaxX, x)
-    sourceMinZ = Math.min(sourceMinZ, z)
-    sourceMaxZ = Math.max(sourceMaxZ, z)
-  }
-  const sourceWidth = Math.max(1, sourceMaxX - sourceMinX)
-  const sourceHeight = Math.max(1, sourceMaxZ - sourceMinZ)
-  const routePoints: TelemetryMapPoint[] = SHANGHAI_GLB_ROAD_ROUTE.map(([x, z]) => ({
-    x: THREE.MathUtils.lerp(roadBounds.min.x, roadBounds.max.x, (x - sourceMinX) / sourceWidth),
-    z: THREE.MathUtils.lerp(roadBounds.min.z, roadBounds.max.z, (z - sourceMinZ) / sourceHeight),
+function createGlbTelemetryRouteMap(): TelemetryMapSource {
+  const routePoints: TelemetryMapPoint[] = GLB_LAP_ROUTE.map((sample) => ({
+    x: sample[0],
+    z: sample[2],
   }))
-  if (startAnchor && routePoints.length > 0) {
-    const dx = startAnchor.x - routePoints[0].x
-    const dz = startAnchor.z - routePoints[0].z
-    for (const point of routePoints) {
-      point.x += dx
-      point.z += dz
-    }
-  }
   return { routePoints }
 }
 
@@ -766,12 +762,13 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     menu.show((cfg) => {
       if (!glbMenuStartHandler) {
         queuedMenuConfig = cfg
+        menu.hide()
+        setStatus('上海赛车场 GLB 主游戏\n正在完成赛道准备...')
         return
       }
       menu.hide()
       glbMenuStartHandler(cfg)
     })
-    notifyReady()
   }
   if (regularGameBoot) showGlbStartMenu()
 
@@ -818,16 +815,21 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let started = false
   let countdownActive = false
   let glbRaceStartTime = 0
-  let glbRaceStartPose: THREE.Vector3 | null = null
   let glbRaceDistance = 0
   let glbRaceArmed = false
+  let glbLapCheckpointStage = 0
   let glbPreviousGateCoordinate = 0
   let glbFinishing = false
   let glbResultVisible = false
   let finishGlbRace: () => void = () => { /* GLB race is not ready yet. */ }
   let updateGlbRaceProgress: (dt: number) => void = () => { /* GLB race is not ready yet. */ }
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
+  let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
   let telemetryUpdateTimer = 0
+
+  const finishGateCoordinate = (position: THREE.Vector3): number =>
+    (position.x - GLB_FINISH_X) * GLB_FINISH_FORWARD_X +
+    (position.z - GLB_FINISH_Z) * GLB_FINISH_FORWARD_Z
 
   const applyCameraModeVisibility = (): void => {
     firstPersonRig.visible = cameraMode === 'first'
@@ -862,7 +864,6 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const rawInput = input?.getInput() ?? { steer: 0, throttle: 0, brake: 0, drs: false }
     if (countdownActive && countdown) {
       countdown.update(dt)
-      countdown.setThrottlePressed(rawInput.throttle > 0.7 || rawInput.drs)
     }
     const manualThrottle = rawInput.throttle > 0.7 || rawInput.drs
     const driveInput = {
@@ -884,6 +885,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.update(dt, speed01, rawInput.steer)
     firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
+    racingGuideLine?.update(drive.state.speed, performance.now() * 0.001)
     if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
     if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
       if (cameraMode === 'first') {
@@ -944,10 +946,11 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
             z: Number(nearby.position.z.toFixed(3)),
             headingDeg: Number(THREE.MathUtils.radToDeg(nearby.heading).toFixed(2)),
           }))))
-          const url = new URL(window.location.href)
-          url.searchParams.delete('allianzGridGui')
-          url.searchParams.set('gridGui', '1')
-          window.location.replace(url.toString())
+          const params = new URLSearchParams(window.location.search)
+          params.delete('allianzGridGui')
+          params.set('gridGui', '1')
+          window.history.replaceState(null, '', `${window.location.pathname}?${params}`)
+          showToast('发车格已保存，请重新打开调试模式查看', 2200)
         },
       })
       showToast(`请选择正确的 Allianz 发车格（共 ${allianzSlots.length} 个）`, 2600)
@@ -977,6 +980,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
     const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
     const pose = findGlbStartPose(ground, gridPlacements)
+    racingGuideLine = createRacingGuideLine(bundle.scene)
     drive = createGlbDrivePhysics(ground, pose, obstacles)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
@@ -984,10 +988,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const resetGlbRaceGrid = (): void => {
       if (!drive) return
       drive.reset(pose)
-      glbRaceStartPose = pose.pos.clone()
       glbRaceDistance = 0
       glbRaceArmed = false
-      glbPreviousGateCoordinate = 0
+      glbLapCheckpointStage = 0
+      glbPreviousGateCoordinate = finishGateCoordinate(pose.pos)
       glbFinishing = false
       glbResultVisible = false
       setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
@@ -1018,10 +1022,6 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       hud.update({ speedKmh: 0, lapMs: 0, mode: 'keyboard' })
       started = false
       countdownActive = true
-      // Countdown is a presentation phase. Temporarily use the low-cost
-      // render path so the overlay and light sequence stay responsive on
-      // large GLB scenes; the selected quality returns at lights-out.
-      bundle.setPerformanceMode(true)
       const silentCountdownRig = {
         group: new THREE.Group(),
         setLitCount: (_n: number): void => { /* screen-only countdown */ },
@@ -1041,31 +1041,16 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
           if (navigator.vibrate) navigator.vibrate([0, 200, 50, 100, 30, 150])
           countdownActive = false
           started = true
-          bundle.setPerformanceMode(storage.getPerformanceMode())
           glbRaceStartTime = performance.now()
           glbRaceDistance = 0
           glbRaceArmed = false
-          glbPreviousGateCoordinate = 0
+          glbLapCheckpointStage = 0
+          glbPreviousGateCoordinate = finishGateCoordinate(drive.state.pos)
           glbFinishing = false
           glbResultVisible = false
           countdownOverlay.flash('GO!', '#00d2be', 820)
           input?.recenter()
           showToast('比赛开始', 1000)
-        },
-        () => {
-          SFX.jumpStart()
-          countdownActive = false
-          started = false
-          countdownOverlay.flash('抢跑', '#ff1801', 900)
-          showToast('抢跑，重新倒计时', 1200)
-          if (countdown) {
-            countdown.destroy()
-            countdown = null
-          }
-          window.setTimeout(() => {
-            if (gridPlacementGuiActive || carVisualTuningGuiActive || cameraTuningGuiActive || firstPersonGuiActive || objectDeletionGuiActive || started) return
-            startGlbCountdown()
-          }, 900)
         },
       )
     }
@@ -1130,29 +1115,39 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })()
     }
     updateGlbRaceProgress = (dt: number): void => {
-      if (!drive || !glbRaceStartPose) return
+      if (!drive) return
       glbRaceDistance += drive.state.speed * dt
-      const dx = drive.state.pos.x - glbRaceStartPose.x
-      const dz = drive.state.pos.z - glbRaceStartPose.z
-      const forwardX = Math.sin(drive.state.heading)
-      const forwardZ = Math.cos(drive.state.heading)
-      const gateCoordinate = dx * forwardX + dz * forwardZ
-      const lateralCoordinate = Math.abs(dx * forwardZ - dz * forwardX)
-      if (!glbRaceArmed && glbRaceDistance >= 35) glbRaceArmed = true
+      const dx = drive.state.pos.x - GLB_FINISH_X
+      const dz = drive.state.pos.z - GLB_FINISH_Z
+      const gateCoordinate = finishGateCoordinate(drive.state.pos)
+      const lateralCoordinate = Math.abs(
+        dx * GLB_FINISH_FORWARD_Z - dz * GLB_FINISH_FORWARD_X,
+      )
+      const nextCheckpoint = GLB_LAP_CHECKPOINTS[glbLapCheckpointStage]
+      if (nextCheckpoint && Math.hypot(
+        drive.state.pos.x - nextCheckpoint.x,
+        drive.state.pos.z - nextCheckpoint.z,
+      ) <= GLB_LAP_CHECKPOINT_RADIUS_M) {
+        glbLapCheckpointStage++
+      }
+      if (
+        !glbRaceArmed &&
+        glbLapCheckpointStage === GLB_LAP_CHECKPOINTS.length &&
+        glbRaceDistance >= GLB_FINISH_ARM_DISTANCE_M
+      ) {
+        glbRaceArmed = true
+      }
       const crossedGate = glbRaceArmed
-        && glbPreviousGateCoordinate < -1
+        && glbPreviousGateCoordinate < 0
         && gateCoordinate >= 0
-        && lateralCoordinate <= 12
-      const returnedToFinishArea = glbRaceArmed
-        && glbRaceDistance >= 1000
-        && Math.hypot(dx, dz) <= 22
+        && lateralCoordinate <= GLB_FINISH_GATE_HALF_WIDTH_M
       glbPreviousGateCoordinate = gateCoordinate
-      if (crossedGate || returnedToFinishArea) finishGlbRace()
+      if (crossedGate) finishGlbRace()
     }
     glbMenuStartHandler = (cfg): void => {
         startGlbAudio()
         void (async () => {
-          await transitionVideo.play()
+          const transitionPlayback = transitionVideo.play()
           cameraMode = cfg.cameraMode
           applyCameraModeVisibility()
           bundle.setPerformanceMode(cfg.performanceMode)
@@ -1167,16 +1162,21 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
             ])
             input?.destroy()
             input = controller
+            await bundle.prewarm()
+            await transitionPlayback
             startGlbCountdown()
           } catch (e) {
             console.warn('[F1S] GLB input init failed:', e)
             const controller = await initInput('keyboard')
             input?.destroy()
             input = controller
+            await bundle.prewarm()
+            await transitionPlayback
             startGlbCountdown()
           }
         })()
     }
+    notifyReady()
     if (queuedMenuConfig) {
       const cfg = queuedMenuConfig
       queuedMenuConfig = null
@@ -1222,7 +1222,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })
     }
     applySavedCarVisualTuning()
-    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap(lowPolyShanghai, pose.pos))
+    telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap())
     telemetryMap.resetTrail()
     telemetryMap.show()
     updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
@@ -1352,7 +1352,6 @@ interface World {
   raceStart: number
   shakeT: number
   shakeMag: number
-  jumpStartPenaltyMs: number
   opponents: OpponentState[]
   opponentCars: OpponentCarBundle | null
   /** Per-opponent debounce: seconds left before another bump can register. */
@@ -1432,7 +1431,6 @@ function bootstrap(onReady?: BootReadyHandler): void {
     raceStart: 0,
     shakeT: 0,
     shakeMag: 0,
-    jumpStartPenaltyMs: 0,
     opponents: [],
     opponentCars: null,
     opponentBumpCooldown: [],
@@ -1847,7 +1845,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
           if (navigator.vibrate) navigator.vibrate([0, 200, 50, 100, 30, 150])
           triggerShake(0.4, 0.4)
           hud.flash('GO!', '#00d2be', 800)
-          world.raceStart = performance.now() + world.jumpStartPenaltyMs
+          world.raceStart = performance.now()
           // Re-zero gyro at the lights-out moment: by now the player is
           // gripping the phone in their race posture (the auto-calibration
           // 1 s after createGyro() may have caught the menu pose, e.g.
@@ -1856,44 +1854,10 @@ function bootstrap(onReady?: BootReadyHandler): void {
           world.input?.recenter()
           void sm.transition(GameState.RACE)
         },
-        () => {
-          // Jump start
-          SFX.jumpStart()
-          hud.flash('JUMP START -2.0s', '#ff1801', 1200)
-          world.jumpStartPenaltyMs += 2000
-          // Restart countdown sequence by recreating it
-          if (world.lightsRig) world.lightsRig.setLitCount(0)
-          // simple restart: discard current countdown; new one created on next tick
-          if (world.countdown) world.countdown.destroy()
-          world.countdown = null
-          setTimeout(() => {
-            if (sm.context().state !== GameState.COUNTDOWN) return
-            if (!world.lightsRig) return
-            world.countdown = createCountdown(
-              world.lightsRig,
-              (n) => SFX.countdownBeep() ?? hud.flash(`${6 - n}`, '#ff3b30', 400),
-              () => {
-                SFX.lightsOut()
-                triggerShake(0.4, 0.4)
-                hud.flash('GO!', '#00d2be', 800)
-                world.raceStart = performance.now() + world.jumpStartPenaltyMs
-                world.input?.recenter()
-                void sm.transition(GameState.RACE)
-              },
-              () => {
-                /* nested jump-start ignored for MVP */
-              },
-            )
-          }, 800)
-        },
       )
     },
     update: (_, dt) => {
       world.countdown?.update(dt)
-      if (world.input) {
-        const inp = world.input.getInput()
-        world.countdown?.setThrottlePressed(inp.throttle > 0.7 || inp.drs)
-      }
       updateCamera()
     },
     exit: () => {
@@ -2156,12 +2120,10 @@ function bootstrap(onReady?: BootReadyHandler): void {
         isPB,
         onRestart: () => {
           result.hide()
-          world.jumpStartPenaltyMs = 0
           void sm.transition(GameState.COUNTDOWN)
         },
         onMenu: () => {
           result.hide()
-          world.jumpStartPenaltyMs = 0
           ctx.raceData.bestLap = null
           teardownOpponents()
           void sm.transition(GameState.MENU)
@@ -2190,10 +2152,26 @@ function bootstrap(onReady?: BootReadyHandler): void {
   void sm.transition(GameState.MENU).then(() => onReady?.())
 }
 
-if (document.readyState === 'loading') {
-  installF1tiApi()
-  document.addEventListener('DOMContentLoaded', bootWithHomeScreen, { once: true })
-} else {
+const bootEntry = (): void => {
+  const params = new URLSearchParams(window.location.search)
+  if (params.has('amgWheelTest')) {
+    void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
+      installMercedesWheelTest()
+    })
+    return
+  }
+  if (params.has('redbullWheelTest')) {
+    void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
+      installMercedesWheelTest('redbull')
+    })
+    return
+  }
   installF1tiApi()
   bootWithHomeScreen()
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootEntry, { once: true })
+} else {
+  bootEntry()
 }

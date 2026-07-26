@@ -1,3 +1,5 @@
+import { configureInlineVideo } from './inlineVideo'
+
 export interface TransitionVideoController {
   play: () => Promise<void>
   hide: () => void
@@ -20,11 +22,9 @@ export function createTransitionVideo(videoUrl: string): TransitionVideoControll
       display:flex;align-items:center;justify-content:center;
     `
     video = document.createElement('video')
-    video.src = videoUrl
-    video.playsInline = true
-    video.setAttribute('webkit-playsinline', 'true')
     video.preload = 'auto'
-    video.controls = false
+    configureInlineVideo(video, true)
+    video.src = videoUrl
     video.style.cssText = 'width:100%;height:100%;object-fit:cover;background:#000;'
 
     const skip = document.createElement('button')
@@ -61,6 +61,8 @@ export function createTransitionVideo(videoUrl: string): TransitionVideoControll
     video.addEventListener('error', finish)
     skip.addEventListener('click', finish)
 
+    video.autoplay = false
+    video.defaultMuted = false
     video.muted = false
     video.play().catch(() => {
       if (!video || settled) return

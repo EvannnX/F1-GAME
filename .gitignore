@@ -6,6 +6,10 @@ dist/
 .idea/
 f1-sense.zip
 submission.zip
+dist-offline8m/
+.offline8m-assets/
+.offline8m-package/
+f1ti-offline-8mb.zip
 F1TI动漫图/
 public/assets/上海赛车场.glb
 src/assets/上海赛车场.glb

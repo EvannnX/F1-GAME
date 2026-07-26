@@ -1,5 +1,6 @@
 import engineUrl from '../assets/audio/engine.mp3?url'
 import bgmUrl from '../assets/audio/Don Toliver - Lose My Mind (feat. Doja Cat) [From F1® The Movie] [Official Audio].mp3?url'
+import { loadLocalAsset } from '../utils/localAsset'
 
 /** Looping engine sample whose volume + playback rate scale with throttle/speed,
  *  plus a constant-volume BGM track. Both decoded once at boot, no streaming. */
@@ -18,8 +19,7 @@ export async function createAudioRig(): Promise<AudioRig> {
 
   const fetchBuffer = async (url: string): Promise<AudioBuffer | null> => {
     try {
-      const res = await fetch(url)
-      const buf = await res.arrayBuffer()
+      const buf = await loadLocalAsset(url)
       return await ctx.decodeAudioData(buf)
     } catch (e) {
       console.warn('[F1S] audio decode failed for', url, e)

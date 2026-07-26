@@ -8,6 +8,7 @@ import ferrariGlbUrl from '../assets/models/Ferrari_26.opt.glb?url'
 import mercedesGlbUrl from '../assets/models/Mercedes_W13.glb?url'
 import redbullGlbUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
+import { loadLocalAsset } from '../utils/localAsset'
 
 export interface OpponentCarBundle {
   group: THREE.Group
@@ -170,8 +171,7 @@ function loadScene(model: NpcModel, options: OpponentCarOptions = {}): Promise<T
       const loader = new GLTFLoader()
       loader.setMeshoptDecoder(MeshoptDecoder)
       loader.setDRACOLoader(getDracoLoader())
-      const res = await fetch(url)
-      const buf = await res.arrayBuffer()
+      const buf = await loadLocalAsset(url)
       const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
         loader.parse(buf, '', (g) => resolve(g as unknown as { scene: THREE.Group }), reject)
       })

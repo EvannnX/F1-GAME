@@ -4,15 +4,23 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { readSelectedPlayerCar } from '../data/playerCars'
 import { createCar } from '../render/car'
 
-const MAP_URL = 'src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb'
+const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const MAP_URL = OFFLINE_8M
+  ? 'offline/shanghai-mobile-v8.glb'
+  : 'src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb'
 const CAR_VISUAL_SCALE = 0.8
 const CAR_GROUND_SINK_M = 0.13
 const PLACEHOLDER_CLUSTER_DISTANCE_M = 4
-const ASPHALT_TEXTURE_URL = '/src/shanghai-international-circuit-2018-layout/textures/asphalt-new.png'
-const PADDOCK_ASPHALT_TEXTURE_URL =
-  '/src/shanghai-international-circuit-2018-layout/textures/PAT_asf_out_123.png'
+const ASPHALT_TEXTURE_URL = OFFLINE_8M
+  ? 'offline/textures/asphalt.jpg'
+  : '/src/shanghai-international-circuit-2018-layout/textures/asphalt-new.png'
+const PADDOCK_ASPHALT_TEXTURE_URL = OFFLINE_8M
+  ? 'offline/textures/paddock.jpg'
+  : '/src/shanghai-international-circuit-2018-layout/textures/PAT_asf_out_123.png'
 const MATERIAL_TEXTURE_OVERRIDES: Record<string, string> = {
-  Prato: '/src/shanghai-international-circuit-2018-layout/textures/Meshesgrassxgrass0171_diff_18.png',
+  Prato: OFFLINE_8M
+    ? 'offline/textures/grass.jpg'
+    : '/src/shanghai-international-circuit-2018-layout/textures/Meshesgrassxgrass0171_diff_18.png',
   tarmac: ASPHALT_TEXTURE_URL,
   '14': PADDOCK_ASPHALT_TEXTURE_URL,
   '15': PADDOCK_ASPHALT_TEXTURE_URL,

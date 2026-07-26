@@ -4,6 +4,7 @@ import type { Difficulty } from '../game/opponents'
 import type { InputMode } from '../input'
 
 export type CommentaryMode = 'off' | 'commentary' | 'coach'
+const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
 export type CameraMode = 'first' | 'third'
 
 export interface MenuStartConfig {
@@ -366,7 +367,7 @@ export function createMenu(): MenuController {
 
     let chosenDiff: Difficulty = 'medium'
     let chosenInput: InputMode = isCoarsePointer() ? 'touch' : 'keyboard'
-    let chosenCommentary: CommentaryMode = 'commentary'
+    let chosenCommentary: CommentaryMode = OFFLINE_8M ? 'off' : 'commentary'
     let chosenQuality: 'performance' | 'quality' =
       storage.getPerformanceMode() || isCoarsePointer() ? 'performance' : 'quality'
     let chosenCamera: CameraMode = 'third'
@@ -389,7 +390,7 @@ export function createMenu(): MenuController {
 
     const commentaryRow = makeRow(
       '语  音',
-      ['off', 'commentary', 'coach'],
+      OFFLINE_8M ? ['off'] : ['off', 'commentary', 'coach'],
       COMMENTARY_LABELS as Record<string, { label: string; tag: string }>,
       chosenCommentary,
       (k) => { chosenCommentary = k as CommentaryMode },

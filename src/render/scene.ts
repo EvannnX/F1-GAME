@@ -14,6 +14,8 @@ export interface SceneBundle {
   renderer: THREE.WebGLRenderer
   sun: THREE.DirectionalLight
   setPerformanceMode: (enabled: boolean) => void
+  /** Compile shaders and allocate render targets before gameplay starts. */
+  prewarm: () => Promise<void>
   /** Call each frame with the player car's world position so the shadow
    *  camera frustum stays centred on it for crisp local shadows. */
   updateShadowFollow: (worldPos: THREE.Vector3) => void
@@ -333,6 +335,10 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   let environmentRT: THREE.WebGLRenderTarget | null = null
   let hdrBackgroundTexture: THREE.Texture | null = null
   let currentWeather: WeatherPreset | null = null
+  let resolveEnvironmentReady: () => void = () => {}
+  const environmentReady = new Promise<void>((resolve) => {
+    resolveEnvironmentReady = resolve
+  })
   const pmrem = new THREE.PMREMGenerator(renderer)
   pmrem.compileEquirectangularShader()
   const skyTex = buildSkyEquirect()
@@ -346,25 +352,30 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     loader.load(
       skyboxHdrUrl,
       (texture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping
-        const hdrPmrem = new THREE.PMREMGenerator(renderer)
-        const hdrRT = hdrPmrem.fromEquirectangular(texture)
-        environmentRT?.dispose()
-        hdrBackgroundTexture?.dispose()
-        environmentRT = hdrRT
-        hdrBackgroundTexture = texture
-        scene.background = currentWeather?.precipitation === 'rain'
-          ? new THREE.Color(currentWeather.sky)
-          : texture
-        scene.environment = hdrRT.texture
-        const rainy = currentWeather?.precipitation === 'rain'
-        scene.backgroundIntensity = rainy ? 0.58 : 1
-        scene.environmentIntensity = rainy ? 0.68 : 1
-        hdrPmrem.dispose()
+        try {
+          texture.mapping = THREE.EquirectangularReflectionMapping
+          const hdrPmrem = new THREE.PMREMGenerator(renderer)
+          const hdrRT = hdrPmrem.fromEquirectangular(texture)
+          environmentRT?.dispose()
+          hdrBackgroundTexture?.dispose()
+          environmentRT = hdrRT
+          hdrBackgroundTexture = texture
+          scene.background = currentWeather?.precipitation === 'rain'
+            ? new THREE.Color(currentWeather.sky)
+            : texture
+          scene.environment = hdrRT.texture
+          const rainy = currentWeather?.precipitation === 'rain'
+          scene.backgroundIntensity = rainy ? 0.58 : 1
+          scene.environmentIntensity = rainy ? 0.68 : 1
+          hdrPmrem.dispose()
+        } finally {
+          resolveEnvironmentReady()
+        }
       },
       undefined,
       (err) => {
         console.warn('[F1S] HDR skybox failed to load:', err)
+        resolveEnvironmentReady()
       },
     )
   }
@@ -403,8 +414,11 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     if (bloomPass) bloomPass.strength = rainy ? 0.12 : preset.nightMode ? 0.26 : 0.22
   }
 
+  let renderPrewarmPromise: Promise<void> | null = null
   const setPerformanceMode = (enabled: boolean): void => {
+    if (performanceMode === enabled) return
     performanceMode = enabled
+    renderPrewarmPromise = null
     resolutionScale = 1
     if (shouldUsePostProcessing()) ensurePostProcessing()
     else disposePostProcessing()
@@ -416,7 +430,7 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   const lastShadowFocus = new THREE.Vector3(Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY)
   const updateShadowFollow = (worldPos: THREE.Vector3): void => {
-    const updateDistance = performanceMode ? (mobileGpu ? 14 : 10) : 6
+    const updateDistance = mobileGpu ? 52 : performanceMode ? 44 : 36
     if (lastShadowFocus.distanceToSquared(worldPos) < updateDistance * updateDistance) return
     lastShadowFocus.copy(worldPos)
     // Re-centre the shadow camera frustum on the player so its 100×100 m
@@ -481,6 +495,43 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     else renderer.render(scene, camera)
   }
 
+  const prewarm = (): Promise<void> => {
+    if (renderPrewarmPromise) return renderPrewarmPromise
+    renderPrewarmPromise = (async () => {
+      await environmentReady
+      resize()
+      renderer.shadowMap.needsUpdate = true
+      const textures = new Set<THREE.Texture>()
+      const temporarilyUnculled: THREE.Object3D[] = []
+      scene.traverse((object) => {
+        if (object.frustumCulled) {
+          temporarilyUnculled.push(object)
+          object.frustumCulled = false
+        }
+        if (!(object instanceof THREE.Mesh || object instanceof THREE.Points || object instanceof THREE.Line)) return
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        for (const material of materials) {
+          for (const value of Object.values(material)) {
+            if (value instanceof THREE.Texture) textures.add(value)
+          }
+        }
+      })
+      try {
+        for (const texture of textures) renderer.initTexture(texture)
+        await renderer.compileAsync(scene, camera)
+      } catch (err) {
+        console.warn('[F1S] async renderer prewarm failed, using synchronous compile:', err)
+        renderer.compile(scene, camera)
+      } finally {
+        for (const object of temporarilyUnculled) object.frustumCulled = true
+      }
+      if (composer) composer.render()
+      else renderer.render(scene, camera)
+      renderer.shadowMap.needsUpdate = false
+    })()
+    return renderPrewarmPromise
+  }
+
   const dispose = (): void => {
     environmentRT?.dispose()
     hdrBackgroundTexture?.dispose()
@@ -495,5 +546,5 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   window.addEventListener('resize', resize)
   window.addEventListener('orientationchange', resize)
 
-  return { scene, camera, renderer, sun, setPerformanceMode, applyWeather, updateShadowFollow, resize, render, dispose }
+  return { scene, camera, renderer, sun, setPerformanceMode, prewarm, applyWeather, updateShadowFollow, resize, render, dispose }
 }

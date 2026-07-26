@@ -172,8 +172,6 @@ export function createLightsRig(anchor: THREE.Vector3, yaw: number): LightsBundl
 export interface CountdownController {
   update: (dt: number) => void
   isFinished: () => boolean
-  hasJumpStart: () => boolean
-  setThrottlePressed: (pressed: boolean) => void
   destroy: () => void
 }
 
@@ -186,27 +184,16 @@ export function createCountdown(
   rig: LightsBundle,
   onLampLit: (n: number) => void,
   onLightsOut: () => void,
-  onJumpStart: () => void,
 ): CountdownController {
   let elapsed = 0
   let phase: 'lighting' | 'hold' | 'done' = 'lighting'
   let lit = 0
   let nextLampAt = LAMP_INTERVAL_MS
   let holdDuration = 0
-  let throttlePressed = false
-  let jumpStarted = false
 
   rig.setLitCount(0)
 
   return {
-    setThrottlePressed: (p: boolean) => {
-      throttlePressed = p
-      // Jump start window: any time during lighting OR hold (i.e., before lights-out)
-      if ((phase === 'lighting' || phase === 'hold') && p && lit > 0 && !jumpStarted) {
-        jumpStarted = true
-        onJumpStart()
-      }
-    },
     update: (dt: number) => {
       if (phase === 'done') return
       elapsed += dt * 1000
@@ -229,10 +216,8 @@ export function createCountdown(
           onLightsOut()
         }
       }
-      throttlePressed // referenced for ts noUnused
     },
     isFinished: () => phase === 'done',
-    hasJumpStart: () => jumpStarted,
     destroy: () => {
       /* noop */
     },

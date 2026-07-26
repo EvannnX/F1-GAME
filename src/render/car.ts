@@ -6,6 +6,7 @@ import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
 import { playerCarById, type PlayerCarId } from '../data/playerCars'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
+import { loadLocalAsset } from '../utils/localAsset'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
   merc: { primary: '#00d2be', secondary: '#181818', spark: '#a8fff5' },
@@ -22,6 +23,9 @@ export interface CarBundle {
   emitSpeedTrail: (intensity: number) => void
   emitSparks: (worldPos: THREE.Vector3, count: number) => void
   setCarModel: (id: PlayerCarId) => Promise<void>
+  setFrontAxleDebugOffset: (y: number, z: number) => void
+  getFrontAxleDebug: () => Array<{ name: string; center: THREE.Vector3; axis: THREE.Vector3 }>
+  getWheelAxleDebug: () => Array<{ name: string; center: THREE.Vector3; axis: THREE.Vector3 }>
   update: (dt: number, speed01: number, steer?: number) => void
   dispose: () => void
 }
@@ -79,11 +83,21 @@ const RED_BULL_AXLE_REFERENCE_MATERIALS = new Set([
   'material_102',
 ])
 
+// REAR_RIMS is visually part of the wheel, but its thinnest PCA dimension is
+// almost vertical in this export. Use the tire/rim-shell geometry that agrees
+// on the authored rear camber axis instead.
+const RED_BULL_REAR_AXLE_REFERENCE_MATERIALS = new Set([
+  'material_105',
+  'material_97',
+  'material_102',
+])
+
 const RED_BULL_WHEEL_AERO_SOURCE_MATERIALS = new Set([
   'suspensions',
 ])
 
 type RedBullWheelSlot = 'left-front' | 'right-front' | 'left-rear' | 'right-rear'
+type PlayerWheelSlot = RedBullWheelSlot
 
 interface RedBullWheelComponents {
   rolling: Map<RedBullWheelSlot, THREE.Object3D[]>
@@ -121,7 +135,6 @@ const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull' | 'lion'>, 
     longitudinalMinRatio: 0.18,
   },
 }
-
 let dracoLoader: DRACOLoader | null = null
 
 function makeMaterialInteriorVisible(material: THREE.Material): void {
@@ -175,6 +188,7 @@ interface WheelRig {
   spinPivots: PivotRef[]
   spinAxis: THREE.Vector3
   spin: number
+  baseCenterWorld?: THREE.Vector3
 }
 
 interface SteerOnlyRig {
@@ -878,22 +892,37 @@ function createWheelRig(
     spinPivots,
     spinAxis: spinAxis.clone(),
     spin: 0,
+    baseCenterWorld: wheelCenterWorld.clone(),
   }
 }
 
 function createRedBullWheelRigs(root: THREE.Object3D): WheelRig[] {
   const wheelParts = splitRedBullWheelComponents(root)
   const rigs: WheelRig[] = []
+  const axlePartsBySlot = new Map<RedBullWheelSlot, THREE.Object3D[]>()
+  const wheelCenters = new Map<RedBullWheelSlot, THREE.Vector3>()
+  for (const [name, rollingParts] of wheelParts.rolling) {
+    const referenceMaterials = name.endsWith('-rear')
+      ? RED_BULL_REAR_AXLE_REFERENCE_MATERIALS
+      : RED_BULL_AXLE_REFERENCE_MATERIALS
+    const referenceParts = rollingParts.filter((part) => {
+      const materials = part.userData.redBullWheelMaterials as string[] | undefined
+      return materials?.some((material) => referenceMaterials.has(material)) === true
+    })
+    const axleParts = referenceParts.length ? referenceParts : rollingParts
+    axlePartsBySlot.set(name, axleParts)
+    wheelCenters.set(name, renderedBoxForObjects(axleParts).getCenter(new THREE.Vector3()))
+  }
+
   for (const [name, rollingParts] of wheelParts.rolling) {
     if (!rollingParts.length) continue
     const steeringParts = wheelParts.steering.get(name) ?? []
-    const referenceParts = rollingParts.filter((part) => {
-      const materials = part.userData.redBullWheelMaterials as string[] | undefined
-      return materials?.some((material) => RED_BULL_AXLE_REFERENCE_MATERIALS.has(material)) === true
-    })
-    const axleParts = referenceParts.length ? referenceParts : rollingParts
+    const axleParts = axlePartsBySlot.get(name) ?? rollingParts
+    // Each rear wheel keeps its own geometry-derived camber. The dedicated
+    // rear reference set excludes the misleading REAR_RIMS principal axis.
     const axleWorld = smallestPrincipalAxisForObjects(axleParts)
-    const wheelCenter = renderedBoxForObjects(axleParts).getCenter(new THREE.Vector3())
+    const wheelCenter = wheelCenters.get(name)?.clone()
+      ?? renderedBoxForObjects(axleParts).getCenter(new THREE.Vector3())
     const steerPivot = createPivotForObjects(
       root,
       [...rollingParts, ...steeringParts],
@@ -924,109 +953,22 @@ function createRedBullWheelRigs(root: THREE.Object3D): WheelRig[] {
   return rigs
 }
 
-function splitMaterialWheelComponents(
+function createWheelRigsFromParts(
   root: THREE.Object3D,
-  profile: MaterialWheelProfile,
-): Map<RedBullWheelSlot, THREE.Object3D[]> {
-  const rolling = new Map<RedBullWheelSlot, THREE.Object3D[]>([
-    ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
-  ])
-  root.updateMatrixWorld(true)
-  const modelBox = new THREE.Box3().setFromObject(root)
-  const modelCenter = modelBox.getCenter(new THREE.Vector3())
-  const modelSize = modelBox.getSize(new THREE.Vector3())
-  const candidates: THREE.Mesh[] = []
-  root.traverse((obj) => {
-    const mesh = obj as THREE.Mesh
-    if (!mesh.isMesh || !mesh.geometry || !mesh.parent) return
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    if (materials.some((material) => profile.materials.has((material?.name ?? '').toLowerCase()))) {
-      candidates.push(mesh)
-    }
-  })
-
-  const point = new THREE.Vector3()
-  for (const mesh of candidates) {
-    const parent = mesh.parent
-    const position = mesh.geometry.getAttribute('position')
-    if (!parent || !position) continue
-    const index = mesh.geometry.index
-    const total = index?.count ?? position.count
-    const triangleStarts = new Map<RedBullWheelSlot, number[]>([
-      ['left-front', []], ['right-front', []], ['left-rear', []], ['right-rear', []],
-    ])
-    const staticTriangles: number[] = []
-
-    for (let offset = 0; offset + 2 < total; offset += 3) {
-      let x = 0
-      let z = 0
-      for (let vertex = 0; vertex < 3; vertex++) {
-        point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
-          .applyMatrix4(mesh.matrixWorld)
-        x += point.x
-        z += point.z
-      }
-      x /= 3
-      z /= 3
-      const inWheelLane = Math.abs(x - modelCenter.x) >= modelSize.x * profile.lateralMinRatio
-      const nearAxle = Math.abs(z - modelCenter.z) >= modelSize.z * profile.longitudinalMinRatio
-      if (!inWheelLane || !nearAxle) {
-        staticTriangles.push(offset)
-        continue
-      }
-      const side = x < modelCenter.x ? 'left' : 'right'
-      const axle = z >= modelCenter.z ? 'front' : 'rear'
-      triangleStarts.get(`${side}-${axle}`)?.push(offset)
-    }
-
-    const wheelGeometries = new Map<RedBullWheelSlot, THREE.BufferGeometry>()
-    for (const [slot, starts] of triangleStarts) {
-      const geometry = buildTriangleSubsetGeometry(mesh.geometry, starts)
-      if (geometry) wheelGeometries.set(slot, geometry)
-    }
-    const staticGeometry = buildTriangleSubsetGeometry(mesh.geometry, staticTriangles)
-    if (!wheelGeometries.size) {
-      staticGeometry?.dispose()
-      continue
-    }
-
-    if (staticGeometry) {
-      const staticMesh = new THREE.Mesh(staticGeometry, mesh.material)
-      staticMesh.name = `material-wheel-static-${mesh.name}`
-      staticMesh.position.copy(mesh.position)
-      staticMesh.quaternion.copy(mesh.quaternion)
-      staticMesh.scale.copy(mesh.scale)
-      staticMesh.castShadow = mesh.castShadow
-      staticMesh.receiveShadow = mesh.receiveShadow
-      staticMesh.frustumCulled = mesh.frustumCulled
-      parent.add(staticMesh)
-    }
-    for (const [slot, geometry] of wheelGeometries) {
-      const component = new THREE.Mesh(geometry, mesh.material)
-      component.name = `material-wheel-${slot}-${mesh.name}`
-      component.position.copy(mesh.position)
-      component.quaternion.copy(mesh.quaternion)
-      component.scale.copy(mesh.scale)
-      component.castShadow = mesh.castShadow
-      component.receiveShadow = mesh.receiveShadow
-      component.frustumCulled = mesh.frustumCulled
-      parent.add(component)
-      rolling.get(slot)?.push(component)
-    }
-    parent.remove(mesh)
-    mesh.geometry.dispose()
-  }
-  root.updateMatrixWorld(true)
-  return rolling
-}
-
-function createMaterialWheelRigs(root: THREE.Object3D, profile: MaterialWheelProfile): WheelRig[] {
-  const wheelParts = splitMaterialWheelComponents(root, profile)
+  rolling: Map<PlayerWheelSlot, THREE.Object3D[]>,
+  centers?: ReadonlyMap<PlayerWheelSlot, THREE.Vector3>,
+  fixedWorldAxle?: THREE.Vector3 | ReadonlyMap<PlayerWheelSlot, THREE.Vector3>,
+): WheelRig[] {
   const rigs: WheelRig[] = []
-  for (const [name, rollingParts] of wheelParts) {
+  for (const [name, rollingParts] of rolling) {
     if (!rollingParts.length) continue
-    const axleWorld = smallestPrincipalAxisForObjects(rollingParts)
-    const wheelCenter = renderedBoxForObjects(rollingParts).getCenter(new THREE.Vector3())
+    const axleOverride = fixedWorldAxle instanceof THREE.Vector3
+      ? fixedWorldAxle
+      : fixedWorldAxle?.get(name)
+    const axleWorld = axleOverride?.clone().normalize()
+      ?? smallestPrincipalAxisForObjects(rollingParts)
+    const wheelCenter = centers?.get(name)?.clone()
+      ?? wheelCenterForParts(rollingParts)
     const steerPivot = createPivotForObjects(
       root,
       rollingParts,
@@ -1050,9 +992,761 @@ function createMaterialWheelRigs(root: THREE.Object3D, profile: MaterialWheelPro
       spinPivots: [spinPivot],
       spinAxis: axleLocal,
       spin: 0,
+      baseCenterWorld: wheelCenter.clone(),
     })
   }
   return rigs
+}
+
+function mercedesWheelAnchorSlot(
+  componentBox: THREE.Box3,
+  modelBox: THREE.Box3,
+): PlayerWheelSlot | null {
+  const center = componentBox.getCenter(new THREE.Vector3())
+  const size = componentBox.getSize(new THREE.Vector3())
+  const modelCenter = modelBox.getCenter(new THREE.Vector3())
+  const modelSize = modelBox.getSize(new THREE.Vector3())
+  const x = center.x - modelCenter.x
+  const z = center.z - modelCenter.z
+  const lowEnough = center.y <= modelBox.min.y + modelSize.y * 0.58
+  const farEnoughOut = Math.abs(x) >= modelSize.x * 0.27
+  const nearAnAxle = Math.abs(z) >= modelSize.z * 0.17
+  const axle: 'front' | 'rear' = z > 0 ? 'front' : 'rear'
+  const radialRoundness = Math.min(size.y, size.z) / Math.max(size.y, size.z, 1e-6)
+  const wheelSized = size.x <= modelSize.x * 0.36
+    && size.y >= modelSize.y * 0.2
+    && size.y <= modelSize.y * 0.82
+    && size.z >= modelSize.z * 0.065
+    && size.z <= modelSize.z * 0.24
+    && size.y / Math.max(size.z, 1e-6) >= 0.5
+    && size.y / Math.max(size.z, 1e-6) <= 1.8
+  const frontTireSized = axle === 'rear'
+    || (
+      size.x >= modelSize.x * 0.075
+      && size.y >= modelSize.y * 0.38
+      && size.z >= modelSize.z * 0.1
+      && radialRoundness >= 0.84
+    )
+  if (!lowEnough || !farEnoughOut || !nearAnAxle || !wheelSized || !frontTireSized) return null
+  const side = x < 0 ? 'left' : 'right'
+  return `${side}-${axle}` as PlayerWheelSlot
+}
+
+interface MercedesMeshComponent {
+  mesh: THREE.Mesh
+  triangleStarts: number[]
+  box: THREE.Box3
+  center: THREE.Vector3
+  size: THREE.Vector3
+  anchorSlot: PlayerWheelSlot | null
+}
+
+interface MercedesWheelComponents {
+  rolling: Map<PlayerWheelSlot, THREE.Object3D[]>
+  centers: Map<PlayerWheelSlot, THREE.Vector3>
+  frontAxles: Map<PlayerWheelSlot, THREE.Vector3>
+}
+
+function fittedWheelCircleCenter(
+  mesh: THREE.Mesh,
+  triangleStarts: readonly number[],
+  fallback: THREE.Vector3,
+): THREE.Vector3 {
+  const position = mesh.geometry.getAttribute('position')
+  if (!position) return fallback.clone()
+  const index = mesh.geometry.index
+  const seen = new Set<number | string>()
+  const point = new THREE.Vector3()
+  let yy = 0
+  let yz = 0
+  let zz = 0
+  let y = 0
+  let z = 0
+  let yr2 = 0
+  let zr2 = 0
+  let r2 = 0
+  let count = 0
+
+  for (const offset of triangleStarts) {
+    for (let vertex = 0; vertex < 3; vertex++) {
+      const vertexIndex = index ? index.getX(offset + vertex) : offset + vertex
+      point.fromBufferAttribute(position, vertexIndex).applyMatrix4(mesh.matrixWorld)
+      const key = index
+        ? vertexIndex
+        : `${Math.round(point.x * 100000)}:${Math.round(point.y * 100000)}:${Math.round(point.z * 100000)}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      const radiusSquared = point.y * point.y + point.z * point.z
+      yy += 4 * point.y * point.y
+      yz += 4 * point.y * point.z
+      zz += 4 * point.z * point.z
+      y += 2 * point.y
+      z += 2 * point.z
+      yr2 += 2 * point.y * radiusSquared
+      zr2 += 2 * point.z * radiusSquared
+      r2 += radiusSquared
+      count += 1
+    }
+  }
+
+  if (count < 12) return fallback.clone()
+  const normal = new THREE.Matrix3().set(
+    yy, yz, y,
+    yz, zz, z,
+    y, z, count,
+  )
+  if (Math.abs(normal.determinant()) < 1e-9) return fallback.clone()
+  const solution = new THREE.Vector3(yr2, zr2, r2).applyMatrix3(normal.invert())
+  if (!Number.isFinite(solution.x) || !Number.isFinite(solution.y)) return fallback.clone()
+  return new THREE.Vector3(fallback.x, solution.x, solution.y)
+}
+
+function splitMercedesWheelComponents(root: THREE.Object3D): MercedesWheelComponents {
+  root.updateMatrixWorld(true)
+  const modelBox = renderedBoxForObjects([root])
+  const modelSize = modelBox.getSize(new THREE.Vector3())
+  const rolling = new Map<PlayerWheelSlot, THREE.Object3D[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const meshes: THREE.Mesh[] = []
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (mesh.isMesh && mesh.geometry && mesh.parent) meshes.push(mesh)
+  })
+
+  const components: MercedesMeshComponent[] = []
+  const anchorBoxes = new Map<PlayerWheelSlot, THREE.Box3>([
+    ['left-front', new THREE.Box3()],
+    ['right-front', new THREE.Box3()],
+    ['left-rear', new THREE.Box3()],
+    ['right-rear', new THREE.Box3()],
+  ])
+  const frontTireAnchors = new Map<PlayerWheelSlot, {
+    box: THREE.Box3
+    score: number
+    center: THREE.Vector3
+    source: MercedesMeshComponent
+  }>()
+  const point = new THREE.Vector3()
+  for (const mesh of meshes) {
+    const position = mesh.geometry.getAttribute('position')
+    if (!position) continue
+    const index = mesh.geometry.index
+    for (const component of triangleComponents(mesh.geometry)) {
+      const componentBox = new THREE.Box3()
+      for (const offset of component) {
+        for (let vertex = 0; vertex < 3; vertex++) {
+          point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+            .applyMatrix4(mesh.matrixWorld)
+          componentBox.expandByPoint(point)
+        }
+      }
+      const anchorSlot = mercedesWheelAnchorSlot(componentBox, modelBox)
+      const record: MercedesMeshComponent = {
+        mesh,
+        triangleStarts: component,
+        box: componentBox,
+        center: componentBox.getCenter(new THREE.Vector3()),
+        size: componentBox.getSize(new THREE.Vector3()),
+        anchorSlot,
+      }
+      components.push(record)
+      if (anchorSlot) {
+        anchorBoxes.get(anchorSlot)?.union(componentBox)
+        if (anchorSlot.endsWith('-front')) {
+          const componentSize = componentBox.getSize(new THREE.Vector3())
+          const roundness = Math.min(componentSize.y, componentSize.z)
+            / Math.max(componentSize.y, componentSize.z, 1e-6)
+          const score = componentSize.y * componentSize.z * roundness * roundness
+          if (score > (frontTireAnchors.get(anchorSlot)?.score ?? -1)) {
+            const boxCenter = componentBox.getCenter(new THREE.Vector3())
+            frontTireAnchors.set(anchorSlot, {
+              box: componentBox.clone(),
+              score,
+              center: fittedWheelCircleCenter(mesh, component, boxCenter),
+              source: record,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  for (const slot of ['left-front', 'right-front'] as const) {
+    const tireAnchor = frontTireAnchors.get(slot)
+    if (!tireAnchor) continue
+    const tireCenter = tireAnchor.box.getCenter(new THREE.Vector3())
+    const tireSize = tireAnchor.box.getSize(new THREE.Vector3())
+    const tireDiameter = Math.max(tireSize.y, tireSize.z)
+    let bestHub: MercedesMeshComponent | null = null
+    let bestScore = Number.POSITIVE_INFINITY
+    for (const component of components) {
+      const radialSize = Math.max(component.size.y, component.size.z)
+      const radialRatio = radialSize / Math.max(tireDiameter, 1e-6)
+      const roundness = Math.min(component.size.y, component.size.z)
+        / Math.max(component.size.y, component.size.z, 1e-6)
+      const dy = Math.abs(component.center.y - tireCenter.y) / Math.max(tireSize.y, 1e-6)
+      const dz = Math.abs(component.center.z - tireCenter.z) / Math.max(tireSize.z, 1e-6)
+      const insideAxleBand = component.center.x >= tireAnchor.box.min.x - tireSize.x * 0.25
+        && component.center.x <= tireAnchor.box.max.x + tireSize.x * 0.25
+      if (
+        !insideAxleBand
+        || dy > 0.2
+        || dz > 0.2
+        || radialRatio < 0.06
+        || radialRatio > 0.42
+        || roundness < 0.68
+      ) continue
+      const score = (dy + dz) * 8
+        + Math.abs(radialRatio - 0.18)
+        + (1 - roundness) * 0.5
+      if (score < bestScore) {
+        bestHub = component
+        bestScore = score
+      }
+    }
+    if (bestHub) tireAnchor.center.copy(bestHub.center)
+  }
+
+  const centers = new Map<PlayerWheelSlot, THREE.Vector3>()
+  for (const [slot, box] of anchorBoxes) {
+    if (box.isEmpty()) continue
+    const frontTire = frontTireAnchors.get(slot)
+    centers.set(
+      slot,
+      frontTire?.center.clone() ?? box.getCenter(new THREE.Vector3()),
+    )
+  }
+  const leftFrontCenter = centers.get('left-front')
+  const rightFrontCenter = centers.get('right-front')
+  if (leftFrontCenter && rightFrontCenter) {
+    // Both front wheels share one physical axle. Preserve each wheel's
+    // lateral X position, while eliminating tiny exporter/component
+    // differences that otherwise make one wheel rotate eccentrically.
+    const axleY = (leftFrontCenter.y + rightFrontCenter.y) * 0.5
+    const axleZ = (leftFrontCenter.z + rightFrontCenter.z) * 0.5
+    leftFrontCenter.set(leftFrontCenter.x, axleY, axleZ)
+    rightFrontCenter.set(rightFrontCenter.x, axleY, axleZ)
+  }
+
+  const frontSelectionAxles = new Map<PlayerWheelSlot, THREE.Vector3>()
+  for (const slot of ['left-front', 'right-front'] as const) {
+    const tireAnchor = frontTireAnchors.get(slot)
+    if (!tireAnchor) continue
+    const geometry = buildTriangleSubsetGeometry(
+      tireAnchor.source.mesh.geometry,
+      tireAnchor.source.triangleStarts,
+    )
+    if (!geometry) continue
+    const reference = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial())
+    reference.matrixAutoUpdate = false
+    reference.matrix.copy(tireAnchor.source.mesh.matrixWorld)
+    reference.matrixWorld.copy(tireAnchor.source.mesh.matrixWorld)
+    const axle = smallestPrincipalAxisForObjects([reference])
+    const outward = slot === 'left-front'
+      ? new THREE.Vector3(-1, 0, 0)
+      : new THREE.Vector3(1, 0, 0)
+    if (axle.dot(outward) < 0) axle.negate()
+    frontSelectionAxles.set(slot, axle)
+    geometry.dispose()
+    ;(reference.material as THREE.Material).dispose()
+  }
+
+  const frontInnerSidewallPlanes = new Map<PlayerWheelSlot, {
+    x: number
+    tolerance: number
+    outerAxis: THREE.Vector3
+    outerAxial: number
+    axialMin: number
+    axialMax: number
+    components: Set<MercedesMeshComponent>
+    ringComponents: Set<MercedesMeshComponent>
+  }>()
+  for (const slot of ['left-front', 'right-front'] as const) {
+    const tireAnchor = frontTireAnchors.get(slot)
+    if (!tireAnchor) continue
+    const tireSize = tireAnchor.box.getSize(new THREE.Vector3())
+    const selectionAxle = frontSelectionAxles.get(slot)
+      ?? new THREE.Vector3(slot === 'left-front' ? -1 : 1, 0, 0)
+    const tireDiameter = Math.max(tireSize.y, tireSize.z)
+    const innerRadius = tireDiameter * 0.24
+    const outerRadius = tireDiameter * 0.6
+    const sidewallMargin = Math.max(tireSize.x * 0.08, modelSize.x * 0.004)
+    const sidewallXMin = slot === 'left-front'
+      ? tireAnchor.box.max.x - tireSize.x * 0.58
+      : tireAnchor.box.min.x - sidewallMargin
+    const sidewallXMax = slot === 'left-front'
+      ? tireAnchor.box.max.x + sidewallMargin
+      : tireAnchor.box.min.x + tireSize.x * 0.58
+    const binSize = Math.max(0.004, modelSize.x * 0.006)
+    const bins = new Map<number, number>()
+    const sidewallComponents = new Set<MercedesMeshComponent>()
+    const ringComponents = new Set<MercedesMeshComponent>()
+    const samplePoint = new THREE.Vector3()
+    const sampleNormal = new THREE.Vector3()
+    const sampleOffset = new THREE.Vector3()
+    const radialUp = new THREE.Vector3(0, 1, 0)
+      .addScaledVector(selectionAxle, -selectionAxle.y)
+      .normalize()
+    const radialForward = new THREE.Vector3()
+      .crossVectors(selectionAxle, radialUp)
+      .normalize()
+
+    for (const component of components) {
+      const position = component.mesh.geometry.getAttribute('position')
+      const normal = component.mesh.geometry.getAttribute('normal')
+      const index = component.mesh.geometry.index
+      if (!position || !normal) continue
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(component.mesh.matrixWorld)
+      const angleBins = new Set<number>()
+      const fullRingAngleBins = new Set<number>()
+      const componentSamples: number[] = []
+      let ringTriangleCount = 0
+      for (const triangleStart of component.triangleStarts) {
+        let centroidX = 0
+        let centroidY = 0
+        let centroidZ = 0
+        let normalAlignment = 0
+        for (let vertex = 0; vertex < 3; vertex++) {
+          const vertexIndex = index ? index.getX(triangleStart + vertex) : triangleStart + vertex
+          samplePoint.fromBufferAttribute(position, vertexIndex).applyMatrix4(component.mesh.matrixWorld)
+          sampleNormal.fromBufferAttribute(normal, vertexIndex).applyNormalMatrix(normalMatrix)
+          centroidX += samplePoint.x
+          centroidY += samplePoint.y
+          centroidZ += samplePoint.z
+          normalAlignment += Math.abs(sampleNormal.dot(selectionAxle))
+        }
+        centroidX /= 3
+        centroidY /= 3
+        centroidZ /= 3
+        normalAlignment /= 3
+        sampleOffset
+          .set(centroidX, centroidY, centroidZ)
+          .sub(tireAnchor.center)
+        const axial = sampleOffset.dot(selectionAxle)
+        sampleOffset.addScaledVector(selectionAxle, -axial)
+        const radial = sampleOffset.length()
+        const angle = Math.atan2(
+          sampleOffset.dot(radialForward),
+          sampleOffset.dot(radialUp),
+        )
+        const angleBin = Math.floor(((angle + Math.PI) / (Math.PI * 2)) * 16) % 16
+        if (
+          radial >= innerRadius
+          && radial <= outerRadius
+          && normalAlignment >= 0.55
+        ) {
+          fullRingAngleBins.add(angleBin)
+          ringTriangleCount += 1
+        }
+        if (
+          centroidX < sidewallXMin
+          || centroidX > sidewallXMax
+          || radial < innerRadius
+          || radial > outerRadius
+          || normalAlignment < 0.55
+        ) {
+          continue
+        }
+        angleBins.add(angleBin)
+        componentSamples.push(centroidX)
+      }
+      const ringCoverage = ringTriangleCount
+        / Math.max(component.triangleStarts.length, 1)
+      if (fullRingAngleBins.size >= 12 && ringCoverage >= 0.55) {
+        ringComponents.add(component)
+      }
+      // A tire sidewall wraps around almost the entire wheel. Wheel brows,
+      // suspension fairings and other aero pieces only occupy a short arc.
+      if (angleBins.size >= 9) {
+        sidewallComponents.add(component)
+        for (const centroidX of componentSamples) {
+          const bin = Math.round(centroidX / binSize)
+          bins.set(bin, (bins.get(bin) ?? 0) + 1)
+        }
+      }
+    }
+
+    let bestBin: number | null = null
+    let bestCount = 0
+    for (const [bin, count] of bins) {
+      if (count > bestCount) {
+        bestBin = bin
+        bestCount = count
+      }
+    }
+    const innerEdgeX = slot === 'left-front'
+      ? tireAnchor.box.max.x
+      : tireAnchor.box.min.x
+    let axialMin = Number.POSITIVE_INFINITY
+    let axialMax = Number.NEGATIVE_INFINITY
+    const anchorPosition = tireAnchor.source.mesh.geometry.getAttribute('position')
+    const anchorIndex = tireAnchor.source.mesh.geometry.index
+    if (anchorPosition) {
+      for (const triangleStart of tireAnchor.source.triangleStarts) {
+        for (let vertex = 0; vertex < 3; vertex++) {
+          const vertexIndex = anchorIndex
+            ? anchorIndex.getX(triangleStart + vertex)
+            : triangleStart + vertex
+          samplePoint
+            .fromBufferAttribute(anchorPosition, vertexIndex)
+            .applyMatrix4(tireAnchor.source.mesh.matrixWorld)
+          const axial = samplePoint.clone().sub(tireAnchor.center).dot(selectionAxle)
+          axialMin = Math.min(axialMin, axial)
+          axialMax = Math.max(axialMax, axial)
+        }
+      }
+    }
+    if (!Number.isFinite(axialMin) || !Number.isFinite(axialMax)) {
+      axialMin = -tireSize.x * 0.5
+      axialMax = tireSize.x * 0.5
+    }
+    frontInnerSidewallPlanes.set(slot, {
+      x: bestBin === null ? innerEdgeX : bestBin * binSize,
+      tolerance: Math.max(binSize * 1.25, modelSize.x * 0.006),
+      outerAxis: selectionAxle.clone(),
+      outerAxial: axialMax,
+      axialMin,
+      axialMax,
+      components: sidewallComponents,
+      ringComponents,
+    })
+  }
+
+  const trianglesByMesh = new Map<THREE.Mesh, {
+    staticTriangles: number[]
+    wheelTriangles: Map<PlayerWheelSlot, number[]>
+    frontAxleTriangles: Map<PlayerWheelSlot, number[]>
+  }>()
+  for (const mesh of meshes) {
+    trianglesByMesh.set(mesh, {
+      staticTriangles: [],
+      wheelTriangles: new Map<PlayerWheelSlot, number[]>([
+        ['left-front', []],
+        ['right-front', []],
+        ['left-rear', []],
+        ['right-rear', []],
+      ]),
+      frontAxleTriangles: new Map<PlayerWheelSlot, number[]>([
+        ['left-front', []],
+        ['right-front', []],
+      ]),
+    })
+  }
+
+  for (const component of components) {
+    const target = trianglesByMesh.get(component.mesh)
+    if (!target) continue
+    let slot: PlayerWheelSlot | null = null
+    for (const candidateSlot of ['left-front', 'right-front'] as const) {
+      const tireAnchor = frontTireAnchors.get(candidateSlot)
+      if (!tireAnchor) continue
+      const tireSize = tireAnchor.box.getSize(new THREE.Vector3())
+      const tireCenter = tireAnchor.center
+      const roundness = Math.min(component.size.y, component.size.z)
+        / Math.max(component.size.y, component.size.z, 1e-6)
+      const sameCenter = Math.abs(component.center.x - tireCenter.x) <= modelSize.x * 0.2
+        && Math.abs(component.center.y - tireCenter.y) <= tireSize.y * 0.018
+        && Math.abs(component.center.z - tireCenter.z) <= tireSize.z * 0.018
+      const wheelDiameter = component.size.y >= tireSize.y * 0.02
+        && component.size.z >= tireSize.z * 0.02
+        && component.size.y <= tireSize.y * 1.04
+        && component.size.z <= tireSize.z * 1.04
+      const wheelWidth = component.size.x <= modelSize.x * 0.24
+      const wheelSource = component === tireAnchor.source
+        || (sameCenter && wheelDiameter && wheelWidth && roundness >= 0.5)
+      const innerDepth = Math.max(tireSize.x * 0.8, modelSize.x * 0.18)
+      const outerMargin = Math.max(tireSize.x * 0.12, modelSize.x * 0.025)
+      const innerXMin = candidateSlot === 'left-front'
+        ? tireAnchor.box.min.x - outerMargin
+        : tireAnchor.box.min.x - innerDepth
+      const innerXMax = candidateSlot === 'left-front'
+        ? tireAnchor.box.max.x + innerDepth
+        : tireAnchor.box.max.x + outerMargin
+      const hubCentered = Math.abs(component.center.y - tireAnchor.center.y) <= tireSize.y * 0.08
+        && Math.abs(component.center.z - tireAnchor.center.z) <= tireSize.z * 0.08
+      const tireDiameter = Math.max(tireSize.y, tireSize.z)
+      const hubRadialSize = Math.max(component.size.y, component.size.z)
+      const hubRoundness = Math.min(component.size.y, component.size.z)
+        / Math.max(hubRadialSize, 1e-6)
+      const compactHub = component.size.x <= tireSize.x * 1.6
+        && hubRadialSize >= tireDiameter * 0.04
+        && hubRadialSize <= tireDiameter * 0.42
+        && component.size.y <= tireSize.y * 0.52
+        && component.size.z <= tireSize.z * 0.52
+        && hubRoundness >= 0.68
+      const insideInnerAxleBand = component.center.x >= innerXMin
+        && component.center.x <= innerXMax
+      const innerHubSource = hubCentered && compactHub && insideInnerAxleBand
+      const sidewallPlane = frontInnerSidewallPlanes.get(candidateSlot)
+      const selectionAxis = sidewallPlane?.outerAxis
+        ?? new THREE.Vector3(candidateSlot === 'left-front' ? -1 : 1, 0, 0)
+      const sidewallMargin = Math.max(tireSize.x * 0.08, modelSize.x * 0.004)
+      const outerComponentMargin = Math.max(tireSize.x * 0.55, modelSize.x * 0.018)
+      const innerSideXMin = candidateSlot === 'left-front'
+        ? tireAnchor.box.max.x - tireSize.x * 0.58
+        : tireAnchor.box.min.x - sidewallMargin
+      const innerSideXMax = candidateSlot === 'left-front'
+        ? tireAnchor.box.max.x + sidewallMargin
+        : tireAnchor.box.min.x + tireSize.x * 0.58
+      const componentTouchesInnerSidewall = component.box.max.x >= innerSideXMin
+        && component.box.min.x <= innerSideXMax
+        && component.box.max.y >= tireAnchor.center.y - tireDiameter * 0.6
+        && component.box.min.y <= tireAnchor.center.y + tireDiameter * 0.6
+        && component.box.max.z >= tireAnchor.center.z - tireDiameter * 0.6
+        && component.box.min.z <= tireAnchor.center.z + tireDiameter * 0.6
+      const componentTouchesTire = component.box.max.x >= tireAnchor.box.min.x - outerComponentMargin
+        && component.box.min.x <= tireAnchor.box.max.x + outerComponentMargin
+        && component.box.max.y >= tireAnchor.center.y - tireDiameter * 0.62
+        && component.box.min.y <= tireAnchor.center.y + tireDiameter * 0.62
+        && component.box.max.z >= tireAnchor.center.z - tireDiameter * 0.62
+        && component.box.min.z <= tireAnchor.center.z + tireDiameter * 0.62
+      if (
+        !wheelSource
+        && !innerHubSource
+        && !componentTouchesInnerSidewall
+        && !componentTouchesTire
+      ) continue
+
+      const position = component.mesh.geometry.getAttribute('position')
+      const normal = component.mesh.geometry.getAttribute('normal')
+      const index = component.mesh.geometry.index
+      if (!position) continue
+      const radius = Math.max(tireSize.y, tireSize.z) * 0.6
+      const innerSidewallRadius = Math.max(tireSize.y, tireSize.z) * 0.24
+      const tireAnnulusRadius = Math.max(tireSize.y, tireSize.z) * 0.2
+      const tireEnvelopeMargin = Math.max(tireSize.x * 0.06, modelSize.x * 0.003)
+      const tireEnvelopeXMin = tireAnchor.box.min.x - tireEnvelopeMargin
+      const tireEnvelopeXMax = tireAnchor.box.max.x + tireEnvelopeMargin
+      const xMin = innerXMin
+      const xMax = innerXMax
+      const wheelTriangles: number[] = []
+      const staticTriangles: number[] = []
+      const vertexPoint = new THREE.Vector3()
+      const vertexNormal = new THREE.Vector3()
+      const tiltedOffset = new THREE.Vector3()
+      const normalMatrix = new THREE.Matrix3().getNormalMatrix(component.mesh.matrixWorld)
+      for (const triangleStart of component.triangleStarts) {
+        let insideWheelCylinder = true
+        let insideTireEnvelope = true
+        let insideInnerSidewall = true
+        let axleNormalAlignment = 0
+        let triangleCenterX = 0
+        let triangleAxial = 0
+        let triangleTiltedRadial = 0
+        for (let vertex = 0; vertex < 3; vertex++) {
+          const vertexIndex = index ? index.getX(triangleStart + vertex) : triangleStart + vertex
+          vertexPoint
+            .fromBufferAttribute(position, vertexIndex)
+            .applyMatrix4(component.mesh.matrixWorld)
+          const radial = Math.hypot(
+            vertexPoint.y - tireAnchor.center.y,
+            vertexPoint.z - tireAnchor.center.z,
+          )
+          tiltedOffset.copy(vertexPoint).sub(tireAnchor.center)
+          const axial = tiltedOffset.dot(selectionAxis)
+          const tiltedRadial = tiltedOffset.addScaledVector(
+            selectionAxis,
+            -axial,
+          ).length()
+          triangleCenterX += vertexPoint.x
+          triangleAxial += axial
+          triangleTiltedRadial += tiltedRadial
+          if (vertexPoint.x < xMin || vertexPoint.x > xMax || radial > radius) {
+            insideWheelCylinder = false
+          }
+          if (
+            vertexPoint.x < tireEnvelopeXMin
+            || vertexPoint.x > tireEnvelopeXMax
+            || radial < tireAnnulusRadius
+            || radial > radius
+          ) insideTireEnvelope = false
+          if (
+            vertexPoint.x < innerSideXMin
+            || vertexPoint.x > innerSideXMax
+            || radial < innerSidewallRadius
+            || radial > radius
+          ) insideInnerSidewall = false
+          if (normal) {
+            vertexNormal.fromBufferAttribute(normal, vertexIndex).applyNormalMatrix(normalMatrix)
+            axleNormalAlignment += Math.abs(vertexNormal.x)
+          }
+        }
+        axleNormalAlignment /= 3
+        triangleCenterX /= 3
+        triangleAxial /= 3
+        triangleTiltedRadial /= 3
+        const innerSidewallTriangle = insideInnerSidewall
+          && Boolean(sidewallPlane)
+          && Boolean(sidewallPlane?.components.has(component))
+          && Math.abs(triangleCenterX - (sidewallPlane?.x ?? 0))
+            <= (sidewallPlane?.tolerance ?? 0)
+          && (!normal || axleNormalAlignment >= 0.55)
+        const tireShapeComponent = Boolean(sidewallPlane?.ringComponents.has(component))
+        const outerSidewallTriangle = Boolean(sidewallPlane)
+          && sidewallPlane?.outerAxial !== undefined
+          && triangleAxial >= sidewallPlane.axialMin
+            + (sidewallPlane.axialMax - sidewallPlane.axialMin) * 0.5
+          && triangleAxial <= sidewallPlane.axialMax
+            + (sidewallPlane.axialMax - sidewallPlane.axialMin) * 0.25
+          && triangleTiltedRadial >= tireAnnulusRadius * 0.95
+          && triangleTiltedRadial <= radius * 1.08
+        const axleReferenceTriangle = wheelSource && insideWheelCylinder
+        const rolls = (wheelSource && insideTireEnvelope)
+          || (innerHubSource && insideWheelCylinder)
+          || innerSidewallTriangle
+          || tireShapeComponent
+          || outerSidewallTriangle
+        if (axleReferenceTriangle) {
+          target.frontAxleTriangles.get(candidateSlot)?.push(triangleStart)
+        }
+        ;(rolls ? wheelTriangles : staticTriangles).push(triangleStart)
+      }
+      if (wheelTriangles.length) {
+        target.wheelTriangles.get(candidateSlot)?.push(...wheelTriangles)
+        target.staticTriangles.push(...staticTriangles)
+        slot = candidateSlot
+        break
+      }
+    }
+
+    if (slot) continue
+
+    if (!slot) slot = component.anchorSlot
+    if (slot?.endsWith('-front')) slot = null
+    if (!slot) {
+      let nearestDistance = Number.POSITIVE_INFINITY
+      for (const [candidateSlot, center] of centers) {
+        if (candidateSlot.endsWith('-front')) continue
+        const dx = Math.abs(component.center.x - center.x)
+        const dy = Math.abs(component.center.y - center.y)
+        const dz = Math.abs(component.center.z - center.z)
+        const compactEnough = component.size.x <= modelSize.x * 0.26
+          && component.size.y <= modelSize.y * 0.62
+          && component.size.z <= modelSize.z * 0.15
+        const insideWheelEnvelope = dx <= modelSize.x * 0.1
+          && dy <= modelSize.y * 0.28
+          && dz <= modelSize.z * 0.07
+        const distance = dx / modelSize.x + dy / modelSize.y + dz / modelSize.z
+        if (compactEnough && insideWheelEnvelope && distance < nearestDistance) {
+          slot = candidateSlot
+          nearestDistance = distance
+        }
+      }
+    }
+    if (slot) target.wheelTriangles.get(slot)?.push(...component.triangleStarts)
+    else target.staticTriangles.push(...component.triangleStarts)
+  }
+
+  const frontAxles = new Map<PlayerWheelSlot, THREE.Vector3>(
+    [...frontSelectionAxles].map(([slot, axle]) => [slot, axle.clone()]),
+  )
+  const axleReferenceMaterial = new THREE.MeshBasicMaterial()
+  for (const slot of ['left-front', 'right-front'] as const) {
+    if (frontAxles.has(slot)) continue
+    const references: THREE.Mesh[] = []
+    for (const mesh of meshes) {
+      const triangles = trianglesByMesh.get(mesh)?.frontAxleTriangles.get(slot) ?? []
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const reference = new THREE.Mesh(geometry, axleReferenceMaterial)
+      reference.matrixAutoUpdate = false
+      reference.matrix.copy(mesh.matrixWorld)
+      reference.matrixWorld.copy(mesh.matrixWorld)
+      references.push(reference)
+    }
+    if (references.length) {
+      frontAxles.set(slot, smallestPrincipalAxisForObjects(references))
+      references.forEach((reference) => reference.geometry.dispose())
+    }
+  }
+  axleReferenceMaterial.dispose()
+
+  for (const mesh of meshes) {
+    const parent = mesh.parent
+    const split = trianglesByMesh.get(mesh)
+    if (!parent || !split) continue
+    const staticGeometry = buildTriangleSubsetGeometry(mesh.geometry, split.staticTriangles)
+    if (staticGeometry) {
+      const staticMesh = new THREE.Mesh(staticGeometry, mesh.material)
+      staticMesh.name = `mercedes-w15-static-${mesh.id}`
+      staticMesh.position.copy(mesh.position)
+      staticMesh.quaternion.copy(mesh.quaternion)
+      staticMesh.scale.copy(mesh.scale)
+      staticMesh.castShadow = mesh.castShadow
+      staticMesh.receiveShadow = mesh.receiveShadow
+      staticMesh.frustumCulled = mesh.frustumCulled
+      parent.add(staticMesh)
+    }
+    for (const [slot, triangles] of split.wheelTriangles) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const component = new THREE.Mesh(geometry, mesh.material)
+      component.name = `mercedes-w15-wheel-${slot}-${mesh.id}`
+      component.position.copy(mesh.position)
+      component.quaternion.copy(mesh.quaternion)
+      component.scale.copy(mesh.scale)
+      component.castShadow = mesh.castShadow
+      component.receiveShadow = mesh.receiveShadow
+      component.frustumCulled = mesh.frustumCulled
+      parent.add(component)
+      rolling.get(slot)?.push(component)
+    }
+    parent.remove(mesh)
+    mesh.geometry.dispose()
+  }
+  root.updateMatrixWorld(true)
+  return { rolling, centers, frontAxles }
+}
+
+function createMercedesW15WheelRigs(root: THREE.Object3D): WheelRig[] {
+  // Known-good model-specific profile. Keep AMG changes isolated and update
+  // AMG_W15_WHEEL_PROFILE.md whenever this calibration intentionally changes.
+  const components = splitMercedesWheelComponents(root)
+  const frontRolling = new Map<PlayerWheelSlot, THREE.Object3D[]>([
+    ['left-front', components.rolling.get('left-front') ?? []],
+    ['right-front', components.rolling.get('right-front') ?? []],
+  ])
+  const rearRolling = new Map<PlayerWheelSlot, THREE.Object3D[]>([
+    ['left-rear', components.rolling.get('left-rear') ?? []],
+    ['right-rear', components.rolling.get('right-rear') ?? []],
+  ])
+  const rearCenters = new Map<PlayerWheelSlot, THREE.Vector3>()
+  for (const slot of ['left-rear', 'right-rear'] as const) {
+    const center = components.centers.get(slot)
+    if (center) rearCenters.set(slot, center)
+  }
+
+  const frontCenters = new Map<PlayerWheelSlot, THREE.Vector3>()
+  for (const slot of ['left-front', 'right-front'] as const) {
+    const center = components.centers.get(slot)
+    if (center) frontCenters.set(slot, center)
+  }
+
+  // The visible white/green hub geometry defines the front axle position.
+  // Each inward-cambered front wheel keeps its own one-dimensional axle,
+  // derived from the isolated wheel geometry rather than a shared world axis.
+  const frontRigs = createWheelRigsFromParts(
+    root,
+    frontRolling,
+    frontCenters,
+    components.frontAxles,
+  )
+  // Detection orients both cambered axles toward the outside of the car.
+  // Use the same worldward axle sign on both sides so the mirrored front
+  // tires roll forward together.
+  const leftFrontRig = frontRigs.find((rig) => rig.name === 'left-front')
+  leftFrontRig?.spinAxis.negate()
+  const rearRigs = createWheelRigsFromParts(
+    root,
+    rearRolling,
+    rearCenters,
+    new THREE.Vector3(1, 0, 0),
+  )
+  return [...frontRigs, ...rearRigs]
 }
 
 function createSteerOnlyRig(
@@ -1129,8 +1823,21 @@ function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): Wheel
     }
     return rigs
   }
-  if (carId === 'redbull' || carId === 'lion') return []
-  return createMaterialWheelRigs(model, MATERIAL_WHEEL_PROFILES[carId])
+  if (strategy === 'mercedes-w15-compressed-v1') return createMercedesW15WheelRigs(model)
+  if (
+    strategy === 'ferrari-material-v1'
+    || strategy === 'mclaren-material-v1'
+    || strategy === 'mercedes-material-v1'
+  ) {
+    return createMaterialWheelRigs(
+      model,
+      MATERIAL_WHEEL_PROFILES[carId as Exclude<PlayerCarId, 'redbull' | 'lion'>],
+    )
+  }
+
+  // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
+  // static wheels until their own mesh mapping and pivots have been verified.
+  return []
 }
 
 export function createCar(options: CarOptions = {}): CarBundle {
@@ -1232,9 +1939,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
     const definition = playerCarById(carId)
     try {
       log(`fetching ${carId} [${definition.wheelStrategy}]:\n${definition.url.slice(0, 120)}${definition.url.length > 120 ? '…' : ''}`)
-      const res = await fetch(definition.url)
-      if (!res.ok) throw new Error(`fetch ${res.status}`)
-      const buf = await res.arrayBuffer()
+      const buf = await loadLocalAsset(definition.url)
       log(`fetched ${buf.byteLength} bytes, parsing…`)
 
       const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -1258,13 +1963,6 @@ export function createCar(options: CarOptions = {}): CarBundle {
       log(`parsed OK, meshes=${meshCount}, fitting…`)
 
       fitGltfToTrack(model)
-      if (definition.reverse) {
-        // Ferrari and Mercedes are authored tail-first relative to the game's
-        // +Z forward convention. Rotate the complete model before extracting
-        // wheel slots so their front axle is classified correctly as well.
-        model.rotation.y += Math.PI
-        model.updateMatrixWorld(true)
-      }
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
@@ -1274,6 +1972,12 @@ export function createCar(options: CarOptions = {}): CarBundle {
         }
       })
       const nextWheelRigs = createPlayerWheelRigs(carId, model)
+      if (definition.wheelStrategy !== 'pending' && nextWheelRigs.length !== 4) {
+        disposeLoadedModel(model)
+        throw new Error(
+          `${carId} wheel profile produced ${nextWheelRigs.length}/4 rigs; refusing an unsafe model swap`,
+        )
+      }
       if (disposed || version !== loadVersion) {
         disposeLoadedModel(model)
         return
@@ -1410,6 +2114,62 @@ export function createCar(options: CarOptions = {}): CarBundle {
     sparkGeo.attributes.position.needsUpdate = true
   }
 
+  const movePivotToWorld = (ref: PivotRef, worldPosition: THREE.Vector3): void => {
+    const pivot = ref.pivot
+    const parent = pivot.parent
+    if (!parent) return
+    parent.updateMatrixWorld(true)
+    const children = [...pivot.children]
+    for (const child of children) parent.attach(child)
+    pivot.position.copy(parent.worldToLocal(worldPosition.clone()))
+    parent.updateMatrixWorld(true)
+    for (const child of children) pivot.attach(child)
+    pivot.updateMatrixWorld(true)
+  }
+
+  const setFrontAxleDebugOffset = (y: number, z: number): void => {
+    for (const rig of wheelRigs) {
+      if (!rig.steerable) continue
+      if (!rig.baseCenterWorld) continue
+      rig.spin = 0
+      rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion)
+      for (const spinPivot of rig.spinPivots) {
+        spinPivot.pivot.quaternion.copy(spinPivot.baseQuaternion)
+      }
+      group.updateMatrixWorld(true)
+      const desiredCenter = group.localToWorld(
+        rig.baseCenterWorld.clone().add(new THREE.Vector3(0, y, z)),
+      )
+      movePivotToWorld(rig.steerPivot, desiredCenter)
+      for (const spinPivot of rig.spinPivots) movePivotToWorld(spinPivot, desiredCenter)
+    }
+  }
+
+  const getFrontAxleDebug = (): Array<{
+    name: string
+    center: THREE.Vector3
+    axis: THREE.Vector3
+  }> => getWheelAxleDebug().filter((rig) => rig.name.endsWith('-front'))
+
+  const getWheelAxleDebug = (): Array<{
+    name: string
+    center: THREE.Vector3
+    axis: THREE.Vector3
+  }> => {
+    group.updateMatrixWorld(true)
+    return wheelRigs
+      .map((rig) => {
+        const spinPivot = rig.spinPivots[0]?.pivot ?? rig.steerPivot.pivot
+        return {
+          name: rig.name,
+          center: spinPivot.getWorldPosition(new THREE.Vector3()),
+          axis: rig.spinAxis.clone().applyQuaternion(
+            spinPivot.getWorldQuaternion(new THREE.Quaternion()),
+          ).normalize(),
+        }
+      })
+  }
+
   const dispose = (): void => {
     disposed = true
     loadVersion++
@@ -1421,5 +2181,17 @@ export function createCar(options: CarOptions = {}): CarBundle {
     sparkMat.dispose()
   }
 
-  return { group, particles, setLivery, emitSpeedTrail, emitSparks, setCarModel, update, dispose }
+  return {
+    group,
+    particles,
+    setLivery,
+    emitSpeedTrail,
+    emitSparks,
+    setCarModel,
+    setFrontAxleDebugOffset,
+    getFrontAxleDebug,
+    getWheelAxleDebug,
+    update,
+    dispose,
+  }
 }

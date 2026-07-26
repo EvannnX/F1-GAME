@@ -1,4 +1,4 @@
-import homeBackgroundVideoUrl from '../f1ti/首页背景视频.mp4?url'
+import homeBackgroundImageUrl from '../f1ti/首页背景.gif?url'
 
 export interface HomeScreenController {
   destroy: () => void
@@ -23,7 +23,7 @@ function installStyles(): void {
       font-family: Inter, "Helvetica Neue", Arial, sans-serif;
       isolation: isolate;
     }
-    .f1s-home__video {
+    .f1s-home__background {
       position: absolute;
       inset: 0;
       z-index: 0;
@@ -32,6 +32,9 @@ function installStyles(): void {
       object-fit: cover;
       object-position: center;
       background: #050608;
+      pointer-events: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
     .f1s-home__shade {
       position: absolute;
@@ -129,51 +132,56 @@ export function showHomeScreen(onStart: StartHandler): HomeScreenController {
   const host = document.createElement('section')
   host.className = 'f1s-home'
   host.setAttribute('aria-label', 'F1TI 主菜单')
-  host.innerHTML = `
-    <video class="f1s-home__video" autoplay muted loop playsinline preload="auto" aria-hidden="true"></video>
-    <div class="f1s-home__shade"></div>
-    <div class="f1s-home__footer">
-      <button class="f1s-home__start" type="button">开始比赛</button>
-    </div>
-  `
+
+  const background = document.createElement('img')
+  background.className = 'f1s-home__background'
+  background.src = homeBackgroundImageUrl
+  background.alt = ''
+  background.decoding = 'async'
+  background.draggable = false
+  background.setAttribute('aria-hidden', 'true')
+
+  const shade = document.createElement('div')
+  shade.className = 'f1s-home__shade'
+  const footer = document.createElement('div')
+  footer.className = 'f1s-home__footer'
+  const startButton = document.createElement('button')
+  startButton.className = 'f1s-home__start'
+  startButton.type = 'button'
+  startButton.textContent = '开始比赛'
+  footer.appendChild(startButton)
+  host.append(background, shade, footer)
   document.body.appendChild(host)
   document.body.classList.add('f1s-home-active')
 
-  const video = host.querySelector<HTMLVideoElement>('.f1s-home__video')!
-  video.src = homeBackgroundVideoUrl
-  video.defaultMuted = true
-  video.muted = true
-  const retryPlayback = (): void => {
-    void video.play().catch(() => { /* browser will retry after interaction */ })
-  }
-  retryPlayback()
-  document.addEventListener('pointerdown', retryPlayback, { once: true })
-
   let destroyed = false
+  let launching = false
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const destroy = (): void => {
     if (destroyed) return
     destroyed = true
-    document.removeEventListener('pointerdown', retryPlayback)
-    video.pause()
-    video.removeAttribute('src')
-    video.load()
+    background.removeAttribute('src')
     document.body.classList.remove('f1s-home-active')
     host.remove()
   }
 
-  const startButton = host.querySelector<HTMLButtonElement>('.f1s-home__start')!
   startButton.addEventListener('click', () => {
+    if (launching) return
+    launching = true
     startButton.disabled = true
     startButton.textContent = '进入赛场'
     host.classList.add('f1s-home--launching')
-    void Promise.resolve(onStart()).catch((error) => {
-      console.warn('[F1S] background game preparation failed:', error)
-    }).then(() => {
+    void Promise.resolve().then(onStart).then(() => {
       host.classList.add('f1s-home--leaving')
       window.setTimeout(destroy, reduceMotion ? 0 : 300)
+    }).catch((error) => {
+      console.warn('[F1S] background game preparation failed:', error)
+      launching = false
+      startButton.disabled = false
+      startButton.textContent = '重试进入赛场'
+      host.classList.remove('f1s-home--launching')
     })
-  }, { once: true })
+  })
 
   return { destroy }
 }

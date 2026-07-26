@@ -1,3 +1,5 @@
+import { configureInlineVideo } from './inlineVideo'
+
 /**
  * Intro video splash. Plays once at app boot before the main menu.
  *
@@ -47,12 +49,10 @@ export function createIntro(videoUrl: string): IntroController {
       // the user clicks "开始" — that's the only way to play with audio
       // under autoplay policy.
       video = document.createElement('video')
-      video.src = videoUrl
-      video.muted = true
-      video.playsInline = true
-      video.setAttribute('webkit-playsinline', 'true')
       video.preload = 'auto'
-      video.controls = false
+      configureInlineVideo(video, true)
+      video.autoplay = false
+      video.src = videoUrl
       video.style.cssText = `
         width: 100%; height: 100%;
         object-fit: cover;
