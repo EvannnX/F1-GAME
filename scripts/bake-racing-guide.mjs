@@ -11,9 +11,6 @@ const ROUTE_PATH = 'src/data/shanghaiGlbRoadRoute.ts'
 const OUTPUT_PATH = 'src/data/shanghaiOptimalRacingLine.ts'
 const DASH_LENGTH = 3.6
 const DASH_GAP = 1.65
-const DASH_WIDTH = 1.05
-const ROAD_SCAN_HALF_WIDTH = 14
-const ROAD_SCAN_STEP = 0.5
 const INDEX_CELL_SIZE = 4
 
 function loadModel() {
@@ -60,22 +57,6 @@ function smoothClosedSpeedProfile(samples, distanceStep) {
       samples[next].speed = Math.min(samples[next].speed, accelerationLimit)
     }
   }
-}
-
-function optimalLineFactor(curve, t) {
-  const previous = signedTurn(curve, t - 0.022)
-  const here = signedTurn(curve, t)
-  const ahead = signedTurn(curve, t + 0.022)
-  const previousStrength = Math.abs(previous)
-  const hereStrength = Math.abs(here)
-  const aheadStrength = Math.abs(ahead)
-  if (Math.max(previousStrength, hereStrength, aheadStrength) < 0.045) return 0
-  if (aheadStrength > hereStrength * 1.18) return -Math.sign(ahead) * 0.72
-  if (hereStrength >= previousStrength * 0.82 && hereStrength >= aheadStrength * 0.82) {
-    return Math.sign(here) * 0.68
-  }
-  if (previousStrength > hereStrength * 1.18) return -Math.sign(previous) * 0.62
-  return Math.sign(here || ahead || previous) * 0.35
 }
 
 function buildRoadIndex(root) {
@@ -156,36 +137,6 @@ function buildRoadIndex(root) {
   return { roadBounds, sample, triangleCount }
 }
 
-function findOptimalRoadPoint(sampleRoad, routePoint, right, lineFactor) {
-  const offsets = []
-  for (let offset = -ROAD_SCAN_HALF_WIDTH; offset <= ROAD_SCAN_HALF_WIDTH; offset += ROAD_SCAN_STEP) {
-    if (sampleRoad(routePoint.x + right.x * offset, routePoint.z + right.z * offset)) offsets.push(offset)
-  }
-  if (!offsets.length) return null
-  const spans = []
-  let min = offsets[0]
-  let max = min
-  for (let i = 1; i < offsets.length; i++) {
-    if (offsets[i] - max <= ROAD_SCAN_STEP * 1.5) max = offsets[i]
-    else {
-      spans.push({ min, max })
-      min = offsets[i]
-      max = offsets[i]
-    }
-  }
-  spans.push({ min, max })
-  spans.sort((first, second) => {
-    const a = first.min <= 0 && first.max >= 0 ? 0 : Math.min(Math.abs(first.min), Math.abs(first.max))
-    const b = second.min <= 0 && second.max >= 0 ? 0 : Math.min(Math.abs(second.min), Math.abs(second.max))
-    return a - b
-  })
-  const span = spans[0]
-  const center = (span.min + span.max) * 0.5
-  const usableHalfWidth = Math.max(0, (span.max - span.min) * 0.5 - DASH_WIDTH)
-  const offset = center + THREE.MathUtils.clamp(lineFactor, -1, 1) * usableHalfWidth
-  return sampleRoad(routePoint.x + right.x * offset, routePoint.z + right.z * offset)
-}
-
 const gltf = await loadModel()
 const model = gltf.scene
 model.updateMatrixWorld(true)
@@ -222,27 +173,19 @@ const route = [...rows.values()]
     .fromBufferAttribute(position, row.index)
     .applyMatrix4(racelineMesh.matrixWorld))
 // The source raceline is stored opposite to the actual race direction.
-// Build the optimisation curve in driving order so braking look-ahead and
-// outside-apex-outside offsets are calculated in the direction the car moves.
+// Build the curve in driving order so braking look-ahead is calculated in the
+// direction the car moves. Keep positions on the model-authored raceline:
+// lateral road scans can accidentally jump to a nearby lane at intersections.
 const driveCurve = new THREE.CatmullRomCurve3([...route].reverse(), true, 'centripetal', 0.5)
+driveCurve.arcLengthDivisions = Math.max(8192, route.length * 8)
+driveCurve.updateArcLengths()
 const routeLength = driveCurve.getLength()
 const dashCount = Math.floor(routeLength / (DASH_LENGTH + DASH_GAP))
 const driveSamples = []
 for (let index = 0; index < dashCount; index++) {
   const t = (index * (DASH_LENGTH + DASH_GAP) + DASH_LENGTH * 0.5) / routeLength
-  const routePoint = driveCurve.getPointAt(t)
-  const driveForward = driveCurve.getTangentAt(t).setY(0).normalize()
-  const right = new THREE.Vector3(driveForward.z, 0, -driveForward.x)
-  const optimalPoint = findOptimalRoadPoint(
-    sample,
-    routePoint,
-    right,
-    optimalLineFactor(driveCurve, t),
-  )
-  const linePoint = optimalPoint
-    ? new THREE.Vector3(optimalPoint.x, optimalPoint.y, optimalPoint.z)
-    : routePoint
-  const hit = optimalPoint ?? sample(linePoint.x, linePoint.z)
+  const linePoint = driveCurve.getPointAt(t)
+  const hit = sample(linePoint.x, linePoint.z)
   const normal = hit
     ? new THREE.Vector3(hit.nx, hit.ny, hit.nz)
     : new THREE.Vector3(0, 1, 0)
