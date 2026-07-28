@@ -12,14 +12,12 @@ function offlineAssetAliases(): Plugin {
     ['src/assets/models/RB19_REDBULL.opt.glb', 'redbull'],
     ['src/assets/models/Ferrari_26.opt.glb', 'ferrari'],
     ['src/assets/models/Mercedes_W13.glb', 'mercedes'],
-    ['src/assets/models/McLaren_MCL35M.opt.glb', 'mclaren'],
     ['src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb', 'shanghai'],
   ].map(([source, key]) => [resolve(__dirname, source), key]))
   const replacements = new Map<string, string>([
     ['src/assets/models/RB19_REDBULL.opt.glb', 'redbull-mobile.glb'],
     ['src/assets/models/Ferrari_26.opt.glb', 'ferrari-mobile.glb'],
     ['src/assets/models/Mercedes_W13.glb', 'mercedes-mobile.glb'],
-    ['src/assets/models/McLaren_MCL35M.opt.glb', 'mclaren-mobile.glb'],
     ['src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb', 'shanghai-mobile.glb'],
     ['src/assets/AutoSave_Shangai_International_Circuit_GP_Track_no_google_earth.glb', 'shanghai-mobile.glb'],
     ['src/assets/background/Cloudymorning2k.hdr', 'sky-mobile.hdr'],

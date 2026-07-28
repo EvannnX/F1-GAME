@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "bake:fom-livery": "node scripts/bake-fom-livery-assets.mjs",
+    "extract:fom-v54": "node scripts/extract-fom-v54-browser.mjs",
     "build": "vite build && node scripts/copy-runtime-public-assets.mjs && node -e \"const fs=require('fs');const p='dist/index.html';let s=fs.readFileSync(p,'utf8');s=s.replace(/ crossorigin(=\\\"[^\\\"]*\\\")?/g,'');fs.writeFileSync(p,s);console.log('stripped crossorigin')\"",
     "preview": "vite preview",
     "verify:redbull-wheels": "node scripts/verify-redbull-wheel-profile.mjs",

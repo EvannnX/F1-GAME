@@ -26,6 +26,22 @@ declare module '*.png' {
   const url: string
   export default url
 }
+declare module '*.jpg?url' {
+  const url: string
+  export default url
+}
+declare module '*.jpg' {
+  const url: string
+  export default url
+}
+declare module '*.svg?url' {
+  const url: string
+  export default url
+}
+declare module '*.svg' {
+  const url: string
+  export default url
+}
 declare module '*.webp?url' {
   const url: string
   export default url

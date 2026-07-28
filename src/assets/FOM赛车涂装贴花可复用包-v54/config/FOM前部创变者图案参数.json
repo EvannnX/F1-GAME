@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "preview": "v42",
+  "status": "confirmed",
+  "model": "f1_2026_fom-nyu-purple-color-only.glb",
+  "source": "download-1.svg",
+  "extractedAsset": "assets/douyin-creator-symbol.svg",
+  "extraction": "left-symbol-only-no-text",
+  "coordinateSpace": "carRoot-local",
+  "rotationOrder": "XYZ",
+  "surface": "front-nose-top",
+  "parameters": {
+    "scale": 1.0,
+    "width": 1.0,
+    "height": 1.0,
+    "x": 0.0,
+    "y": 0.3,
+    "z": 2.325,
+    "rotationX": -90,
+    "rotationY": 0,
+    "rotationZ": 0,
+    "flipHorizontal": false,
+    "flipVertical": false,
+    "reverseFacing": false
+  }
+}

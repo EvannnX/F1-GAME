@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "preview": "v50",
+  "defaultColor": {
+    "name": "NYU 紫",
+    "hex": "#57068c"
+  },
+  "targetMaterials": [
+    "livery_audi_01",
+    "fom_car_dummy_decal",
+    "boya"
+  ],
+  "protected": [
+    "轮胎与轮毂材质",
+    "碳纤维材质",
+    "原始纹理贴图",
+    "所有 Logo 与曲面贴花",
+    "rear_light 动态尾灯"
+  ],
+  "colors": [
+    { "name": "NYU 紫", "hex": "#57068c" },
+    { "name": "竞速红", "hex": "#e10600" },
+    { "name": "电光蓝", "hex": "#0067ff" },
+    { "name": "活力橙", "hex": "#ff8700" },
+    { "name": "亮黄", "hex": "#ffd400" },
+    { "name": "翡翠绿", "hex": "#00a86b" },
+    { "name": "青色", "hex": "#00b8d9" },
+    { "name": "品红", "hex": "#d000ff" },
+    { "name": "银白", "hex": "#d9d9d6" },
+    { "name": "哑光黑", "hex": "#151515" }
+  ]
+}

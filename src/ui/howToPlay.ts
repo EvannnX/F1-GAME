@@ -1,8 +1,11 @@
+import { createPageBackButton } from './backButton'
+
 export interface HowToPlayController {
   destroy: () => void
 }
 
 type ContinueHandler = () => void | Promise<void>
+type BackHandler = () => void
 
 const STYLE_ID = 'f1s-how-to-play-style'
 
@@ -45,7 +48,7 @@ function installStyles(): void {
     .f1s-guide__heading {
       position: absolute;
       top: 24px;
-      left: clamp(20px, 5vw, 74px);
+      left: clamp(88px, 11vw, 150px);
       display: flex;
       min-width: min(370px, 64vw);
       height: 58px;
@@ -210,7 +213,10 @@ function installStyles(): void {
   document.head.appendChild(style)
 }
 
-export function showHowToPlay(onContinue: ContinueHandler): HowToPlayController {
+export function showHowToPlay(
+  onContinue: ContinueHandler,
+  onBack?: BackHandler,
+): HowToPlayController {
   installStyles()
   const touchDevice = window.matchMedia('(pointer: coarse)').matches
   const host = document.createElement('section')
@@ -251,6 +257,13 @@ export function showHowToPlay(onContinue: ContinueHandler): HowToPlayController 
     destroyed = true
     document.body.classList.remove('f1s-guide-active')
     host.remove()
+  }
+
+  if (onBack) {
+    host.appendChild(createPageBackButton(() => {
+      destroy()
+      onBack()
+    }, '返回首页'))
   }
 
   const button = host.querySelector<HTMLButtonElement>('.f1s-guide__continue')!

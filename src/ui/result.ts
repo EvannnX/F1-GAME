@@ -75,7 +75,7 @@ export function createResult(): ResultController {
       data.onRestart()
     }, { once: true })
     const menu = document.createElement('button')
-    menu.textContent = '返 回 首 页'
+    menu.textContent = '返 回 比 赛 设 置'
     menu.style.cssText = `
       min-width: 160px; min-height: 64px;
       background: transparent; color: #fff; border: 2px solid #fff; border-radius: 8px;

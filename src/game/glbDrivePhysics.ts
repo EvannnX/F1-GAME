@@ -17,7 +17,7 @@ const AUTO_CRUISE_DECEL = 18
 const TURN_RATE = 2.9
 const RIDE_HEIGHT = 0.09
 const SLOPE_GRAVITY_FACTOR = 0.42
-const CAR_COLLISION_RADIUS = 1.05
+const CAR_COLLISION_RADIUS = 0.82
 const CHASSIS_SAMPLE_OFFSET = 1.35
 const CHASSIS_HALF_WIDTH = 0.68
 const MAX_GROUND_SAMPLE_DELTA = 0.28
@@ -27,6 +27,9 @@ const HEIGHT_FALL_RESPONSE = 9
 const HEIGHT_SPEED_RESPONSE = 0.05
 const NORMAL_RESPONSE = 7
 const NORMAL_SPEED_RESPONSE = 0.04
+const MAX_VISUAL_PENETRATION = 0.02
+const MAX_VISUAL_CLEARANCE = 0.05
+const MAX_NORMAL_LAG_RAD = THREE.MathUtils.degToRad(3)
 
 export interface GlbDriveState {
   pos: THREE.Vector3
@@ -79,7 +82,19 @@ export function createGlbDrivePhysics(
         -(NORMAL_RESPONSE + state.speed * NORMAL_SPEED_RESPONSE) * dt,
       )
       state.pos.y += (boundedTargetY - state.pos.y) * heightAlpha
-      state.normal.lerp(hit.normal, normalAlpha).normalize()
+      state.pos.y = clamp(
+        state.pos.y,
+        targetY - MAX_VISUAL_PENETRATION,
+        targetY + MAX_VISUAL_CLEARANCE,
+      )
+
+      const normalError = state.normal.angleTo(hit.normal)
+      const minimumNormalAlpha = normalError > MAX_NORMAL_LAG_RAD
+        ? 1 - MAX_NORMAL_LAG_RAD / normalError
+        : 0
+      state.normal
+        .lerp(hit.normal, Math.max(normalAlpha, minimumNormalAlpha))
+        .normalize()
     }
     state.onRoad = hit.isRoad
   }
@@ -216,8 +231,12 @@ export function createGlbDrivePhysics(
     state.pos.z += forward.z * state.speed * dt
 
     const hit = sampleChassisGround(forward)
+    if (hit?.isRunoff) {
+      collisionLocked = false
+      collisionNormal.set(0, 0, 0)
+    }
 
-    if (obstacles && was.distanceToSquared(state.pos) > 1e-10) {
+    if (obstacles && !hit?.isRunoff && was.distanceToSquared(state.pos) > 1e-10) {
       const side = forward.clone().negate()
       const startObstacle = obstacles.sampleObstacleNear(was, {
         radius: CAR_COLLISION_RADIUS,

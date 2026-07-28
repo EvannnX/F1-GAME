@@ -40,10 +40,12 @@ export interface RaceTelemetry {
 
 export interface PersonalityCardController {
   /** Render the card. Resolves once the user dismisses it. */
-  show: (stats: Partial<PlayerStats> | RaceData, telemetry?: RaceTelemetry) => Promise<void>
-  showResult: (result: RacerPersonalityResult, telemetry?: RaceTelemetry) => Promise<void>
+  show: (stats: Partial<PlayerStats> | RaceData, telemetry?: RaceTelemetry) => Promise<PersonalityCardAction>
+  showResult: (result: RacerPersonalityResult, telemetry?: RaceTelemetry) => Promise<PersonalityCardAction>
   hide: () => void
 }
+
+export type PersonalityCardAction = 'continue' | 'menu'
 
 const formatLap = (ms: number): string => {
   if (!ms || ms <= 0) return '—'
@@ -123,10 +125,10 @@ const isLandscape = (): boolean => {
 
 export function createPersonalityCard(): PersonalityCardController {
   let host: HTMLDivElement | null = null
-  let resolveFn: (() => void) | null = null
+  let resolveFn: ((action: PersonalityCardAction) => void) | null = null
   let resizeObserver: ResizeObserver | null = null
 
-  const hide = (): void => {
+  const hide = (action: PersonalityCardAction = 'continue'): void => {
     resizeObserver?.disconnect()
     resizeObserver = null
     if (host && host.parentElement) host.parentElement.removeChild(host)
@@ -134,14 +136,14 @@ export function createPersonalityCard(): PersonalityCardController {
     if (resolveFn) {
       const r = resolveFn
       resolveFn = null
-      r()
+      r(action)
     }
   }
 
   const showResult = (
     data: RacerPersonalityResult,
     telemetry?: RaceTelemetry,
-  ): Promise<void> => {
+  ): Promise<PersonalityCardAction> => {
     hide()
     const personality = data['你的赛车人格']
     const typeCode = personality['类型代码'] as string | undefined
@@ -154,7 +156,7 @@ export function createPersonalityCard(): PersonalityCardController {
       : data['为何你是这个类型']
     const landscape = isLandscape()
 
-    return new Promise<void>((resolve) => {
+    return new Promise<PersonalityCardAction>((resolve) => {
       resolveFn = resolve
 
       host = document.createElement('div')
@@ -454,17 +456,26 @@ export function createPersonalityCard(): PersonalityCardController {
       const actions = document.createElement('div')
       actions.style.cssText = `
         flex: 0 0 auto;
-        display: flex; align-items: center; justify-content: center;
+        display: flex; align-items: center; justify-content: center; gap: 10px;
         z-index: 2;
       `
+      const backBtn = document.createElement('button')
+      backBtn.textContent = '返 回 比 赛 设 置'
+      backBtn.style.cssText = `
+        min-width: 158px; min-height: 44px;
+        background: transparent; color: #fff; border: 2px solid #fff; border-radius: 8px;
+        font-size: 14px; font-weight: 800; letter-spacing: 2px; cursor: pointer;
+      `
+      backBtn.addEventListener('click', () => hide('menu'), { once: true })
       const closeBtn = document.createElement('button')
       closeBtn.textContent = '继 续'
       closeBtn.style.cssText = `
-        min-width: 130px; min-height: 44px;
+        min-width: 112px; min-height: 44px;
         background: #ff1801; color: #fff; border: none; border-radius: 8px;
         font-size: 15px; font-weight: 800; letter-spacing: 4px; cursor: pointer;
       `
-      closeBtn.addEventListener('click', hide, { once: true })
+      closeBtn.addEventListener('click', () => hide('continue'), { once: true })
+      actions.appendChild(backBtn)
       actions.appendChild(closeBtn)
 
       host.appendChild(card)
@@ -548,7 +559,7 @@ export function createPersonalityCard(): PersonalityCardController {
   const show = (
     stats: Partial<PlayerStats> | RaceData,
     telemetry?: RaceTelemetry,
-  ): Promise<void> => showResult(generateRacerPersonalityResult(stats), telemetry)
+  ): Promise<PersonalityCardAction> => showResult(generateRacerPersonalityResult(stats), telemetry)
 
-  return { show, showResult, hide }
+  return { show, showResult, hide: () => hide() }
 }

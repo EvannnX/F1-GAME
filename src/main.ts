@@ -19,7 +19,7 @@ import {
   installShanghai2018MapTest,
   isShanghai2018MapTestEnabled,
 } from './ui/shanghai2018MapTest'
-import { onPlayerCarChange, readSelectedPlayerCar } from './data/playerCars'
+import { onPlayerCarChange, readSelectedPlayerCar, selectPlayerCar } from './data/playerCars'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createTransitionVideo } from './ui/transitionVideo'
@@ -77,6 +77,7 @@ import {
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
 import {
+  SHANGHAI_FINISH_LINE_CENTER,
   SHANGHAI_FINISH_LINE_INDEX,
   SHANGHAI_OPTIMAL_RACING_LINE,
 } from './data/shanghaiOptimalRacingLine'
@@ -110,8 +111,8 @@ const GLB_LAP_ROUTE = [
   ...SHANGHAI_OPTIMAL_RACING_LINE.slice(SHANGHAI_FINISH_LINE_INDEX + 1).reverse(),
 ]
 const GLB_FINISH_SAMPLE = GLB_LAP_ROUTE[0]
-const GLB_FINISH_X = GLB_FINISH_SAMPLE[0]
-const GLB_FINISH_Z = GLB_FINISH_SAMPLE[2]
+const GLB_FINISH_X = SHANGHAI_FINISH_LINE_CENTER[0]
+const GLB_FINISH_Z = SHANGHAI_FINISH_LINE_CENTER[2]
 // The baked racing line runs opposite to the cars' actual race direction.
 const GLB_FINISH_FORWARD_X = -GLB_FINISH_SAMPLE[6]
 const GLB_FINISH_FORWARD_Z = -GLB_FINISH_SAMPLE[8]
@@ -164,7 +165,7 @@ const SCENE_CACHE_STORAGE_KEYS = [
 ]
 
 interface GlbGridPlacement {
-  id: 'player' | 'ferrari' | 'mercedes' | 'mclaren' | 'redbull' | string
+  id: 'player' | 'ferrari' | 'mercedes' | 'creator' | 'redbull' | string
   x: number
   z: number
   headingDeg: number
@@ -174,7 +175,7 @@ const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
   { id: 'player', x: -264.27, z: 520.03, headingDeg: 281.7 },
   { id: 'redbull', x: -230.42, z: 511.9, headingDeg: 281.7 },
   { id: 'ferrari', x: -257.32, z: 513.86, headingDeg: 284.4 },
-  { id: 'mclaren', x: -240.22, z: 509.83, headingDeg: 283.5 },
+  { id: 'creator', x: -240.22, z: 509.83, headingDeg: 283.5 },
   { id: 'mercedes', x: -247.97, z: 516.04, headingDeg: 282 },
 ]
 
@@ -208,6 +209,8 @@ function resetSceneCacheFromUrl(): boolean {
 }
 
 type BootReadyHandler = () => void
+const SHOW_RACE_MENU_EVENT = 'f1ti:show-race-menu'
+const BACK_TO_GARAGE_EVENT = 'f1ti:back-to-garage'
 
 function bootApp(onReady?: BootReadyHandler): void {
   const sceneCacheWasReset = resetSceneCacheFromUrl()
@@ -238,12 +241,45 @@ function bootWithHomeScreen(): void {
   const gameReady = new Promise<void>((resolve) => {
     markGameReady = resolve
   })
-  showHomeScreen(() => {
-    showHowToPlay(async () => {
-      await gameReady
-      showGarageSelection(() => { /* The prepared race settings menu is underneath. */ })
+
+  let homeController: ReturnType<typeof showHomeScreen> | null = null
+  let guideController: ReturnType<typeof showHowToPlay> | null = null
+  let garageController: ReturnType<typeof showGarageSelection> | null = null
+
+  const showHomePage = (): void => {
+    guideController?.destroy()
+    guideController = null
+    garageController?.destroy()
+    garageController = null
+    homeController?.destroy()
+    homeController = showHomeScreen(() => {
+      showGuidePage()
     })
-  })
+  }
+  const showGuidePage = (): void => {
+    homeController?.destroy()
+    homeController = null
+    garageController?.destroy()
+    garageController = null
+    guideController?.destroy()
+    guideController = showHowToPlay(async () => {
+      await gameReady
+      showGaragePage()
+    }, showHomePage)
+  }
+  const showGaragePage = (): void => {
+    homeController?.destroy()
+    homeController = null
+    guideController?.destroy()
+    guideController = null
+    garageController?.destroy()
+    garageController = showGarageSelection(() => {
+      window.dispatchEvent(new Event(SHOW_RACE_MENU_EVENT))
+    }, showGuidePage)
+  }
+
+  window.addEventListener(BACK_TO_GARAGE_EVENT, showGaragePage)
+  showHomePage()
 
   void warmRuntimeAssetCache()
 
@@ -307,7 +343,8 @@ function finiteNumber(value: unknown): number | null {
 function normalizeGlbGridPlacement(value: unknown): GlbGridPlacement | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
-  const id = typeof record.id === 'string' ? record.id : null
+  const rawId = typeof record.id === 'string' ? record.id : null
+  const id = rawId === 'mclaren' ? 'creator' : rawId
   const x = finiteNumber(record.x)
   const z = finiteNumber(record.z)
   const headingDeg = finiteNumber(record.headingDeg) ?? finiteNumber(record.yawDeg)
@@ -496,7 +533,7 @@ const GLB_GRID_OPPONENT_PROFILES: Record<string, OpponentProfile> = {
     mistakeMinS: 0,
     mistakeMaxS: 0,
   },
-  mclaren: {
+  creator: {
     name: 'Aggressor',
     color: '#ef476f',
     baseSpeed: 0,
@@ -768,8 +805,11 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       }
       menu.hide()
       glbMenuStartHandler(cfg)
+    }, () => {
+      window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
     })
   }
+  window.addEventListener(SHOW_RACE_MENU_EVENT, showGlbStartMenu)
   if (regularGameBoot) showGlbStartMenu()
 
   const weather = pickRandomWeather()
@@ -885,7 +925,9 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.update(dt, speed01, rawInput.steer)
     firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
-    racingGuideLine?.update(drive.state.speed, performance.now() * 0.001)
+    if (racingGuideLine?.group.visible) {
+      racingGuideLine.update(drive.state.speed, performance.now() * 0.001)
+    }
     if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
     if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
       if (cameraMode === 'first') {
@@ -941,7 +983,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
             .sort((a, b) => a.position.distanceToSquared(slot.position) - b.position.distanceToSquared(slot.position))
             .slice(0, 5)
           localStorage.setItem(GLB_GRID_STORAGE_KEY, JSON.stringify(nearbySlots.map((nearby, index) => ({
-            id: ['player', 'redbull', 'ferrari', 'mclaren', 'mercedes'][index],
+            id: ['player', 'redbull', 'ferrari', 'creator', 'mercedes'][index],
             x: Number(nearby.position.x.toFixed(3)),
             z: Number(nearby.position.z.toFixed(3)),
             headingDeg: Number(THREE.MathUtils.radToDeg(nearby.heading).toFixed(2)),
@@ -1088,7 +1130,12 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       }
       void (async () => {
         await transitionVideo.play()
-        await personalityCard.show(stats, telemetry)
+        const personalityAction = await personalityCard.show(stats, telemetry)
+        if (personalityAction === 'menu') {
+          resetGlbRaceGrid()
+          showGlbStartMenu()
+          return
+        }
         if (glbResultVisible) return
         glbResultVisible = true
         result.show({
@@ -1149,6 +1196,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         void (async () => {
           const transitionPlayback = transitionVideo.play()
           cameraMode = cfg.cameraMode
+          if (racingGuideLine) racingGuideLine.group.visible = cfg.racingGuideEnabled
           applyCameraModeVisibility()
           bundle.setPerformanceMode(cfg.performanceMode)
           storage.setPerformanceMode(cfg.performanceMode)
@@ -2094,7 +2142,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       // Reveal the MBTI-style racer-personality card first, then fall
       // through to the regular result panel.
       await transitionVideo.play()
-      await personalityCard.show(buildPlayerStats(), {
+      const personalityAction = await personalityCard.show(buildPlayerStats(), {
         bestLapMs: ctx.raceData.bestLap ?? 0,
         topSpeedKmh: ctx.raceData.topSpeed,
         wallHits: ctx.raceData.crashes,
@@ -2102,6 +2150,12 @@ function bootstrap(onReady?: BootReadyHandler): void {
         finalPosition: ctx.raceData.finalPosition || (world.opponents.length + 1),
         fieldSize: world.opponents.length + 1,
       })
+      if (personalityAction === 'menu') {
+        ctx.raceData.bestLap = null
+        teardownOpponents()
+        void sm.transition(GameState.MENU)
+        return
+      }
       const lap = ctx.raceData.bestLap ?? 0
       const prev = storage.getBestLap()
       // Only count it as a PB if the player actually won the race.
@@ -2154,6 +2208,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
 
 const bootEntry = (): void => {
   const params = new URLSearchParams(window.location.search)
+  if (params.has('creatorCarMapTest')) selectPlayerCar('creator')
   if (params.has('amgWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest()
@@ -2163,6 +2218,24 @@ const bootEntry = (): void => {
   if (params.has('redbullWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest('redbull')
+    })
+    return
+  }
+  if (params.has('ferrariF175WheelTest')) {
+    void import('./ui/ferrariF175WheelTest').then(({ installFerrariF175WheelTest }) => {
+      installFerrariF175WheelTest()
+    })
+    return
+  }
+  if (params.has('fomWheelTest')) {
+    void import('./ui/fomWheelTest').then(({ installFomWheelTest }) => {
+      installFomWheelTest()
+    })
+    return
+  }
+  if (params.has('creatorCarPreview')) {
+    void import('./ui/creatorCarPreview').then(({ installCreatorCarPreview }) => {
+      installCreatorCarPreview()
     })
     return
   }

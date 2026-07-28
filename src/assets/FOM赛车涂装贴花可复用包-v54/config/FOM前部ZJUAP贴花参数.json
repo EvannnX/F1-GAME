@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "preview": "v45",
+  "status": "confirmed",
+  "model": "f1_2026_fom-nyu-purple-color-only.glb",
+  "file": "抖音官方赞助商logo/ZJUAP.jpg",
+  "coordinateSpace": "carRoot-local",
+  "rotationOrder": "XYZ",
+  "surface": "front-nose-top",
+  "textureProcessing": {
+    "sourceModified": false,
+    "blueBackground": "preserved",
+    "mode": "use-original-jpeg"
+  },
+  "parameters": {
+    "scale": 0.79,
+    "width": 1.0,
+    "height": 1.0,
+    "x": 0.0,
+    "y": 0.34,
+    "z": 1.415,
+    "rotationX": -90,
+    "rotationY": 0,
+    "rotationZ": 0,
+    "flipHorizontal": false,
+    "flipVertical": false,
+    "reverseFacing": false
+  }
+}

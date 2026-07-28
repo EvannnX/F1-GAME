@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 const EXPECTED = {
   sourceCommit: 'ccc253bf5cbd7e2f09d981eb813ac69071bffc26',
   modelSha1: '66c78ca97b11d3cbaf20f2bf9c7eec7a2614d3ae',
-  wheelFunctionSha1: 'a617e4b221e1e51090e3272b1d0171bfbda3518e',
+  wheelFunctionSha1: '1143545cc0e6b8a857b738ea412948d4583dbdb7',
   profileRevision: '2026-07-25-independent-rear-tire-camber-axes',
 }
 
@@ -124,7 +124,7 @@ const redBullBlock = strategySource.match(/id: 'redbull',[\s\S]*?wheelStrategy: 
 if (redBullBlock?.[1] !== 'redbull-github-v1') {
   fail(`Red Bull strategy changed: ${redBullBlock?.[1] ?? 'missing'}`)
 }
-for (const carId of ['ferrari', 'mclaren', 'mercedes']) {
+for (const carId of ['ferrari', 'mercedes', 'creator', 'creator-special', 'audi']) {
   const block = strategySource.match(new RegExp(`id: '${carId}',[\\s\\S]*?wheelStrategy: '([^']+)'`))
   if (block?.[1] === 'redbull-github-v1') fail(`${carId} is using the Red Bull strategy`)
 }
