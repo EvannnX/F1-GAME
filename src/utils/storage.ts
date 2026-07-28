@@ -9,6 +9,7 @@ export interface F1SStorage {
   nickname: string
   unlocks: string[]
   lastFaceImg: string | null
+  customLogo: string | null
   performanceMode: boolean
 }
 
@@ -19,6 +20,7 @@ const DEFAULTS: F1SStorage = {
   nickname: '',
   unlocks: [],
   lastFaceImg: null,
+  customLogo: null,
   performanceMode: true,
 }
 
@@ -62,6 +64,9 @@ export const storage = {
 
   getLastFaceImg: () => readKey('lastFaceImg'),
   setLastFaceImg: (b64: string) => writeKey('lastFaceImg', b64),
+
+  getCustomLogo: () => readKey('customLogo'),
+  setCustomLogo: (dataUrl: string | null) => writeKey('customLogo', dataUrl),
 
   getPerformanceMode: () => readKey('performanceMode'),
   setPerformanceMode: (enabled: boolean) => writeKey('performanceMode', enabled),

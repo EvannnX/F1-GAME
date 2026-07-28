@@ -7,6 +7,7 @@ import { showToast } from '../utils/error'
 import { playerCarById, type PlayerCarId } from '../data/playerCars'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 import { loadLocalAsset } from '../utils/localAsset'
+import { applyCustomLivery, clearCustomLivery } from './customLogo'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
   merc: { primary: '#00d2be', secondary: '#181818', spark: '#a8fff5' },
@@ -94,6 +95,12 @@ const RED_BULL_REAR_AXLE_REFERENCE_MATERIALS = new Set([
 
 const RED_BULL_WHEEL_AERO_SOURCE_MATERIALS = new Set([
   'suspensions',
+])
+
+const AUDI_WHEEL_MATERIALS = new Set([
+  'tread_medium',
+  'sidewall',
+  'livery_audi_01_wheel_hub',
 ])
 
 type RedBullWheelSlot = 'left-front' | 'right-front' | 'left-rear' | 'right-rear'
@@ -1718,6 +1725,73 @@ function createMercedesW15WheelRigs(root: THREE.Object3D): WheelRig[] {
   return [...frontRigs, ...rearRigs]
 }
 
+function createAudiWheelRigs(root: THREE.Object3D): WheelRig[] {
+  root.updateMatrixWorld(true)
+  const modelBox = new THREE.Box3().setFromObject(root)
+  const modelCenter = modelBox.getCenter(new THREE.Vector3())
+  const rolling = new Map<PlayerWheelSlot, THREE.Object3D[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const meshes: THREE.Mesh[] = []
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || !object.parent) return
+    const materials = Array.isArray(object.material) ? object.material : [object.material]
+    if (materials.some((material) => AUDI_WHEEL_MATERIALS.has(material.name.toLowerCase()))) {
+      meshes.push(object)
+    }
+  })
+
+  const point = new THREE.Vector3()
+  for (const mesh of meshes) {
+    const position = mesh.geometry.getAttribute('position')
+    const parent = mesh.parent
+    if (!position || !parent) continue
+    const index = mesh.geometry.index
+    const total = index?.count ?? position.count
+    const triangles = new Map<PlayerWheelSlot, number[]>([
+      ['left-front', []],
+      ['right-front', []],
+      ['left-rear', []],
+      ['right-rear', []],
+    ])
+    for (let offset = 0; offset + 2 < total; offset += 3) {
+      let x = 0
+      let z = 0
+      for (let vertex = 0; vertex < 3; vertex++) {
+        point
+          .fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+          .applyMatrix4(mesh.matrixWorld)
+        x += point.x
+        z += point.z
+      }
+      const side = x / 3 < modelCenter.x ? 'left' : 'right'
+      const axle = z / 3 > modelCenter.z ? 'front' : 'rear'
+      triangles.get(`${side}-${axle}`)?.push(offset)
+    }
+    for (const [slot, starts] of triangles) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, starts)
+      if (!geometry) continue
+      const component = new THREE.Mesh(geometry, mesh.material)
+      component.name = `audi-wheel-${slot}-${mesh.name}`
+      component.position.copy(mesh.position)
+      component.quaternion.copy(mesh.quaternion)
+      component.scale.copy(mesh.scale)
+      component.castShadow = mesh.castShadow
+      component.receiveShadow = mesh.receiveShadow
+      component.frustumCulled = mesh.frustumCulled
+      parent.add(component)
+      rolling.get(slot)?.push(component)
+    }
+    parent.remove(mesh)
+    mesh.geometry.dispose()
+  }
+  root.updateMatrixWorld(true)
+  return createWheelRigsFromParts(root, rolling, undefined, new THREE.Vector3(1, 0, 0))
+}
+
 function createSteerOnlyRig(
   root: THREE.Object3D,
   name: string,
@@ -1771,6 +1845,7 @@ function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): Wheel
   const strategy = playerCarById(carId).wheelStrategy
   if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
   if (strategy === 'mercedes-w15-compressed-v1') return createMercedesW15WheelRigs(model)
+  if (strategy === 'audi-fom-v1') return createAudiWheelRigs(model)
 
   // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
   // static wheels until their own mesh mapping and pivots have been verified.
@@ -1925,10 +2000,18 @@ export function createCar(options: CarOptions = {}): CarBundle {
         disposePlaceholder(placeholder)
         placeholderActive = false
       } else {
+        clearCustomLivery(group, activeModel)
         group.remove(activeModel)
         disposeLoadedModel(activeModel)
       }
       group.add(model)
+      if (carId === 'audi') {
+        try {
+          await applyCustomLivery(group, model)
+        } catch (error) {
+          console.warn('[F1S] custom livery apply failed:', error)
+        }
+      }
       activeModel = model
       activeWheels = []
       wheelRigs = nextWheelRigs
@@ -2111,7 +2194,10 @@ export function createCar(options: CarOptions = {}): CarBundle {
     disposed = true
     loadVersion++
     if (placeholderActive) disposePlaceholder(placeholder)
-    else disposeLoadedModel(activeModel)
+    else {
+      clearCustomLivery(group, activeModel)
+      disposeLoadedModel(activeModel)
+    }
     trailGeo.dispose()
     trailMat.dispose()
     sparkGeo.dispose()

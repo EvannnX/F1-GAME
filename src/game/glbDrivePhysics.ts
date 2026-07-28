@@ -17,10 +17,7 @@ const AUTO_CRUISE_DECEL = 18
 const TURN_RATE = 2.9
 const RIDE_HEIGHT = 0.09
 const SLOPE_GRAVITY_FACTOR = 0.42
-const CAR_COLLISION_RADIUS = 0.82
-const WALL_REBOUND_SPEED = 3.2
-const WALL_REBOUND_DAMPING = 10
-const OBSTACLE_CHECK_INTERVAL = 0.045
+const CAR_COLLISION_RADIUS = 1.05
 const CHASSIS_SAMPLE_OFFSET = 1.35
 const CHASSIS_HALF_WIDTH = 0.68
 const MAX_GROUND_SAMPLE_DELTA = 0.28
@@ -61,10 +58,10 @@ export function createGlbDrivePhysics(
     onRoad: true,
   }
   let lastGood = state.pos.clone()
-  const reboundVelocity = new THREE.Vector3()
   const sampleOffset = new THREE.Vector3()
   const chassisSide = new THREE.Vector3()
-  let obstacleCheckTimer = 0
+  const collisionNormal = new THREE.Vector3()
+  let collisionLocked = false
 
   const applyHit = (hit: LowPolyShanghaiGroundHit, dt = 0, immediate = false): void => {
     const targetY = hit.point.y + RIDE_HEIGHT
@@ -167,9 +164,8 @@ export function createGlbDrivePhysics(
     state.topSpeed = 0
     state.normal.copy(pose.normal ?? new THREE.Vector3(0, 1, 0)).normalize()
     state.onRoad = true
-    reboundVelocity.set(0, 0, 0)
-    obstacleCheckTimer = 0
-
+    collisionNormal.set(0, 0, 0)
+    collisionLocked = false
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading))
     const hit = sampleChassisGround(forward)
     if (hit) applyHit(hit, 0, true)
@@ -199,42 +195,46 @@ export function createGlbDrivePhysics(
     forward.addScaledVector(state.normal, -forward.dot(state.normal))
     if (forward.lengthSq() < 1e-5) forward.set(Math.sin(state.heading), 0, Math.cos(state.heading))
     forward.normalize()
+    let blockedByContact = false
+    if (collisionLocked) {
+      if (forward.dot(collisionNormal) > 0.08) {
+        collisionLocked = false
+        collisionNormal.set(0, 0, 0)
+      } else {
+        state.speed = 0
+        blockedByContact = true
+      }
+    }
     const gravityOnSurface = new THREE.Vector3(0, -9.81, 0)
       .addScaledVector(state.normal, 9.81 * state.normal.y)
     const slopeAccel = gravityOnSurface.dot(forward) * SLOPE_GRAVITY_FACTOR
     state.speed = clamp(state.speed + slopeAccel * dt, 0, MAX_SPEED)
+    if (blockedByContact) state.speed = 0
     if (state.speed > state.topSpeed) state.topSpeed = state.speed
 
     state.pos.x += forward.x * state.speed * dt
     state.pos.z += forward.z * state.speed * dt
-    if (reboundVelocity.lengthSq() > 0.0001) {
-      state.pos.addScaledVector(reboundVelocity, dt)
-      reboundVelocity.multiplyScalar(Math.exp(-WALL_REBOUND_DAMPING * dt))
-      reboundVelocity.y = 0
-    } else {
-      reboundVelocity.set(0, 0, 0)
-    }
 
     const hit = sampleChassisGround(forward)
-    if (hit?.isRunoff) reboundVelocity.set(0, 0, 0)
 
-    obstacleCheckTimer += dt
-    if (obstacles && !hit?.isRunoff && obstacleCheckTimer >= OBSTACLE_CHECK_INTERVAL && was.distanceToSquared(state.pos) > 0.0004) {
-      obstacleCheckTimer = 0
+    if (obstacles && was.distanceToSquared(state.pos) > 1e-10) {
       const side = forward.clone().negate()
+      const startObstacle = obstacles.sampleObstacleNear(was, {
+        radius: CAR_COLLISION_RADIUS,
+        side,
+      })
       const obstacle = obstacles.sampleObstacleBetween(was, state.pos, {
         radius: CAR_COLLISION_RADIUS,
         side,
       })
-      const impactDot = obstacle ? forward.dot(obstacle.normal) : 1
-      if (obstacle && impactDot < 0.05) {
-        state.pos.copy(was).addScaledVector(obstacle.normal, 0.04)
-        if (impactDot < -0.15) {
-          reboundVelocity.copy(obstacle.normal).multiplyScalar(WALL_REBOUND_SPEED * Math.min(1, -impactDot))
-        } else {
-          reboundVelocity.set(0, 0, 0)
-        }
-        state.speed *= impactDot < -0.35 ? 0.28 : 0.65
+      const movingAwayFromContact = startObstacle
+        ? forward.dot(startObstacle.normal) > 0.08
+        : false
+      if (obstacle && !movingAwayFromContact) {
+        state.pos.copy(was)
+        state.speed = 0
+        collisionNormal.copy(startObstacle?.normal ?? obstacle.normal).normalize()
+        collisionLocked = true
       }
     }
 

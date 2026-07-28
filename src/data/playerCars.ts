@@ -3,11 +3,13 @@ import ferrariUrl from '../assets/models/Ferrari_26.opt.glb?url'
 import mclarenUrl from '../assets/models/McLaren_MCL35M.opt.glb?url'
 import mercedesUrl from '../assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb?url'
 import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
+import audiUrl from '../assets/models/f1_2026_audi_fom-optimized.glb?url'
 
-export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes'
+export type PlayerCarId = 'redbull' | 'ferrari' | 'mclaren' | 'mercedes' | 'audi'
 export type PlayerCarWheelStrategy =
   | 'redbull-github-v1'
   | 'mercedes-w15-compressed-v1'
+  | 'audi-fom-v1'
   | 'pending'
 
 export interface PlayerCarDefinition {
@@ -23,6 +25,17 @@ export interface PlayerCarDefinition {
 }
 
 export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
+  {
+    id: 'audi',
+    name: 'Audi DIY',
+    team: 'F1 2026 Custom Works',
+    model: 'FOM 白车 · 痛车专用',
+    url: audiUrl,
+    reverse: false,
+    teamId: 'merc',
+    accent: '#d41222',
+    wheelStrategy: 'audi-fom-v1',
+  },
   {
     id: 'redbull',
     name: 'Red Bull Racing',

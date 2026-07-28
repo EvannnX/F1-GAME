@@ -14,6 +14,12 @@ import {
   type PlayerCarId,
 } from '../data/playerCars'
 import { loadLocalAsset } from '../utils/localAsset'
+import { storage } from '../utils/storage'
+import {
+  applyCustomLivery,
+  clearCustomLivery,
+  prepareCustomLogo,
+} from '../render/customLogo'
 
 export interface GarageController {
   destroy: () => void
@@ -153,6 +159,50 @@ function installStyles(): void {
       align-items: center;
       gap: 22px;
     }
+    .f1s-garage__diy {
+      position: absolute;
+      z-index: 4;
+      left: clamp(20px, 5vw, 76px);
+      bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, .8);
+      border-radius: 8px;
+      background: rgba(247, 248, 250, .9);
+      box-shadow: 0 8px 22px rgba(27, 30, 37, .16);
+      backdrop-filter: blur(8px);
+    }
+    .f1s-garage__upload,
+    .f1s-garage__clear-logo {
+      min-height: 42px;
+      padding: 0 17px;
+      border: 0;
+      border-radius: 5px;
+      background: #b80f1d;
+      color: #fff;
+      font: 850 14px/1 Inter, "Helvetica Neue", Arial, sans-serif;
+      cursor: pointer;
+    }
+    .f1s-garage__clear-logo {
+      background: #4e525b;
+    }
+    .f1s-garage__logo-status {
+      max-width: 150px;
+      color: #555963;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .f1s-garage__logo-preview {
+      width: 42px;
+      height: 42px;
+      border: 2px solid #fff;
+      border-radius: 5px;
+      background: #d9dbe0;
+      object-fit: cover;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+    }
     .f1s-garage__count {
       color: #5d616b;
       font-size: 13px;
@@ -213,6 +263,10 @@ function installStyles(): void {
       .f1s-garage__model { margin-top: 4px; font-size: 11px; }
       .f1s-garage__arrow { width: 56px; height: 56px; font-size: 46px; }
       .f1s-garage__footer { right: 18px; bottom: 14px; }
+      .f1s-garage__diy { left: 18px; bottom: 14px; padding: 7px; }
+      .f1s-garage__upload,
+      .f1s-garage__clear-logo { min-height: 38px; padding: 0 12px; font-size: 12px; }
+      .f1s-garage__logo-status { display: none; }
       .f1s-garage__continue { min-width: 240px; min-height: 56px; font-size: 18px; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -290,6 +344,13 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     </div>
     <button class="f1s-garage__arrow f1s-garage__arrow--prev" type="button" aria-label="上一辆赛车" title="上一辆赛车"><span>‹</span></button>
     <button class="f1s-garage__arrow f1s-garage__arrow--next" type="button" aria-label="下一辆赛车" title="下一辆赛车"><span>›</span></button>
+    <div class="f1s-garage__diy">
+      <input class="f1s-garage__logo-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <button class="f1s-garage__upload" type="button">上传 DIY Logo</button>
+      <button class="f1s-garage__clear-logo" type="button">清除</button>
+      <img class="f1s-garage__logo-preview" alt="当前上传图片预览" hidden>
+      <span class="f1s-garage__logo-status" aria-live="polite"></span>
+    </div>
     <div class="f1s-garage__footer">
       <div class="f1s-garage__count"></div>
       <button class="f1s-garage__continue" type="button">确认赛车</button>
@@ -460,6 +521,17 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   const nameEl = host.querySelector<HTMLDivElement>('.f1s-garage__name')!
   const modelEl = host.querySelector<HTMLDivElement>('.f1s-garage__model')!
   const countEl = host.querySelector<HTMLDivElement>('.f1s-garage__count')!
+  const logoInput = host.querySelector<HTMLInputElement>('.f1s-garage__logo-input')!
+  const uploadLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__upload')!
+  const clearLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__clear-logo')!
+  const logoStatus = host.querySelector<HTMLSpanElement>('.f1s-garage__logo-status')!
+  const logoPreview = host.querySelector<HTMLImageElement>('.f1s-garage__logo-preview')!
+  const storedLogo = storage.getCustomLogo()
+  if (storedLogo) {
+    logoPreview.src = storedLogo
+    logoPreview.hidden = false
+  }
+  logoStatus.textContent = storedLogo ? '已应用自定义 Logo' : 'PNG / JPG / WebP'
   let selectionVersion = 0
   const showSelection = (index: number): void => {
     selectedIndex = (index + PLAYER_CARS.length) % PLAYER_CARS.length
@@ -478,6 +550,18 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
       currentModel = model
       currentModel.visible = true
       if (!currentModel.parent) scene.add(currentModel)
+      const liveryPromise = definition.id === 'audi'
+        ? applyCustomLivery(scene, currentModel)
+        : Promise.resolve(false)
+      void liveryPromise.then((applied) => {
+        logoStatus.textContent = applied
+          ? '痛车车衣已贴合'
+          : storage.getCustomLogo()
+            ? '请选择 Audi DIY 白车'
+            : 'PNG / JPG / WebP'
+      }).catch((error) => {
+        console.warn('[F1S] garage custom livery failed:', error)
+      })
       frameModel(currentModel)
       renderer.shadowMap.needsUpdate = true
     }).catch((error) => {
@@ -489,6 +573,40 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   const next = (): void => showSelection(selectedIndex + 1)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--prev')!.addEventListener('click', previous)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--next')!.addEventListener('click', next)
+
+  uploadLogoButton.addEventListener('click', () => logoInput.click())
+  logoInput.addEventListener('change', () => {
+    const file = logoInput.files?.[0]
+    logoInput.value = ''
+    if (!file) return
+    logoStatus.textContent = '正在处理…'
+    void prepareCustomLogo(file).then(async (dataUrl) => {
+      storage.setCustomLogo(dataUrl)
+      logoPreview.src = dataUrl
+      logoPreview.hidden = false
+      const audiIndex = PLAYER_CARS.findIndex((car) => car.id === 'audi')
+      if (selectedIndex !== audiIndex) {
+        logoStatus.textContent = '正在切换 Audi 白车…'
+        showSelection(audiIndex)
+        return
+      }
+      const applied = currentModel
+        ? await applyCustomLivery(scene, currentModel, dataUrl)
+        : false
+      logoStatus.textContent = applied ? '痛车车衣已贴合' : '正在加载 Audi 白车…'
+      renderer.shadowMap.needsUpdate = true
+    }).catch((error) => {
+      logoStatus.textContent = error instanceof Error ? error.message : '上传失败'
+      console.warn('[F1S] custom logo upload failed:', error)
+    })
+  })
+  clearLogoButton.addEventListener('click', () => {
+    storage.setCustomLogo(null)
+    logoPreview.removeAttribute('src')
+    logoPreview.hidden = true
+    if (currentModel) clearCustomLivery(scene, currentModel)
+    logoStatus.textContent = '已清除'
+  })
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'ArrowLeft') previous()
@@ -540,6 +658,7 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     window.removeEventListener('resize', resize)
     window.removeEventListener('keydown', onKeyDown)
     controls.dispose()
+    if (currentModel) clearCustomLivery(scene, currentModel)
     for (const model of loaded.values()) disposeModel(model)
     loaded.clear()
     floor.geometry.dispose()

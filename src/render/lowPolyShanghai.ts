@@ -260,6 +260,7 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
       }
       material.needsUpdate = true
     }
+
   })
 
   const blueRunoffMaterial = blueRunoffMaterials[0]
@@ -951,12 +952,22 @@ function collectObstacleSurfaceTargets(root: THREE.Object3D): THREE.Mesh[] {
 export function createLowPolyShanghaiObstacleSampler(
   lowPolyShanghai: LowPolyShanghaiBundle,
 ): LowPolyShanghaiObstacleSampler {
+  interface ObstacleSegment {
+    a: THREE.Vector3
+    b: THREE.Vector3
+    minY: number
+    maxY: number
+  }
+
   const obstacleTargets = collectObstacleSurfaceTargets(lowPolyShanghai.group)
   const cellSize = 8
-  const maxPointsPerMesh = 6000
+  const maxPointsPerMesh = 20000
   const maxPointsPerCell = 36
+  const maxSegmentsPerCell = 180
   const obstaclePadding = 0.2
   const grid = new Map<string, THREE.Vector3[]>()
+  const segmentGrid = new Map<string, ObstacleSegment[]>()
+  let segmentCount = 0
   const tmp = new THREE.Vector3()
   const triangleA = new THREE.Vector3()
   const triangleB = new THREE.Vector3()
@@ -975,6 +986,32 @@ export function createLowPolyShanghaiObstacleSampler(
       bucket.push(point.clone())
     } else {
       grid.set(key, [point.clone()])
+    }
+  }
+  const addSegment = (a: THREE.Vector3, b: THREE.Vector3): void => {
+    const dx = b.x - a.x
+    const dz = b.z - a.z
+    const planarLength = Math.hypot(dx, dz)
+    if (planarLength < 0.18) return
+    const segment: ObstacleSegment = {
+      a: a.clone(),
+      b: b.clone(),
+      minY: Math.min(a.y, b.y),
+      maxY: Math.max(a.y, b.y),
+    }
+    segmentCount++
+    const steps = Math.max(1, Math.ceil(planarLength / (cellSize * 0.6)))
+    for (let step = 0; step <= steps; step++) {
+      const alpha = step / steps
+      const x = a.x + dx * alpha
+      const z = a.z + dz * alpha
+      const key = cellKey(x, z)
+      const bucket = segmentGrid.get(key)
+      if (bucket) {
+        if (bucket.length < maxSegmentsPerCell && !bucket.includes(segment)) bucket.push(segment)
+      } else {
+        segmentGrid.set(key, [segment])
+      }
     }
   }
 
@@ -1013,6 +1050,9 @@ export function createLowPolyShanghaiObstacleSampler(
         if (verticalSpan < 0.35) continue
         triangleCenter.copy(triangleA).add(triangleB).add(triangleC).multiplyScalar(1 / 3)
         if (Number.isFinite(triangleCenter.x) && Number.isFinite(triangleCenter.y) && Number.isFinite(triangleCenter.z)) {
+          addSegment(triangleA, triangleB)
+          addSegment(triangleB, triangleC)
+          addSegment(triangleC, triangleA)
           addPoint(triangleCenter)
           tmp.copy(triangleA).add(triangleB).multiplyScalar(0.5)
           addPoint(tmp)
@@ -1025,11 +1065,15 @@ export function createLowPolyShanghaiObstacleSampler(
     }
   }
 
+  console.info(
+    `[F1S] obstacle collider: ${obstacleTargets.length} meshes, ${segmentCount} segments`,
+  )
+
   const sampleObstacleNear = (
     point: THREE.Vector3,
     options: LowPolyShanghaiObstacleQuery = {},
   ): LowPolyShanghaiObstacleHit | null => {
-    if (grid.size === 0) return null
+    if (grid.size === 0 && segmentGrid.size === 0) return null
     const radius = options.radius ?? 1.1
     const queryRadius = radius + obstaclePadding
     const queryRadiusSq = queryRadius * queryRadius
@@ -1040,9 +1084,45 @@ export function createLowPolyShanghaiObstacleSampler(
     const minY = point.y - 0.8
     const maxY = point.y + 3.2
     let closest: LowPolyShanghaiObstacleHit | null = null
+    const checkedSegments = new Set<ObstacleSegment>()
+    const closestPoint = new THREE.Vector3()
 
     for (let ix = minCellX; ix <= maxCellX; ix++) {
       for (let iz = minCellZ; iz <= maxCellZ; iz++) {
+        const segments = segmentGrid.get(`${ix}:${iz}`)
+        for (const segment of segments ?? []) {
+          if (checkedSegments.has(segment)) continue
+          checkedSegments.add(segment)
+          if (segment.maxY < minY || segment.minY > maxY) continue
+          const abX = segment.b.x - segment.a.x
+          const abZ = segment.b.z - segment.a.z
+          const lengthSq = abX * abX + abZ * abZ
+          const alpha = lengthSq > 1e-8
+            ? THREE.MathUtils.clamp(
+                ((point.x - segment.a.x) * abX + (point.z - segment.a.z) * abZ) / lengthSq,
+                0,
+                1,
+              )
+            : 0
+          closestPoint.set(
+            segment.a.x + abX * alpha,
+            THREE.MathUtils.clamp(point.y, segment.minY, segment.maxY),
+            segment.a.z + abZ * alpha,
+          )
+          const dx = point.x - closestPoint.x
+          const dz = point.z - closestPoint.z
+          const dSq = dx * dx + dz * dz
+          if (dSq > queryRadiusSq || (closest && dSq >= closest.distance * closest.distance)) continue
+          const normal = new THREE.Vector3(dx, 0, dz)
+          if (normal.lengthSq() < 1e-5) normal.set(-abZ, 0, abX)
+          normal.normalize()
+          closest = {
+            point: closestPoint.clone(),
+            normal,
+            distance: Math.sqrt(dSq),
+          }
+        }
+
         const bucket = grid.get(`${ix}:${iz}`)
         if (!bucket) continue
         for (const candidate of bucket) {
@@ -1075,11 +1155,15 @@ export function createLowPolyShanghaiObstacleSampler(
     to: THREE.Vector3,
     options: LowPolyShanghaiObstacleQuery = {},
   ): LowPolyShanghaiObstacleHit | null => {
-    tmp.copy(to)
-    if (from.distanceToSquared(to) > 0.001) {
-      tmp.lerp(from, 0.25)
+    const distance = from.distanceTo(to)
+    const radius = options.radius ?? 1.1
+    const steps = Math.max(1, Math.ceil(distance / Math.max(0.2, radius * 0.5)))
+    for (let step = 1; step <= steps; step++) {
+      tmp.lerpVectors(from, to, step / steps)
+      const hit = sampleObstacleNear(tmp, options)
+      if (hit) return hit
     }
-    return sampleObstacleNear(tmp, options) ?? sampleObstacleNear(to, options)
+    return null
   }
 
   return { sampleObstacleBetween, sampleObstacleNear }
