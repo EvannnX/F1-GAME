@@ -16,6 +16,12 @@ export async function createAudioRig(): Promise<AudioRig> {
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
   const ctx = new AC()
+  // createAudioRig() is normally entered directly from the first pointer
+  // gesture. Resume before the first await so mobile Safari/WebView keeps
+  // the browser's user-activation permission while assets decode.
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch(() => {})
+  }
 
   const fetchBuffer = async (url: string): Promise<AudioBuffer | null> => {
     try {

@@ -38,6 +38,7 @@ const isMobileGpu = (): boolean => {
 }
 
 const pixelRatioCap = (performanceMode: boolean, mobileGpu: boolean): number => {
+  if (COMPACT_30_BUILD && mobileGpu) return performanceMode ? 1.15 : 1.35
   if (mobileGpu) return performanceMode ? 1 : 1.25
   return performanceMode ? 1.25 : 1.5
 }
@@ -473,9 +474,10 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     const sampleDuration = now - fpsSampleStartedAt
     if (sampleDuration < 1800) return
     const fps = fpsSampleFrames * 1000 / sampleDuration
+    const minimumResolutionScale = COMPACT_30_BUILD ? 0.84 : 0.72
     let nextScale = resolutionScale
-    if (fps < 43 && resolutionScale > 0.72) {
-      nextScale = Math.max(0.72, resolutionScale - 0.12)
+    if (fps < 43 && resolutionScale > minimumResolutionScale) {
+      nextScale = Math.max(minimumResolutionScale, resolutionScale - 0.12)
     } else if (fps > 57 && resolutionScale < 1 && now - lastResolutionChangeAt > 6000) {
       nextScale = Math.min(1, resolutionScale + 0.06)
     }
@@ -548,3 +550,4 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
 
   return { scene, camera, renderer, sun, setPerformanceMode, prewarm, applyWeather, updateShadowFollow, resize, render, dispose }
 }
+const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'

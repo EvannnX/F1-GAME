@@ -1,0 +1,161 @@
+{
+  "version": 3,
+  "preview": "v45",
+  "model": "f1_2026_fom-nyu-purple-color-only.glb",
+  "coordinateSpace": "carRoot-local",
+  "rotationOrder": "XYZ",
+  "mirrorRule": {
+    "x": "negate",
+    "rotationY": "negate",
+    "rotationZ": "negate",
+    "otherParameters": "copy"
+  },
+  "decals": {
+    "sponsorTraeRight": {
+      "file": "抖音官方赞助商logo/trae.ec67ce78.png",
+      "scale": 0.74,
+      "width": 1.0,
+      "height": 1.0,
+      "x": 0.405,
+      "y": 0.66,
+      "z": -0.15,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorTraeLeft": {
+      "mirrorOf": "sponsorTraeRight",
+      "scale": 0.74,
+      "width": 1.0,
+      "height": 1.0,
+      "x": -0.405,
+      "y": 0.66,
+      "z": -0.15,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    },
+    "sponsorBlueRight": {
+      "file": "抖音官方赞助商logo/download.png",
+      "scale": 1.37,
+      "width": 1.0,
+      "height": 0.61,
+      "x": 0.405,
+      "y": 0.82,
+      "z": -0.765,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorBlueLeft": {
+      "mirrorOf": "sponsorBlueRight",
+      "scale": 1.37,
+      "width": 1.0,
+      "height": 0.61,
+      "x": -0.405,
+      "y": 0.82,
+      "z": -0.765,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    },
+    "sponsorJointRight": {
+      "file": "抖音官方赞助商logo/joint-organizer.30e85169.svg",
+      "scale": 0.87,
+      "width": 1.0,
+      "height": 1.0,
+      "x": 0.405,
+      "y": 0.524,
+      "z": 0.81,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorJointLeft": {
+      "mirrorOf": "sponsorJointRight",
+      "scale": 0.87,
+      "width": 1.0,
+      "height": 1.0,
+      "x": -0.405,
+      "y": 0.524,
+      "z": 0.81,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    },
+    "sponsorDownload3Right": {
+      "file": "抖音官方赞助商logo/download-3.svg",
+      "scale": 0.8,
+      "width": 1.0,
+      "height": 1.0,
+      "x": 0.405,
+      "y": 0.562,
+      "z": -1.58,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorDownload3Left": {
+      "mirrorOf": "sponsorDownload3Right",
+      "scale": 0.8,
+      "width": 1.0,
+      "height": 1.0,
+      "x": -0.405,
+      "y": 0.562,
+      "z": -1.58,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    },
+    "sponsorDouyinRight": {
+      "file": "抖音官方赞助商logo/download-2.svg",
+      "scale": 1.0,
+      "width": 1.0,
+      "height": 1.0,
+      "x": 0.405,
+      "y": 0.702,
+      "z": -0.925,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorDouyinLeft": {
+      "mirrorOf": "sponsorDouyinRight",
+      "scale": 1.0,
+      "width": 1.0,
+      "height": 1.0,
+      "x": -0.405,
+      "y": 0.702,
+      "z": -0.925,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    },
+    "sponsorJinqiuRight": {
+      "status": "confirmed",
+      "file": "抖音官方赞助商logo/jinqiu.2db5dbb8.png",
+      "scale": 0.53,
+      "width": 1.0,
+      "height": 1.0,
+      "x": 0.405,
+      "y": 0.43,
+      "z": 2.195,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "sponsorJinqiuLeft": {
+      "status": "confirmed",
+      "mirrorOf": "sponsorJinqiuRight",
+      "scale": 0.53,
+      "width": 1.0,
+      "height": 1.0,
+      "x": -0.405,
+      "y": 0.43,
+      "z": 2.195,
+      "rotationX": 0,
+      "rotationY": -90,
+      "rotationZ": 0
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "preview": "v47",
+  "model": "f1_2026_fom-nyu-purple-color-only.glb",
+  "targetMaterial": "rear_light",
+  "enabled": true,
+  "flashesPerSecond": 2,
+  "periodMilliseconds": 500,
+  "dutyCycle": 0.5,
+  "phases": [
+    {
+      "durationMilliseconds": 250,
+      "color": "#ff1808",
+      "emissive": "#ff1808",
+      "emissiveIntensity": 4
+    },
+    {
+      "durationMilliseconds": 250,
+      "color": "original",
+      "emissive": "original",
+      "emissiveIntensity": "original"
+    }
+  ],
+  "scope": "rear_light material only"
+}

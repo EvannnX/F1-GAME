@@ -4,9 +4,20 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
-import { playerCarById, type PlayerCarId } from '../data/playerCars'
+import {
+  playerCarById,
+  wheelStrategyForPlayerCar,
+  type PlayerCarId,
+} from '../data/playerCars'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 import { loadLocalAsset } from '../utils/localAsset'
+import {
+  applyFomSpecialLivery,
+  applyFomThemeColor,
+  readFomThemeColor,
+  type FomSpecialLivery,
+} from './fomSpecialLivery'
+import { applyCustomLivery, clearCustomLivery } from './customLogo'
 
 export const TEAM_COLORS: Record<TeamId, { primary: string; secondary: string; spark: string }> = {
   merc: { primary: '#00d2be', secondary: '#181818', spark: '#a8fff5' },
@@ -39,7 +50,7 @@ const PARTICLE_MAX = 256
 const PARTICLE_LIFE = 1.0
 const TARGET_LENGTH_M = 5.0 // real F1 ≈ 5.5 m; pick 5 to feel right against 16 m wide road
 const FRONT_STEER_MAX_RAD = THREE.MathUtils.degToRad(18)
-const WHEEL_SPIN_RATE = 42
+export const PLAYER_WHEEL_SPIN_RATE = 42
 const WHEEL_SPIN_AXIS = new THREE.Vector3(0, 0, 1)
 const WHEEL_STEER_AXIS = new THREE.Vector3(0, 1, 0)
 const FRONT_WHEEL_ROLL_SHELL_RATIO = 0.76
@@ -110,15 +121,7 @@ interface MaterialWheelProfile {
   longitudinalMinRatio: number
 }
 
-const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull' | 'lion'>, MaterialWheelProfile> = {
-  ferrari: {
-    // `Tyre` supplies the rubber while the other four materials contain the
-    // wheel faces/rims. `base` is intentionally excluded because it also
-    // contains most of the chassis.
-    materials: new Set(['tyre', 'secondary', 'chrome', 'lambert1']),
-    lateralMinRatio: 0.35,
-    longitudinalMinRatio: 0.18,
-  },
+const MATERIAL_WHEEL_PROFILES: Record<'mclaren', MaterialWheelProfile> = {
   mclaren: {
     materials: new Set(['rim_png', 'tread_png', 'tyrewall_png']),
     // These materials are wheel-only. Keep the threshold low so the inboard
@@ -127,13 +130,6 @@ const MATERIAL_WHEEL_PROFILES: Record<Exclude<PlayerCarId, 'redbull' | 'lion'>, 
     lateralMinRatio: 0.05,
     longitudinalMinRatio: 0.08,
   },
-  mercedes: {
-    // The W13 keeps all four tyre shells in one Draco mesh. Hub materials are
-    // shared with the chassis, so only the rubber is safe to animate.
-    materials: new Set(['tyre']),
-    lateralMinRatio: 0.25,
-    longitudinalMinRatio: 0.18,
-  },
 }
 let dracoLoader: DRACOLoader | null = null
 
@@ -141,6 +137,27 @@ function makeMaterialInteriorVisible(material: THREE.Material): void {
   if (material.side !== THREE.DoubleSide) {
     material.side = THREE.DoubleSide
     material.needsUpdate = true
+  }
+}
+
+function sharpenCarTextures(root: THREE.Object3D): void {
+  const textures = new Set<THREE.Texture>()
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value)
+      }
+    }
+  })
+  for (const texture of textures) {
+    texture.generateMipmaps = true
+    texture.minFilter = THREE.LinearMipmapLinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.anisotropy = Math.max(texture.anisotropy, 8)
+    texture.needsUpdate = true
   }
 }
 
@@ -176,24 +193,25 @@ interface PlaceholderRefs {
   geos: THREE.BufferGeometry[]
 }
 
-interface PivotRef {
+export interface PlayerWheelPivotRef {
   pivot: THREE.Group
   baseQuaternion: THREE.Quaternion
 }
 
-interface WheelRig {
+export interface PlayerWheelRig {
   name: string
   steerable: boolean
-  steerPivot: PivotRef
-  spinPivots: PivotRef[]
+  steerPivot: PlayerWheelPivotRef
+  spinPivots: PlayerWheelPivotRef[]
   spinAxis: THREE.Vector3
   spin: number
   baseCenterWorld?: THREE.Vector3
+  steerComposition?: 'multiply' | 'premultiply'
 }
 
 interface SteerOnlyRig {
   name: string
-  steerPivot: PivotRef
+  steerPivot: PlayerWheelPivotRef
 }
 
 function buildPlaceholder(): PlaceholderRefs {
@@ -337,6 +355,61 @@ function renderedBoxForObjects(objects: THREE.Object3D[]): THREE.Box3 {
   return box
 }
 
+function smallestEigenvectorForSymmetricMatrix(
+  matrix: number[][],
+): THREE.Vector3 {
+  const covariance = matrix.map((row) => [...row])
+  const eigenvectors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+  for (let iteration = 0; iteration < 24; iteration++) {
+    let p = 0
+    let q = 1
+    let largest = Math.abs(covariance[0][1])
+    for (const [row, col] of [[0, 2], [1, 2]] as const) {
+      const value = Math.abs(covariance[row][col])
+      if (value > largest) {
+        largest = value
+        p = row
+        q = col
+      }
+    }
+    if (largest < 1e-12) break
+    const angle = 0.5 * Math.atan2(
+      2 * covariance[p][q],
+      covariance[q][q] - covariance[p][p],
+    )
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    const app = covariance[p][p]
+    const aqq = covariance[q][q]
+    const apq = covariance[p][q]
+    covariance[p][p] = cos * cos * app - 2 * sin * cos * apq + sin * sin * aqq
+    covariance[q][q] = sin * sin * app + 2 * sin * cos * apq + cos * cos * aqq
+    covariance[p][q] = 0
+    covariance[q][p] = 0
+    for (let index = 0; index < 3; index++) {
+      if (index === p || index === q) continue
+      const aip = covariance[index][p]
+      const aiq = covariance[index][q]
+      covariance[index][p] = covariance[p][index] = cos * aip - sin * aiq
+      covariance[index][q] = covariance[q][index] = sin * aip + cos * aiq
+    }
+    for (let row = 0; row < 3; row++) {
+      const vip = eigenvectors[row][p]
+      const viq = eigenvectors[row][q]
+      eigenvectors[row][p] = cos * vip - sin * viq
+      eigenvectors[row][q] = sin * vip + cos * viq
+    }
+  }
+  let smallest = 0
+  if (covariance[1][1] < covariance[smallest][smallest]) smallest = 1
+  if (covariance[2][2] < covariance[smallest][smallest]) smallest = 2
+  return new THREE.Vector3(
+    eigenvectors[0][smallest],
+    eigenvectors[1][smallest],
+    eigenvectors[2][smallest],
+  ).normalize()
+}
+
 function smallestPrincipalAxisForObjects(objects: THREE.Object3D[]): THREE.Vector3 {
   const points: THREE.Vector3[] = []
   const point = new THREE.Vector3()
@@ -374,57 +447,186 @@ function smallestPrincipalAxisForObjects(objects: THREE.Object3D[]): THREE.Vecto
   covariance[2][0] = covariance[0][2]
   covariance[2][1] = covariance[1][2]
 
-  const eigenvectors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-  for (let iteration = 0; iteration < 18; iteration++) {
-    let p = 0
-    let q = 1
-    let largest = Math.abs(covariance[0][1])
-    for (const [row, col] of [[0, 2], [1, 2]] as const) {
-      const value = Math.abs(covariance[row][col])
-      if (value > largest) {
-        largest = value
-        p = row
-        q = col
-      }
-    }
-    if (largest < 1e-10) break
-    const angle = 0.5 * Math.atan2(
-      2 * covariance[p][q],
-      covariance[q][q] - covariance[p][p],
-    )
-    const cos = Math.cos(angle)
-    const sin = Math.sin(angle)
-    const app = covariance[p][p]
-    const aqq = covariance[q][q]
-    const apq = covariance[p][q]
-    covariance[p][p] = cos * cos * app - 2 * sin * cos * apq + sin * sin * aqq
-    covariance[q][q] = sin * sin * app + 2 * sin * cos * apq + cos * cos * aqq
-    covariance[p][q] = 0
-    covariance[q][p] = 0
-    for (let index = 0; index < 3; index++) {
-      if (index === p || index === q) continue
-      const aip = covariance[index][p]
-      const aiq = covariance[index][q]
-      covariance[index][p] = covariance[p][index] = cos * aip - sin * aiq
-      covariance[index][q] = covariance[q][index] = sin * aip + cos * aiq
-    }
-    for (let row = 0; row < 3; row++) {
-      const vip = eigenvectors[row][p]
-      const viq = eigenvectors[row][q]
-      eigenvectors[row][p] = cos * vip - sin * viq
-      eigenvectors[row][q] = sin * vip + cos * viq
-    }
-  }
-  let smallest = 0
-  if (covariance[1][1] < covariance[smallest][smallest]) smallest = 1
-  if (covariance[2][2] < covariance[smallest][smallest]) smallest = 2
-  const axis = new THREE.Vector3(
-    eigenvectors[0][smallest],
-    eigenvectors[1][smallest],
-    eigenvectors[2][smallest],
-  ).normalize()
+  const axis = smallestEigenvectorForSymmetricMatrix(covariance)
   if (axis.x < 0) axis.negate()
   return Math.abs(axis.x) >= 0.55 ? axis : new THREE.Vector3(1, 0, 0)
+}
+
+function cylinderAxisFromSurfaceGeometry(
+  objects: THREE.Object3D[],
+): THREE.Vector3 | null {
+  const covariance = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  const edgeAB = new THREE.Vector3()
+  const edgeAC = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  let totalArea = 0
+
+  for (const object of objects) {
+    object.updateMatrixWorld(true)
+    object.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      if (!position) return
+      const index = mesh.geometry.index
+      const total = index?.count ?? position.count
+      for (let offset = 0; offset + 2 < total; offset += 3) {
+        a.fromBufferAttribute(position, index ? index.getX(offset) : offset)
+          .applyMatrix4(mesh.matrixWorld)
+        b.fromBufferAttribute(position, index ? index.getX(offset + 1) : offset + 1)
+          .applyMatrix4(mesh.matrixWorld)
+        c.fromBufferAttribute(position, index ? index.getX(offset + 2) : offset + 2)
+          .applyMatrix4(mesh.matrixWorld)
+        edgeAB.subVectors(b, a)
+        edgeAC.subVectors(c, a)
+        normal.crossVectors(edgeAB, edgeAC)
+        const doubledArea = normal.length()
+        if (doubledArea < 1e-10) continue
+        normal.multiplyScalar(1 / doubledArea)
+        const weight = doubledArea
+        covariance[0][0] += weight * normal.x * normal.x
+        covariance[0][1] += weight * normal.x * normal.y
+        covariance[0][2] += weight * normal.x * normal.z
+        covariance[1][1] += weight * normal.y * normal.y
+        covariance[1][2] += weight * normal.y * normal.z
+        covariance[2][2] += weight * normal.z * normal.z
+        totalArea += weight
+      }
+    })
+  }
+  if (totalArea < 1e-8) return null
+  covariance[1][0] = covariance[0][1]
+  covariance[2][0] = covariance[0][2]
+  covariance[2][1] = covariance[1][2]
+  const axis = smallestEigenvectorForSymmetricMatrix(covariance)
+  if (axis.x < 0) axis.negate()
+  return Math.abs(axis.x) >= 0.55 ? axis : null
+}
+
+function areaWeightedSidewallAxisForObjects(
+  objects: THREE.Object3D[],
+): THREE.Vector3 | null {
+  const axis = new THREE.Vector3()
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  const edgeAB = new THREE.Vector3()
+  const edgeAC = new THREE.Vector3()
+  const normal = new THREE.Vector3()
+  let totalWeight = 0
+
+  for (const object of objects) {
+    object.updateMatrixWorld(true)
+    object.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      if (!position) return
+      const index = mesh.geometry.index
+      const total = index?.count ?? position.count
+      for (let offset = 0; offset + 2 < total; offset += 3) {
+        a.fromBufferAttribute(position, index ? index.getX(offset) : offset)
+          .applyMatrix4(mesh.matrixWorld)
+        b.fromBufferAttribute(position, index ? index.getX(offset + 1) : offset + 1)
+          .applyMatrix4(mesh.matrixWorld)
+        c.fromBufferAttribute(position, index ? index.getX(offset + 2) : offset + 2)
+          .applyMatrix4(mesh.matrixWorld)
+        edgeAB.subVectors(b, a)
+        edgeAC.subVectors(c, a)
+        normal.crossVectors(edgeAB, edgeAC)
+        const doubledArea = normal.length()
+        if (doubledArea < 1e-10) continue
+        normal.multiplyScalar(1 / doubledArea)
+        if (normal.x < 0) normal.negate()
+        const lateralAlignment = Math.abs(normal.x)
+        if (lateralAlignment < 0.55) continue
+        const weight = doubledArea * lateralAlignment ** 4
+        axis.addScaledVector(normal, weight)
+        totalWeight += weight
+      }
+    })
+  }
+  if (totalWeight < 1e-8 || axis.lengthSq() < 1e-12) return null
+  return axis.normalize()
+}
+
+function fittedWheelCenterForObjects(
+  objects: THREE.Object3D[],
+  axleWorld: THREE.Vector3,
+  fallback: THREE.Vector3,
+): THREE.Vector3 {
+  if (!objects.length) return fallback.clone()
+  const axle = axleWorld.clone().normalize()
+  const radialUp = new THREE.Vector3(0, 1, 0)
+    .addScaledVector(axle, -axle.y)
+    .normalize()
+  if (radialUp.lengthSq() < 1e-8) radialUp.set(0, 0, 1)
+  const radialForward = new THREE.Vector3()
+    .crossVectors(axle, radialUp)
+    .normalize()
+  const point = new THREE.Vector3()
+  const seen = new Set<string>()
+  let uu = 0
+  let uv = 0
+  let vv = 0
+  let u = 0
+  let v = 0
+  let ur2 = 0
+  let vr2 = 0
+  let r2 = 0
+  let axialMin = Number.POSITIVE_INFINITY
+  let axialMax = Number.NEGATIVE_INFINITY
+  let count = 0
+
+  for (const object of objects) {
+    object.updateMatrixWorld(true)
+    object.traverse((child) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+      const position = mesh.geometry.getAttribute('position')
+      if (!position) return
+      const index = mesh.geometry.index
+      const total = index?.count ?? position.count
+      for (let offset = 0; offset < total; offset++) {
+        point.fromBufferAttribute(position, index ? index.getX(offset) : offset)
+          .applyMatrix4(mesh.matrixWorld)
+        const key = `${Math.round(point.x * 100000)}:${Math.round(point.y * 100000)}:${Math.round(point.z * 100000)}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        const projectedU = point.dot(radialUp)
+        const projectedV = point.dot(radialForward)
+        const axial = point.dot(axle)
+        const radiusSquared = projectedU * projectedU + projectedV * projectedV
+        uu += 4 * projectedU * projectedU
+        uv += 4 * projectedU * projectedV
+        vv += 4 * projectedV * projectedV
+        u += 2 * projectedU
+        v += 2 * projectedV
+        ur2 += 2 * projectedU * radiusSquared
+        vr2 += 2 * projectedV * radiusSquared
+        r2 += radiusSquared
+        axialMin = Math.min(axialMin, axial)
+        axialMax = Math.max(axialMax, axial)
+        count += 1
+      }
+    })
+  }
+  if (count < 12) return fallback.clone()
+  const normal = new THREE.Matrix3().set(
+    uu, uv, u,
+    uv, vv, v,
+    u, v, count,
+  )
+  if (Math.abs(normal.determinant()) < 1e-9) return fallback.clone()
+  const solution = new THREE.Vector3(ur2, vr2, r2).applyMatrix3(normal.invert())
+  if (!Number.isFinite(solution.x) || !Number.isFinite(solution.y)) return fallback.clone()
+  return new THREE.Vector3()
+    .addScaledVector(radialUp, solution.x)
+    .addScaledVector(radialForward, solution.y)
+    .addScaledVector(axle, (axialMin + axialMax) * 0.5)
 }
 
 function renderedLocalBoxForMesh(mesh: THREE.Mesh): THREE.Box3 {
@@ -817,7 +1019,7 @@ function createPivotForObjects(
   objects: THREE.Object3D[],
   name: string,
   centerWorldOverride?: THREE.Vector3,
-): PivotRef | null {
+): PlayerWheelPivotRef | null {
   if (!objects.length) return null
   root.updateMatrixWorld(true)
   const box = renderedBoxForObjects(objects)
@@ -858,7 +1060,7 @@ function createWheelRig(
   steerable: boolean,
   sharedSpinCenter: boolean,
   spinAxis = WHEEL_SPIN_AXIS,
-): WheelRig | null {
+): PlayerWheelRig | null {
   const steerParts = [
     ...collectPartObjects(root, steerPartNumbers),
     ...collectFrontWheelStaticObjects(root, steerPartNumbers),
@@ -879,10 +1081,10 @@ function createWheelRig(
           `player-${name}-spin-pivot`,
           wheelCenterWorld,
         ),
-      ].filter((item): item is PivotRef => Boolean(item))
+      ].filter((item): item is PlayerWheelPivotRef => Boolean(item))
     : spinParts
         .map((part, index) => createPivotForObjects(steerPivot.pivot, [part], `player-${name}-spin-pivot-${index}`))
-        .filter((item): item is PivotRef => Boolean(item))
+        .filter((item): item is PlayerWheelPivotRef => Boolean(item))
   if (!spinPivots.length) return null
 
   return {
@@ -896,9 +1098,9 @@ function createWheelRig(
   }
 }
 
-function createRedBullWheelRigs(root: THREE.Object3D): WheelRig[] {
+function createRedBullWheelRigs(root: THREE.Object3D): PlayerWheelRig[] {
   const wheelParts = splitRedBullWheelComponents(root)
-  const rigs: WheelRig[] = []
+  const rigs: PlayerWheelRig[] = []
   const axlePartsBySlot = new Map<RedBullWheelSlot, THREE.Object3D[]>()
   const wheelCenters = new Map<RedBullWheelSlot, THREE.Vector3>()
   for (const [name, rollingParts] of wheelParts.rolling) {
@@ -958,8 +1160,8 @@ function createWheelRigsFromParts(
   rolling: Map<PlayerWheelSlot, THREE.Object3D[]>,
   centers?: ReadonlyMap<PlayerWheelSlot, THREE.Vector3>,
   fixedWorldAxle?: THREE.Vector3 | ReadonlyMap<PlayerWheelSlot, THREE.Vector3>,
-): WheelRig[] {
-  const rigs: WheelRig[] = []
+): PlayerWheelRig[] {
+  const rigs: PlayerWheelRig[] = []
   for (const [name, rollingParts] of rolling) {
     if (!rollingParts.length) continue
     const axleOverride = fixedWorldAxle instanceof THREE.Vector3
@@ -1702,7 +1904,7 @@ function splitMercedesWheelComponents(root: THREE.Object3D): MercedesWheelCompon
   return { rolling, centers, frontAxles }
 }
 
-function createMercedesW15WheelRigs(root: THREE.Object3D): WheelRig[] {
+function createMercedesW15WheelRigs(root: THREE.Object3D): PlayerWheelRig[] {
   // Known-good model-specific profile. Keep AMG changes isolated and update
   // AMG_W15_WHEEL_PROFILE.md whenever this calibration intentionally changes.
   const components = splitMercedesWheelComponents(root)
@@ -1768,7 +1970,7 @@ function fitGltfToTrack(model: THREE.Object3D): void {
 
   // Scale by planar (x,z) length to 5 m. Using max(x,y,z) lets a tall rear
   // wing inflate the bbox and shrink the actual on-track footprint, which
-  // makes some packs (e.g. McLaren MCL35M) visibly smaller than others.
+  // makes some packs with tall rear wings visibly smaller than others.
   const planarLongest = Math.max(size.x, size.z)
   if (planarLongest > 0) {
     const s = TARGET_LENGTH_M / planarLongest
@@ -1798,8 +2000,265 @@ function fitGltfToTrack(model: THREE.Object3D): void {
   }
 }
 
-function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): WheelRig[] {
-  const strategy = playerCarById(carId).wheelStrategy
+const FERRARI_F175_WHEEL_NODES = [
+  { name: 'right-front', wheel: 'WHEEL_RF_19', hub: 'HUB_RF_20', steerable: true },
+  { name: 'left-front', wheel: 'WHEEL_LF_40', hub: 'HUB_LF_41', steerable: true },
+  { name: 'left-rear', wheel: 'WHEEL_LR_54', hub: 'HUB_LR_55', steerable: false },
+  { name: 'right-rear', wheel: 'WHEEL_RR_69', hub: 'HUB_RR_70', steerable: false },
+] as const
+
+function createFerrariF175WheelRigs(root: THREE.Object3D): PlayerWheelRig[] {
+  root.updateMatrixWorld(true)
+  const rigs: PlayerWheelRig[] = []
+  for (const definition of FERRARI_F175_WHEEL_NODES) {
+    const wheel = root.getObjectByName(definition.wheel)
+    const hub = root.getObjectByName(definition.hub)
+    if (!wheel || !hub || wheel.parent !== hub) continue
+
+    rigs.push({
+      name: definition.name,
+      steerable: definition.steerable,
+      steerPivot: {
+        pivot: hub as THREE.Group,
+        baseQuaternion: hub.quaternion.clone(),
+      },
+      spinPivots: [{
+        pivot: wheel as THREE.Group,
+        baseQuaternion: wheel.quaternion.clone(),
+      }],
+      spinAxis: new THREE.Vector3(1, 0, 0),
+      spin: 0,
+      baseCenterWorld: wheel.getWorldPosition(new THREE.Vector3()),
+      // Match the visually verified standalone preview: steering is applied
+      // before each authored front-hub quaternion, while wheel roll stays on
+      // the wheel node's own cambered local X axis.
+      steerComposition: 'premultiply',
+    })
+  }
+  return rigs
+}
+
+const FOM_WHEEL_MATERIALS = new Set([
+  'tread_medium',
+  'sidewall',
+  'livery_audi_01_wheel_hub',
+  'hub_nut',
+  'discs',
+])
+
+const FOM_WHEEL_AXLE_REFERENCE_MATERIALS = new Set([
+  'tread_medium',
+  'sidewall',
+])
+
+export function createFom2026WheelRigs(root: THREE.Object3D): PlayerWheelRig[] {
+  root.updateMatrixWorld(true)
+  const modelCenter = new THREE.Box3().setFromObject(root).getCenter(new THREE.Vector3())
+  const rolling = new Map<PlayerWheelSlot, THREE.Object3D[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const axleReferences = new Map<PlayerWheelSlot, THREE.Mesh[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const sidewallReferences = new Map<PlayerWheelSlot, THREE.Mesh[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const treadReferences = new Map<PlayerWheelSlot, THREE.Mesh[]>([
+    ['left-front', []],
+    ['right-front', []],
+    ['left-rear', []],
+    ['right-rear', []],
+  ])
+  const candidates: THREE.Mesh[] = []
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || !mesh.geometry || !mesh.parent) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    if (materials.some((material) => FOM_WHEEL_MATERIALS.has(material?.name ?? ''))) {
+      candidates.push(mesh)
+    }
+  })
+
+  const point = new THREE.Vector3()
+  for (const mesh of candidates) {
+    const parent = mesh.parent
+    const position = mesh.geometry.getAttribute('position')
+    if (!parent || !position) continue
+    const index = mesh.geometry.index
+    const total = index?.count ?? position.count
+    const slots = new Map<PlayerWheelSlot, number[]>([
+      ['left-front', []],
+      ['right-front', []],
+      ['left-rear', []],
+      ['right-rear', []],
+    ])
+    const referenceSlots = new Map<PlayerWheelSlot, number[]>([
+      ['left-front', []],
+      ['right-front', []],
+      ['left-rear', []],
+      ['right-rear', []],
+    ])
+    const sidewallSlots = new Map<PlayerWheelSlot, number[]>([
+      ['left-front', []],
+      ['right-front', []],
+      ['left-rear', []],
+      ['right-rear', []],
+    ])
+    const treadSlots = new Map<PlayerWheelSlot, number[]>([
+      ['left-front', []],
+      ['right-front', []],
+      ['left-rear', []],
+      ['right-rear', []],
+    ])
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    const materialNameAt = (triangleOffset: number): string => {
+      const group = mesh.geometry.groups.find(
+        (candidate) => triangleOffset >= candidate.start
+          && triangleOffset < candidate.start + candidate.count,
+      )
+      return materials[group?.materialIndex ?? 0]?.name ?? ''
+    }
+    for (let offset = 0; offset + 2 < total; offset += 3) {
+      let x = 0
+      let z = 0
+      for (let vertex = 0; vertex < 3; vertex++) {
+        point.fromBufferAttribute(position, index ? index.getX(offset + vertex) : offset + vertex)
+          .applyMatrix4(mesh.matrixWorld)
+        x += point.x
+        z += point.z
+      }
+      const side = x / 3 < modelCenter.x ? 'left' : 'right'
+      const axle = z / 3 > modelCenter.z ? 'front' : 'rear'
+      const slot = `${side}-${axle}` as PlayerWheelSlot
+      slots.get(slot)?.push(offset)
+      const materialName = materialNameAt(offset)
+      if (FOM_WHEEL_AXLE_REFERENCE_MATERIALS.has(materialName)) {
+        referenceSlots.get(slot)?.push(offset)
+      }
+      if (materialName === 'sidewall') sidewallSlots.get(slot)?.push(offset)
+      if (materialName === 'tread_medium') treadSlots.get(slot)?.push(offset)
+    }
+    for (const [slot, triangles] of referenceSlots) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const reference = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial())
+      reference.name = `fom-wheel-${slot}-axle-reference`
+      reference.matrixAutoUpdate = false
+      reference.matrix.copy(mesh.matrixWorld)
+      reference.matrixWorld.copy(mesh.matrixWorld)
+      axleReferences.get(slot)?.push(reference)
+    }
+    for (const [slot, triangles] of sidewallSlots) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const reference = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial())
+      reference.name = `fom-wheel-${slot}-sidewall-reference`
+      reference.matrixAutoUpdate = false
+      reference.matrix.copy(mesh.matrixWorld)
+      reference.matrixWorld.copy(mesh.matrixWorld)
+      sidewallReferences.get(slot)?.push(reference)
+    }
+    for (const [slot, triangles] of treadSlots) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const reference = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial())
+      reference.name = `fom-wheel-${slot}-tread-reference`
+      reference.matrixAutoUpdate = false
+      reference.matrix.copy(mesh.matrixWorld)
+      reference.matrixWorld.copy(mesh.matrixWorld)
+      treadReferences.get(slot)?.push(reference)
+    }
+    for (const [slot, triangles] of slots) {
+      const geometry = buildTriangleSubsetGeometry(mesh.geometry, triangles)
+      if (!geometry) continue
+      const part = new THREE.Mesh(geometry, mesh.material)
+      part.name = `fom-wheel-${slot}-${mesh.name}`
+      part.position.copy(mesh.position)
+      part.quaternion.copy(mesh.quaternion)
+      part.scale.copy(mesh.scale)
+      part.castShadow = mesh.castShadow
+      part.receiveShadow = mesh.receiveShadow
+      part.frustumCulled = mesh.frustumCulled
+      parent.add(part)
+      rolling.get(slot)?.push(part)
+    }
+    parent.remove(mesh)
+    mesh.geometry.dispose()
+  }
+  root.updateMatrixWorld(true)
+
+  const centers = new Map<PlayerWheelSlot, THREE.Vector3>()
+  const axles = new Map<PlayerWheelSlot, THREE.Vector3>()
+  for (const [slot, parts] of rolling) {
+    if (!parts.length) continue
+    const references = axleReferences.get(slot) ?? []
+    const sidewalls = sidewallReferences.get(slot) ?? []
+    const treads = treadReferences.get(slot) ?? []
+    const tireReferences = references.length ? references : parts
+    const fallbackCenter = renderedBoxForObjects(tireReferences)
+      .getCenter(new THREE.Vector3())
+    // The authored front wheels include steering/toe in their cylindrical
+    // tread shape, so derive their axes from each tread independently.
+    // Rear sidewall normals are more stable and are already visually verified.
+    const axle = slot.endsWith('-front')
+      ? cylinderAxisFromSurfaceGeometry(treads)
+        ?? smallestPrincipalAxisForObjects(treads.length ? treads : tireReferences)
+      : areaWeightedSidewallAxisForObjects(sidewalls)
+        ?? smallestPrincipalAxisForObjects(tireReferences)
+    // Geometry-normal and principal-axis signs are arbitrary. Keep every
+    // wheel oriented toward
+    // world +X so equal spin deltas always mean the same travel direction,
+    // while preserving each wheel's authored camber.
+    if (axle.x < 0) axle.multiplyScalar(-1)
+    axles.set(slot, axle)
+    centers.set(
+      slot,
+      slot.endsWith('-front')
+        ? fittedWheelCenterForObjects(
+          treads.length ? treads : tireReferences,
+          axle,
+          fallbackCenter,
+        )
+        : fallbackCenter,
+    )
+  }
+  for (const references of axleReferences.values()) {
+    for (const reference of references) {
+      reference.geometry.dispose()
+      ;(reference.material as THREE.Material).dispose()
+    }
+  }
+  for (const references of sidewallReferences.values()) {
+    for (const reference of references) {
+      reference.geometry.dispose()
+      ;(reference.material as THREE.Material).dispose()
+    }
+  }
+  for (const references of treadReferences.values()) {
+    for (const reference of references) {
+      reference.geometry.dispose()
+      ;(reference.material as THREE.Material).dispose()
+    }
+  }
+  return createWheelRigsFromParts(
+    root,
+    rolling,
+    centers,
+    axles,
+  )
+}
+
+function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): PlayerWheelRig[] {
+  const strategy = wheelStrategyForPlayerCar(carId)
   if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
   if (strategy === 'saber-lion-named-v1') {
     const rigs: WheelRig[] = []
@@ -1823,21 +2282,42 @@ function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): Wheel
     }
     return rigs
   }
+  if (strategy === 'ferrari-f1-75-named-v1') return createFerrariF175WheelRigs(model)
   if (strategy === 'mercedes-w15-compressed-v1') return createMercedesW15WheelRigs(model)
-  if (
-    strategy === 'ferrari-material-v1'
-    || strategy === 'mclaren-material-v1'
-    || strategy === 'mercedes-material-v1'
-  ) {
-    return createMaterialWheelRigs(
-      model,
-      MATERIAL_WHEEL_PROFILES[carId as Exclude<PlayerCarId, 'redbull' | 'lion'>],
-    )
+  if (strategy === 'fom-2026-material-v1') return createFom2026WheelRigs(model)
+  if (strategy === 'mclaren-material-v1') {
+    return createMaterialWheelRigs(model, MATERIAL_WHEEL_PROFILES.mclaren)
   }
 
   // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
   // static wheels until their own mesh mapping and pivots have been verified.
   return []
+}
+
+export function updatePlayerWheelRigs(
+  rigs: readonly PlayerWheelRig[],
+  spinDelta: number,
+  steer: number,
+): void {
+  const steerQuat = new THREE.Quaternion().setFromAxisAngle(
+    WHEEL_STEER_AXIS,
+    -THREE.MathUtils.clamp(steer, -1, 1) * FRONT_STEER_MAX_RAD,
+  )
+  for (const rig of rigs) {
+    rig.spin += spinDelta
+    rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion)
+    if (rig.steerable) {
+      if (rig.steerComposition === 'premultiply') {
+        rig.steerPivot.pivot.quaternion.premultiply(steerQuat)
+      } else {
+        rig.steerPivot.pivot.quaternion.multiply(steerQuat)
+      }
+    }
+    const spinQuat = new THREE.Quaternion().setFromAxisAngle(rig.spinAxis, rig.spin)
+    for (const spinPivot of rig.spinPivots) {
+      spinPivot.pivot.quaternion.copy(spinPivot.baseQuaternion).multiply(spinQuat)
+    }
+  }
 }
 
 export function createCar(options: CarOptions = {}): CarBundle {
@@ -1851,7 +2331,9 @@ export function createCar(options: CarOptions = {}): CarBundle {
   let placeholderActive = true
   let activeModel: THREE.Object3D = placeholder.group
   let activeWheels: THREE.Mesh[] = placeholder.wheels
-  let wheelRigs: WheelRig[] = []
+  let wheelRigs: PlayerWheelRig[] = []
+  let activeFomLivery: FomSpecialLivery | null = null
+  let liveryElapsedMs = 0
   let steerOnlyRigs: SteerOnlyRig[] = []
   let smoothSteer = 0
 
@@ -1918,6 +2400,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
   loader.setDRACOLoader(getDracoLoader())
   let loadVersion = 0
   let requestedCarId: PlayerCarId | null = null
+  let activeCarId: PlayerCarId | null = null
   let disposed = false
 
   const disposeLoadedModel = (model: THREE.Object3D): void => {
@@ -1933,7 +2416,17 @@ export function createCar(options: CarOptions = {}): CarBundle {
   }
 
   const setCarModel = async (carId: PlayerCarId): Promise<void> => {
-    if (requestedCarId === carId || disposed) return
+    if (disposed) return
+    if (requestedCarId === carId) {
+      if (carId === 'audi' && activeCarId === carId && !placeholderActive) {
+        try {
+          await applyCustomLivery(group, activeModel)
+        } catch (error) {
+          console.warn('[F1S] custom livery refresh failed:', error)
+        }
+      }
+      return
+    }
     requestedCarId = carId
     const version = ++loadVersion
     const definition = playerCarById(carId)
@@ -1963,6 +2456,20 @@ export function createCar(options: CarOptions = {}): CarBundle {
       log(`parsed OK, meshes=${meshCount}, fitting…`)
 
       fitGltfToTrack(model)
+      if (definition.id === 'creator') {
+        applyFomThemeColor(model, readFomThemeColor())
+      } else if (definition.id === 'audi') {
+        applyFomThemeColor(model, '#ffffff')
+      }
+      const nextFomLivery = definition.livery === 'fom-special'
+        || definition.livery === 'fom-partner'
+        ? await applyFomSpecialLivery(
+          model,
+          undefined,
+          definition.livery === 'fom-partner' ? 'partners' : 'core',
+        )
+        : null
+      sharpenCarTextures(model)
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
@@ -1973,12 +2480,14 @@ export function createCar(options: CarOptions = {}): CarBundle {
       })
       const nextWheelRigs = createPlayerWheelRigs(carId, model)
       if (definition.wheelStrategy !== 'pending' && nextWheelRigs.length !== 4) {
+        nextFomLivery?.dispose()
         disposeLoadedModel(model)
         throw new Error(
           `${carId} wheel profile produced ${nextWheelRigs.length}/4 rigs; refusing an unsafe model swap`,
         )
       }
       if (disposed || version !== loadVersion) {
+        nextFomLivery?.dispose()
         disposeLoadedModel(model)
         return
       }
@@ -1988,13 +2497,32 @@ export function createCar(options: CarOptions = {}): CarBundle {
         disposePlaceholder(placeholder)
         placeholderActive = false
       } else {
+        activeFomLivery?.dispose()
+        clearCustomLivery(group, activeModel)
         group.remove(activeModel)
         disposeLoadedModel(activeModel)
       }
       group.add(model)
+      if (definition.id === 'audi') {
+        try {
+          await applyCustomLivery(group, model)
+        } catch (error) {
+          console.warn('[F1S] custom livery apply failed:', error)
+        }
+      }
+      if (disposed || version !== loadVersion) {
+        clearCustomLivery(group, model)
+        group.remove(model)
+        nextFomLivery?.dispose()
+        disposeLoadedModel(model)
+        return
+      }
       activeModel = model
+      activeCarId = carId
       activeWheels = []
       wheelRigs = nextWheelRigs
+      activeFomLivery = nextFomLivery
+      liveryElapsedMs = 0
       steerOnlyRigs = []
       smoothSteer = 0
       const bbox = new THREE.Box3().setFromObject(model)
@@ -2061,25 +2589,19 @@ export function createCar(options: CarOptions = {}): CarBundle {
   }
 
   const update = (dt: number, speed01: number, steer = 0): void => {
-    const spin = speed01 * WHEEL_SPIN_RATE * dt
+    liveryElapsedMs += dt * 1000
+    activeFomLivery?.update(liveryElapsedMs)
+    const spin = speed01 * PLAYER_WHEEL_SPIN_RATE * dt
     for (const w of activeWheels) w.rotation.x += spin
     smoothSteer += (THREE.MathUtils.clamp(steer, -1, 1) - smoothSteer) * Math.min(1, dt * 14)
 
-    const steerQuat = new THREE.Quaternion().setFromAxisAngle(
+    updatePlayerWheelRigs(wheelRigs, spin, smoothSteer)
+    const steerOnlyQuat = new THREE.Quaternion().setFromAxisAngle(
       WHEEL_STEER_AXIS,
       -smoothSteer * FRONT_STEER_MAX_RAD,
     )
-    for (const rig of wheelRigs) {
-      rig.spin += spin
-      if (rig.steerable) rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerQuat)
-      else rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion)
-      const spinQuat = new THREE.Quaternion().setFromAxisAngle(rig.spinAxis, rig.spin)
-      for (const spinPivot of rig.spinPivots) {
-        spinPivot.pivot.quaternion.copy(spinPivot.baseQuaternion).multiply(spinQuat)
-      }
-    }
     for (const rig of steerOnlyRigs) {
-      rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerQuat)
+      rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerOnlyQuat)
     }
 
     // Trails: tick down life; on death move to sentinel so they vanish.
@@ -2114,7 +2636,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
     sparkGeo.attributes.position.needsUpdate = true
   }
 
-  const movePivotToWorld = (ref: PivotRef, worldPosition: THREE.Vector3): void => {
+  const movePivotToWorld = (ref: PlayerWheelPivotRef, worldPosition: THREE.Vector3): void => {
     const pivot = ref.pivot
     const parent = pivot.parent
     if (!parent) return
@@ -2173,6 +2695,9 @@ export function createCar(options: CarOptions = {}): CarBundle {
   const dispose = (): void => {
     disposed = true
     loadVersion++
+    activeFomLivery?.dispose()
+    if (!placeholderActive) clearCustomLivery(group, activeModel)
+    activeFomLivery = null
     if (placeholderActive) disposePlaceholder(placeholder)
     else disposeLoadedModel(activeModel)
     trailGeo.dispose()

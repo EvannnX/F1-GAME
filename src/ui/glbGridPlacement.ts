@@ -47,14 +47,14 @@ const GRID_LABELS: Record<string, string> = {
   player: '玩家',
   ferrari: 'Ferrari',
   mercedes: 'Mercedes',
-  mclaren: 'McLaren',
+  creator: 'Creator',
   redbull: 'Red Bull',
 }
 const GRID_COLORS: Record<string, string> = {
   player: '#38e8ff',
   ferrari: '#ef233c',
   mercedes: '#d8f3dc',
-  mclaren: '#ff8c1a',
+  creator: '#57068c',
   redbull: '#335cff',
 }
 const MARKER_MIN_SCREEN_SCALE = 0.65

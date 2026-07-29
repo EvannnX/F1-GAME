@@ -2,9 +2,12 @@ import { storage } from '../utils/storage'
 import { formatLapTime } from '../utils/math'
 import type { Difficulty } from '../game/opponents'
 import type { InputMode } from '../input'
+import { createPageBackButton } from './backButton'
 
 export type CommentaryMode = 'off' | 'commentary' | 'coach'
 const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const COMPACT_30 = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const COMMENTARY_DISABLED_BUILD = OFFLINE_8M || COMPACT_30
 export type CameraMode = 'first' | 'third'
 
 export interface MenuStartConfig {
@@ -12,6 +15,7 @@ export interface MenuStartConfig {
   inputMode: InputMode
   performanceMode: boolean
   cameraMode: CameraMode
+  racingGuideEnabled: boolean
   /** Audio guidance during the race:
    *   - 'commentary' = pre-recorded race-announcer clips
    *   - 'coach'      = TTS driving-coach cues (turn / brake / push)
@@ -20,7 +24,7 @@ export interface MenuStartConfig {
 }
 
 export interface MenuController {
-  show: (onStart: (cfg: MenuStartConfig) => void) => void
+  show: (onStart: (cfg: MenuStartConfig) => void, onBack?: () => void) => void
   hide: () => void
 }
 
@@ -50,6 +54,11 @@ const QUALITY_LABELS: Record<'performance' | 'quality', { label: string; tag: st
 const CAMERA_LABELS: Record<CameraMode, { label: string; tag: string }> = {
   first: { label: '第一视角', tag: '座舱内' },
   third: { label: '第三视角', tag: '追车镜头' },
+}
+
+const RACING_GUIDE_LABELS: Record<'on' | 'off', { label: string; tag: string }> = {
+  on: { label: '开 启', tag: '显示最佳线路' },
+  off: { label: '关 闭', tag: '纯净赛道画面' },
 }
 
 const isCoarsePointer = (): boolean => {
@@ -101,7 +110,7 @@ function installMenuStyles(): void {
     .f1s-race-menu__heading {
       position: absolute;
       top: 24px;
-      left: clamp(20px, 5vw, 74px);
+      left: clamp(88px, 11vw, 150px);
       display: flex;
       min-width: min(370px, 54vw);
       height: 58px;
@@ -297,7 +306,7 @@ function installMenuStyles(): void {
 export function createMenu(): MenuController {
   let host: HTMLDivElement | null = null
 
-  const show = (onStart: (cfg: MenuStartConfig) => void): void => {
+  const show = (onStart: (cfg: MenuStartConfig) => void, onBack?: () => void): void => {
     hide()
     installMenuStyles()
     host = document.createElement('div')
@@ -367,10 +376,11 @@ export function createMenu(): MenuController {
 
     let chosenDiff: Difficulty = 'medium'
     let chosenInput: InputMode = isCoarsePointer() ? 'touch' : 'keyboard'
-    let chosenCommentary: CommentaryMode = OFFLINE_8M ? 'off' : 'commentary'
+    let chosenCommentary: CommentaryMode = COMMENTARY_DISABLED_BUILD ? 'off' : 'commentary'
     let chosenQuality: 'performance' | 'quality' =
       storage.getPerformanceMode() || isCoarsePointer() ? 'performance' : 'quality'
     let chosenCamera: CameraMode = 'third'
+    let chosenRacingGuide: 'on' | 'off' = 'on'
 
     const diffRow = makeRow(
       '难  度',
@@ -390,7 +400,7 @@ export function createMenu(): MenuController {
 
     const commentaryRow = makeRow(
       '语  音',
-      OFFLINE_8M ? ['off'] : ['off', 'commentary', 'coach'],
+      COMMENTARY_DISABLED_BUILD ? ['off'] : ['off', 'commentary', 'coach'],
       COMMENTARY_LABELS as Record<string, { label: string; tag: string }>,
       chosenCommentary,
       (k) => { chosenCommentary = k as CommentaryMode },
@@ -413,6 +423,14 @@ export function createMenu(): MenuController {
       CAMERA_LABELS,
       chosenCamera,
       (k) => { chosenCamera = k as CameraMode },
+    )
+
+    const racingGuideRow = makeRow(
+      '地 面 引 导 线',
+      ['on', 'off'],
+      RACING_GUIDE_LABELS,
+      chosenRacingGuide,
+      (k) => { chosenRacingGuide = k as 'on' | 'off' },
     )
 
     const btn = document.createElement('button')
@@ -451,6 +469,7 @@ export function createMenu(): MenuController {
         inputMode: chosenInput,
         performanceMode: chosenQuality === 'performance',
         cameraMode: chosenCamera,
+        racingGuideEnabled: chosenRacingGuide === 'on',
         commentaryMode: chosenCommentary,
       })
     }, { once: true })
@@ -462,13 +481,19 @@ export function createMenu(): MenuController {
 
     const settings = document.createElement('div')
     settings.className = 'f1s-race-menu__settings'
-    settings.append(diffRow, inputRow, commentaryRow, qualityRow, cameraRow)
+    settings.append(diffRow, inputRow, commentaryRow, qualityRow, cameraRow, racingGuideRow)
 
     const footer = document.createElement('div')
     footer.className = 'f1s-race-menu__footer'
     footer.append(bestEl, btn)
 
     host.append(topLine, title, brand, settings, footer)
+    if (onBack) {
+      host.appendChild(createPageBackButton(() => {
+        hide()
+        onBack()
+      }, '返回赛车选择'))
+    }
     document.body.appendChild(host)
     document.body.classList.add('f1s-race-menu-active')
   }

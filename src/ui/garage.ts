@@ -14,6 +14,26 @@ import {
   type PlayerCarId,
 } from '../data/playerCars'
 import { loadLocalAsset } from '../utils/localAsset'
+import { storage } from '../utils/storage'
+import {
+  applyFomThemeColor,
+  applyFomSpecialLivery,
+  FOM_LIVERY_SCHEMES,
+  FOM_THEME_COLORS,
+  preloadFomSpecialLivery,
+  readFomLiveryScheme,
+  readFomThemeColor,
+  selectFomLiveryScheme,
+  selectFomThemeColor,
+  type FomLiverySchemeId,
+  type FomSpecialLivery,
+} from '../render/fomSpecialLivery'
+import {
+  applyCustomLivery,
+  clearCustomLivery,
+  prepareCustomLogo,
+} from '../render/customLogo'
+import { createPageBackButton } from './backButton'
 
 export interface GarageController {
   destroy: () => void
@@ -58,7 +78,7 @@ function installStyles(): void {
       position: absolute;
       z-index: 2;
       top: 24px;
-      left: clamp(20px, 5vw, 74px);
+      left: clamp(88px, 11vw, 150px);
       display: flex;
       align-items: center;
       min-width: min(360px, 52vw);
@@ -144,6 +164,104 @@ function installStyles(): void {
     .f1s-garage__arrow--prev { left: clamp(18px, 6vw, 104px); }
     .f1s-garage__arrow--next { right: clamp(18px, 6vw, 104px); }
     .f1s-garage__arrow span { transform: translateY(-4px); }
+    .f1s-garage__liveries {
+      position: absolute;
+      z-index: 4;
+      left: clamp(22px, 5vw, 76px);
+      bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
+      display: grid;
+      grid-template-columns: repeat(4, minmax(104px, 1fr));
+      width: min(540px, 48vw);
+      gap: 7px;
+      transition: opacity .16s ease;
+    }
+    .f1s-garage__liveries[hidden] { display: none; }
+    .f1s-garage__colors {
+      grid-template-columns: repeat(5, minmax(96px, 1fr));
+      width: min(620px, 54vw);
+    }
+    .f1s-garage__livery {
+      display: flex;
+      min-width: 0;
+      height: 38px;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px;
+      border: 1px solid rgba(21, 23, 28, .22);
+      border-radius: 4px;
+      background: rgba(248, 249, 251, .9);
+      color: #252831;
+      font: 800 11px/1 Inter, "Helvetica Neue", Arial, sans-serif;
+      cursor: pointer;
+    }
+    .f1s-garage__livery:hover,
+    .f1s-garage__livery:focus-visible {
+      border-color: #d41222;
+      outline: none;
+    }
+    .f1s-garage__livery.is-active {
+      border-color: #d41222;
+      background: #fff;
+      box-shadow: inset 0 -3px #d41222, 0 5px 14px rgba(29, 31, 38, .14);
+    }
+    .f1s-garage__livery-swatch {
+      flex: 0 0 auto;
+      width: 24px;
+      height: 16px;
+      border: 1px solid rgba(0, 0, 0, .18);
+      background: var(--livery-primary);
+      box-shadow:
+        inset -7px 0 var(--livery-accent-a),
+        inset -13px 0 var(--livery-accent-b);
+    }
+    .f1s-garage__livery-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .f1s-garage__diy {
+      position: absolute;
+      z-index: 4;
+      left: clamp(22px, 5vw, 76px);
+      bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px;
+      border: 1px solid rgba(21, 23, 28, .16);
+      border-radius: 6px;
+      background: rgba(248, 249, 251, .88);
+      box-shadow: 0 8px 22px rgba(27, 30, 37, .16);
+      backdrop-filter: blur(8px);
+    }
+    .f1s-garage__diy[hidden] { display: none; }
+    .f1s-garage__upload,
+    .f1s-garage__clear-logo {
+      min-height: 42px;
+      padding: 0 17px;
+      border: 0;
+      border-radius: 5px;
+      background: #b80f1d;
+      color: #fff;
+      font: 850 14px/1 Inter, "Helvetica Neue", Arial, sans-serif;
+      cursor: pointer;
+    }
+    .f1s-garage__clear-logo { background: #4e525b; }
+    .f1s-garage__logo-status {
+      max-width: 150px;
+      color: #555963;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .f1s-garage__logo-preview {
+      width: 42px;
+      height: 42px;
+      border: 2px solid #fff;
+      border-radius: 5px;
+      background: #d9dbe0;
+      object-fit: cover;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .18);
+    }
     .f1s-garage__footer {
       position: absolute;
       z-index: 3;
@@ -193,6 +311,15 @@ function installStyles(): void {
       pointer-events: none;
       transition: opacity .28s ease;
     }
+    .f1s-garage--capture .f1s-garage__topline,
+    .f1s-garage--capture .f1s-garage__heading,
+    .f1s-garage--capture .f1s-garage__identity,
+    .f1s-garage--capture .f1s-garage__arrow,
+    .f1s-garage--capture .f1s-garage__liveries,
+    .f1s-garage--capture .f1s-garage__diy,
+    .f1s-garage--capture .f1s-garage__footer {
+      display: none;
+    }
     @media (max-height: 620px) {
       .f1s-garage__heading {
         top: 14px;
@@ -213,7 +340,31 @@ function installStyles(): void {
       .f1s-garage__model { margin-top: 4px; font-size: 11px; }
       .f1s-garage__arrow { width: 56px; height: 56px; font-size: 46px; }
       .f1s-garage__footer { right: 18px; bottom: 14px; }
+      .f1s-garage__diy { left: 18px; bottom: 14px; padding: 7px; }
+      .f1s-garage__upload,
+      .f1s-garage__clear-logo { min-height: 38px; padding: 0 12px; font-size: 12px; }
+      .f1s-garage__logo-status { display: none; }
       .f1s-garage__continue { min-width: 240px; min-height: 56px; font-size: 18px; }
+      .f1s-garage__liveries {
+        left: 18px;
+        bottom: 14px;
+        width: min(500px, 54vw);
+        grid-template-columns: repeat(4, minmax(92px, 1fr));
+      }
+      .f1s-garage__livery { height: 32px; padding: 0 7px; font-size: 10px; }
+    }
+    @media (max-width: 900px) {
+      .f1s-garage__liveries {
+        right: 14px;
+        bottom: max(92px, calc(env(safe-area-inset-bottom) + 84px));
+        left: 14px;
+        display: flex;
+        width: auto;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .f1s-garage__liveries::-webkit-scrollbar { display: none; }
+      .f1s-garage__livery { flex: 0 0 112px; }
     }
     @media (prefers-reduced-motion: reduce) {
       .f1s-garage__arrow,
@@ -270,13 +421,21 @@ function disposeModel(model: THREE.Object3D): void {
   })
 }
 
-export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): GarageController {
+export function showGarageSelection(
+  onConfirm: (id: PlayerCarId) => void,
+  onBack?: () => void,
+): GarageController {
   installStyles()
+  const params = new URLSearchParams(window.location.search)
+  const captureMode = params.has('specialLiveryCapture')
+  const captureYawDeg = THREE.MathUtils.clamp(Number(params.get('captureYaw') ?? 0), -18, 18)
+  const capturePitchDeg = THREE.MathUtils.clamp(Number(params.get('capturePitch') ?? 8), 3, 18)
   const mobileGpu = window.matchMedia('(pointer: coarse)').matches
 
   let selectedIndex = Math.max(0, PLAYER_CARS.findIndex((car) => car.id === readSelectedPlayerCar()))
   const host = document.createElement('section')
   host.className = 'f1s-garage'
+  host.classList.toggle('f1s-garage--capture', captureMode)
   host.setAttribute('aria-label', '赛车车库')
   host.innerHTML = `
     <div class="f1s-garage__topline"></div>
@@ -290,6 +449,15 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     </div>
     <button class="f1s-garage__arrow f1s-garage__arrow--prev" type="button" aria-label="上一辆赛车" title="上一辆赛车"><span>‹</span></button>
     <button class="f1s-garage__arrow f1s-garage__arrow--next" type="button" aria-label="下一辆赛车" title="下一辆赛车"><span>›</span></button>
+    <div class="f1s-garage__liveries f1s-garage__colors" aria-label="创变者纯色选择" hidden></div>
+    <div class="f1s-garage__liveries" aria-label="特涂配色选择" hidden></div>
+    <div class="f1s-garage__diy" hidden>
+      <input class="f1s-garage__logo-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+      <button class="f1s-garage__upload" type="button">上传 DIY 图片</button>
+      <button class="f1s-garage__clear-logo" type="button">清除</button>
+      <img class="f1s-garage__logo-preview" alt="当前上传图片预览" hidden>
+      <span class="f1s-garage__logo-status" aria-live="polite"></span>
+    </div>
     <div class="f1s-garage__footer">
       <div class="f1s-garage__count"></div>
       <button class="f1s-garage__continue" type="button">确认赛车</button>
@@ -404,9 +572,14 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   }
   loader.setDRACOLoader(dracoLoader)
   loader.setMeshoptDecoder(MeshoptDecoder)
+  void preloadFomSpecialLivery(renderer).catch((error) => {
+    console.warn('[F1S] FOM livery preload failed:', error)
+  })
 
   const loaded = new Map<PlayerCarId, THREE.Group>()
   const loading = new Map<PlayerCarId, Promise<THREE.Group>>()
+  const fomLiveries = new Map<PlayerCarId, FomSpecialLivery>()
+  const modelBytes = new Map<string, Promise<ArrayBuffer>>()
   let currentModel: THREE.Group | null = null
   let destroyed = false
 
@@ -417,16 +590,22 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     const target = new THREE.Vector3(0, box.min.y + size.y * 0.46, 0)
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const fitDistance = sphere.radius / Math.max(0.1, Math.sin(halfVerticalFov)) * 1.12
-    const displayDistance = fitDistance * 0.7
-    const viewDirection = new THREE.Vector3(0.58, 0.24, 0.78).normalize()
+    const displayDistance = fitDistance * (captureMode ? 0.42 : 0.7)
+    const viewDirection = captureMode
+      ? new THREE.Vector3(
+        Math.sin(THREE.MathUtils.degToRad(captureYawDeg)),
+        Math.tan(THREE.MathUtils.degToRad(capturePitchDeg)),
+        Math.cos(THREE.MathUtils.degToRad(captureYawDeg)),
+      ).normalize()
+      : new THREE.Vector3(0.58, 0.24, 0.78).normalize()
 
     controls.target.copy(target)
     camera.position.copy(target).addScaledVector(viewDirection, displayDistance)
     camera.near = Math.max(0.05, displayDistance * 0.02)
     camera.far = Math.max(80, fitDistance * 8)
     camera.updateProjectionMatrix()
-    controls.minDistance = fitDistance * 0.66
-    controls.maxDistance = fitDistance * 1.55
+    controls.minDistance = captureMode ? displayDistance * 0.95 : fitDistance * 0.66
+    controls.maxDistance = captureMode ? displayDistance * 1.05 : fitDistance * 1.55
     controls.update()
   }
 
@@ -436,14 +615,46 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     const pending = loading.get(definition.id)
     if (pending) return pending
     const promise = (async (): Promise<THREE.Group> => {
-      const modelBytes = await loadLocalAsset(definition.url)
+      let bytesPromise = modelBytes.get(definition.url)
+      if (!bytesPromise) {
+        bytesPromise = loadLocalAsset(definition.url)
+        modelBytes.set(definition.url, bytesPromise)
+      }
+      const bytes = await bytesPromise
       const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
-        loader.parse(modelBytes, '', (result) => resolve(result as unknown as { scene: THREE.Group }), reject)
+        loader.parse(bytes, '', (result) => resolve(result as unknown as { scene: THREE.Group }), reject)
       })
       fitForGarage(gltf.scene, definition)
+      if (definition.id === 'creator') {
+        applyFomThemeColor(gltf.scene, readFomThemeColor())
+      } else if (definition.id === 'audi') {
+        applyFomThemeColor(gltf.scene, '#ffffff')
+      }
+      if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        fomLiveries.set(
+          definition.id,
+          await applyFomSpecialLivery(
+            gltf.scene,
+            renderer,
+            definition.livery === 'fom-partner' ? 'partners' : 'core',
+          ),
+        )
+      }
       if (destroyed) {
         disposeModel(gltf.scene)
         throw new Error('Garage closed before the car finished loading')
+      }
+      for (const sibling of PLAYER_CARS) {
+        if (sibling.id === definition.id || sibling.url !== definition.url) continue
+        const oldLivery = fomLiveries.get(sibling.id)
+        oldLivery?.dispose()
+        fomLiveries.delete(sibling.id)
+        const oldModel = loaded.get(sibling.id)
+        if (oldModel) {
+          oldModel.removeFromParent()
+          disposeModel(oldModel)
+          loaded.delete(sibling.id)
+        }
       }
       loaded.set(definition.id, gltf.scene)
       loading.delete(definition.id)
@@ -460,6 +671,94 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   const nameEl = host.querySelector<HTMLDivElement>('.f1s-garage__name')!
   const modelEl = host.querySelector<HTMLDivElement>('.f1s-garage__model')!
   const countEl = host.querySelector<HTMLDivElement>('.f1s-garage__count')!
+  const colorsEl = host.querySelector<HTMLDivElement>('.f1s-garage__colors')!
+  const liveriesEl = host.querySelector<HTMLDivElement>(
+    '.f1s-garage__liveries:not(.f1s-garage__colors)',
+  )!
+  const diyEl = host.querySelector<HTMLDivElement>('.f1s-garage__diy')!
+  const logoInput = host.querySelector<HTMLInputElement>('.f1s-garage__logo-input')!
+  const uploadLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__upload')!
+  const clearLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__clear-logo')!
+  const logoStatus = host.querySelector<HTMLSpanElement>('.f1s-garage__logo-status')!
+  const logoPreview = host.querySelector<HTMLImageElement>('.f1s-garage__logo-preview')!
+  const storedLogo = storage.getCustomLogo()
+  if (storedLogo) {
+    logoPreview.src = storedLogo
+    logoPreview.hidden = false
+  }
+  logoStatus.textContent = storedLogo ? '已应用自定义图片' : 'PNG / JPG / WebP'
+  let selectedFomColor = readFomThemeColor()
+  const colorButtons = new Map<string, HTMLButtonElement>()
+  const updateColorButtons = (): void => {
+    for (const [hex, button] of colorButtons) {
+      const active = hex === selectedFomColor
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-pressed', String(active))
+    }
+  }
+  for (const color of FOM_THEME_COLORS) {
+    const button = document.createElement('button')
+    button.className = 'f1s-garage__livery'
+    button.type = 'button'
+    button.setAttribute('aria-label', `使用${color.name}`)
+    button.style.setProperty('--livery-primary', color.hex)
+    button.style.setProperty('--livery-accent-a', color.hex)
+    button.style.setProperty('--livery-accent-b', color.hex)
+    const swatch = document.createElement('span')
+    swatch.className = 'f1s-garage__livery-swatch'
+    const label = document.createElement('span')
+    label.className = 'f1s-garage__livery-name'
+    label.textContent = color.name
+    button.append(swatch, label)
+    button.addEventListener('click', () => {
+      selectedFomColor = color.hex
+      selectFomThemeColor(color.hex)
+      const creatorModel = loaded.get('creator')
+      if (creatorModel) applyFomThemeColor(creatorModel, color.hex)
+      updateColorButtons()
+      renderer.shadowMap.needsUpdate = true
+    })
+    colorButtons.set(color.hex, button)
+    colorsEl.appendChild(button)
+  }
+  updateColorButtons()
+  let selectedFomScheme = readFomLiveryScheme()
+  const liveryButtons = new Map<FomLiverySchemeId, HTMLButtonElement>()
+  const updateLiveryButtons = (): void => {
+    for (const [id, button] of liveryButtons) {
+      const active = id === selectedFomScheme
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-pressed', String(active))
+    }
+  }
+  for (const scheme of FOM_LIVERY_SCHEMES) {
+    const button = document.createElement('button')
+    button.className = 'f1s-garage__livery'
+    button.type = 'button'
+    button.setAttribute('aria-label', `使用${scheme.name}配色`)
+    button.style.setProperty('--livery-primary', scheme.primary ?? '#57068c')
+    button.style.setProperty('--livery-accent-a', scheme.accentA ?? '#57068c')
+    button.style.setProperty('--livery-accent-b', scheme.accentB ?? '#57068c')
+    const swatch = document.createElement('span')
+    swatch.className = 'f1s-garage__livery-swatch'
+    const label = document.createElement('span')
+    label.className = 'f1s-garage__livery-name'
+    label.textContent = scheme.name
+    button.append(swatch, label)
+    button.addEventListener('click', () => {
+      selectedFomScheme = scheme.id
+      selectFomLiveryScheme(scheme.id)
+      const selectedDefinition = PLAYER_CARS[selectedIndex]
+      if (selectedDefinition.livery === 'fom-special' || selectedDefinition.livery === 'fom-partner') {
+        fomLiveries.get(selectedDefinition.id)?.setScheme(scheme.id)
+      }
+      updateLiveryButtons()
+      renderer.shadowMap.needsUpdate = true
+    })
+    liveryButtons.set(scheme.id, button)
+    liveriesEl.appendChild(button)
+  }
+  updateLiveryButtons()
   let selectionVersion = 0
   const showSelection = (index: number): void => {
     selectedIndex = (index + PLAYER_CARS.length) % PLAYER_CARS.length
@@ -471,15 +770,46 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     nameEl.textContent = definition.name
     modelEl.textContent = definition.model
     countEl.textContent = `${selectedIndex + 1} / ${PLAYER_CARS.length}`
+    colorsEl.hidden = definition.id !== 'creator'
+    liveriesEl.hidden = definition.livery !== 'fom-special'
+      && definition.livery !== 'fom-partner'
+    diyEl.hidden = definition.id !== 'audi'
     controls.autoRotate = false
+    if (currentModel) {
+      clearCustomLivery(scene, currentModel)
+      currentModel.visible = false
+    }
     void loadCar(definition).then((model) => {
       if (destroyed || version !== selectionVersion) return
-      if (currentModel) currentModel.visible = false
       currentModel = model
       currentModel.visible = true
       if (!currentModel.parent) scene.add(currentModel)
+      if (definition.id === 'creator') {
+        applyFomThemeColor(currentModel, selectedFomColor)
+      }
+      if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        fomLiveries.get(definition.id)?.setScheme(selectedFomScheme)
+      }
+      if (definition.id === 'audi') {
+        void applyCustomLivery(scene, currentModel).then((applied) => {
+          if (destroyed || version !== selectionVersion) return
+          logoStatus.textContent = applied
+            ? '自定义车衣已贴合'
+            : storage.getCustomLogo()
+              ? '图片无法贴合当前底模'
+              : 'PNG / JPG / WebP'
+        }).catch((error) => {
+          console.warn('[F1S] garage custom livery failed:', error)
+        })
+      }
       frameModel(currentModel)
       renderer.shadowMap.needsUpdate = true
+      if (captureMode) {
+        window.requestAnimationFrame(() => {
+          renderer.render(scene, camera)
+          document.body.dataset.captureReady = 'true'
+        })
+      }
     }).catch((error) => {
       console.warn('[F1S] garage car load failed:', definition.id, error)
     })
@@ -489,6 +819,41 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
   const next = (): void => showSelection(selectedIndex + 1)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--prev')!.addEventListener('click', previous)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--next')!.addEventListener('click', next)
+
+  uploadLogoButton.addEventListener('click', () => logoInput.click())
+  logoInput.addEventListener('change', () => {
+    const file = logoInput.files?.[0]
+    logoInput.value = ''
+    if (!file) return
+    logoStatus.textContent = '正在处理…'
+    void prepareCustomLogo(file).then(async (dataUrl) => {
+      storage.setCustomLogo(dataUrl)
+      logoPreview.src = dataUrl
+      logoPreview.hidden = false
+      const audiIndex = PLAYER_CARS.findIndex((car) => car.id === 'audi')
+      if (selectedIndex !== audiIndex) {
+        logoStatus.textContent = '正在切换 Audi DIY…'
+        showSelection(audiIndex)
+        return
+      }
+      const applied = currentModel
+        ? await applyCustomLivery(scene, currentModel, dataUrl)
+        : false
+      logoStatus.textContent = applied ? '自定义车衣已贴合' : '正在加载 Audi DIY…'
+      renderer.shadowMap.needsUpdate = true
+    }).catch((error) => {
+      logoStatus.textContent = error instanceof Error ? error.message : '上传失败'
+      console.warn('[F1S] custom logo upload failed:', error)
+    })
+  })
+  clearLogoButton.addEventListener('click', () => {
+    storage.setCustomLogo(null)
+    logoPreview.removeAttribute('src')
+    logoPreview.hidden = true
+    if (currentModel) clearCustomLivery(scene, currentModel)
+    logoStatus.textContent = '已清除'
+    renderer.shadowMap.needsUpdate = true
+  })
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === 'ArrowLeft') previous()
@@ -503,6 +868,7 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     frame = window.requestAnimationFrame(render)
     if (mobileGpu && now - lastRenderAt < 1000 / 30) return
     lastRenderAt = now
+    fomLiveries.get(PLAYER_CARS[selectedIndex].id)?.update(now)
     controls.update()
     renderer.render(scene, camera)
   }
@@ -524,8 +890,11 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
   }
   const preloadRemaining = (): void => {
+    const selectedDefinition = PLAYER_CARS[selectedIndex]
+    const scheduledUrls = new Set([selectedDefinition.url])
     for (const definition of PLAYER_CARS) {
-      if (definition.id === PLAYER_CARS[selectedIndex].id) continue
+      if (definition.id === selectedDefinition.id || scheduledUrls.has(definition.url)) continue
+      scheduledUrls.add(definition.url)
       void loadCar(definition).catch(() => { /* Loaded on demand if idle preload fails. */ })
     }
   }
@@ -540,6 +909,9 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     window.removeEventListener('resize', resize)
     window.removeEventListener('keydown', onKeyDown)
     controls.dispose()
+    if (currentModel) clearCustomLivery(scene, currentModel)
+    for (const livery of fomLiveries.values()) livery.dispose()
+    fomLiveries.clear()
     for (const model of loaded.values()) disposeModel(model)
     loaded.clear()
     floor.geometry.dispose()
@@ -551,6 +923,13 @@ export function showGarageSelection(onConfirm: (id: PlayerCarId) => void): Garag
     renderer.dispose()
     document.body.classList.remove('f1s-garage-active')
     host.remove()
+  }
+
+  if (onBack) {
+    host.appendChild(createPageBackButton(() => {
+      destroy()
+      onBack()
+    }, '返回玩法指南'))
   }
 
   host.querySelector<HTMLButtonElement>('.f1s-garage__continue')!.addEventListener('click', () => {

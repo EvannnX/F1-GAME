@@ -1,3 +1,7 @@
+declare const __F1TI_USE_EMBEDDED_TRACK_TEXTURES__: boolean
+declare const __F1TI_COMPRESSED_TRACK_TEXTURES__: boolean
+declare const __F1TI_LITE_SINGLE_CAR__: boolean
+
 declare module '*.glb?url' {
   const url: string
   export default url
@@ -23,6 +27,22 @@ declare module '*.png?url' {
   export default url
 }
 declare module '*.png' {
+  const url: string
+  export default url
+}
+declare module '*.jpg?url' {
+  const url: string
+  export default url
+}
+declare module '*.jpg' {
+  const url: string
+  export default url
+}
+declare module '*.svg?url' {
+  const url: string
+  export default url
+}
+declare module '*.svg' {
   const url: string
   export default url
 }

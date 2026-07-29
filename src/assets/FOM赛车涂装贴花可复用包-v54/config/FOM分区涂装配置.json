@@ -1,0 +1,99 @@
+{
+  "version": 4,
+  "preview": "v54",
+  "implementation": "same-surface-material-shader",
+  "decalGeometryUsed": false,
+  "referenceDirection": [
+    "红色主体、白色结构分区、黑色下部气动区域",
+    "银黑主体、青色连续结构线",
+    "橙色主体、黑色侧箱与鼻锥主轴切面",
+    "蓝色主体、白色鼻锥肩部、深色上侧箭面",
+    "紫色主体、金色侧面扫线、深色下部结构",
+    "绿色主体、黑色斜切侧箱、荧光绿结构边",
+    "银白主体、红色中部脊线、黑色下部结构"
+  ],
+  "defaultScheme": "clean",
+  "placement": {
+    "sideStructuralPanel": {
+      "centerY": 0.48,
+      "centerZ": 0.25,
+      "widthAlongCar": 4.2,
+      "height": 0.62,
+      "designRule": "直接在原车身材质上按侧箱体块和下部气动结构分色；边界避开现有 Logo"
+    },
+    "noseStructuralPanel": {
+      "centerX": 0,
+      "centerY": 0.3,
+      "centerZ": 1.45,
+      "width": 0.76,
+      "length": 2.3,
+      "designRule": "直接在原车身材质上沿鼻锥主轴和左右肩线分色；Logo 位于完整色块内部"
+    }
+  },
+  "schemes": [
+    {
+      "id": "clean",
+      "name": "纯色",
+      "primary": "current",
+      "accentsVisible": false
+    },
+    {
+      "id": "classic",
+      "name": "红白经典",
+      "primary": "#e10600",
+      "secondary": ["#ffffff", "#161719"],
+      "layout": "红色主体、白色鼻锥肩部、黑色侧箱下部"
+    },
+    {
+      "id": "silver",
+      "name": "银黑青线",
+      "primary": "#151515",
+      "secondary": ["#50565c", "#00d9d2"],
+      "layout": "黑色主体、银灰结构面、连续青色边界线"
+    },
+    {
+      "id": "orange",
+      "name": "橙黑切面",
+      "primary": "#ff8700",
+      "secondary": ["#101214", "#00b8a9"],
+      "layout": "橙色主体、黑色侧箱与鼻锥主轴、青绿色细边"
+    },
+    {
+      "id": "blueArrow",
+      "name": "蓝白箭锋",
+      "primary": "#0067ff",
+      "secondary": ["#f4f7ff", "#111820"],
+      "layout": "蓝色主体、白色鼻锥外肩、深色上侧箭面"
+    },
+    {
+      "id": "violetGold",
+      "name": "紫金翼面",
+      "primary": "#57068c",
+      "secondary": ["#ffcc33", "#17131d"],
+      "layout": "NYU 紫主体、金色侧面扫线与鼻锥导轨、深色侧箱下部"
+    },
+    {
+      "id": "greenCut",
+      "name": "绿黑渐切",
+      "primary": "#00a86b",
+      "secondary": ["#111513", "#dfff32"],
+      "layout": "绿色主体、黑色斜切侧箱、荧光绿斜切边与鼻锥边"
+    },
+    {
+      "id": "silverSpine",
+      "name": "银白红脊",
+      "primary": "#d9d9d6",
+      "secondary": ["#e10600", "#151515"],
+      "layout": "银白主体、红色侧面中段与鼻锥主脊、黑色侧箱下部"
+    }
+  ],
+  "protected": [
+    "分区与原车身共用同一表面，不生成隆起几何",
+    "所有 Logo 使用独立更高显示层，不会被分区遮挡",
+    "侧面 Logo 不被分色边界穿过",
+    "前部 ZJUAP 不被分色边界穿过",
+    "前部创变者图案不被分色边界穿过",
+    "轮胎、轮毂与碳纤维材质",
+    "原始车身纹理"
+  ]
+}

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FOM · 抖音 AI 创变者贴花</title>
+    <link rel="stylesheet" href="./wing-preview.css?v=51" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./vendor/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main class="preview-shell">
+      <canvas id="preview-canvas" aria-label="FOM 赛车抖音 AI 创变者贴花预览"></canvas>
+
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">F1 2026 FOM / DECAL LAB</p>
+          <h1>抖音 AI 创变者贴花</h1>
+        </div>
+        <div class="status"><i></i> COLOR-ONLY GLB</div>
+      </header>
+
+      <aside class="info-card">
+        <p class="index">THREE-SURFACE DECAL</p>
+        <h2>侧面 + 后部</h2>
+        <p>白色 Logo 只投射到紫色车身外表面。轮胎材质、车身纹理和原始几何保持不变。</p>
+        <dl>
+          <div><dt>MODEL</dt><dd>FOM NYU Purple</dd></div>
+          <div><dt>SURFACE</dt><dd>左右侧 / 后部外表面</dd></div>
+          <div><dt>REAR</dt><dd>ChatGPT Image Jul 26</dd></div>
+          <div><dt>FRONT</dt><dd>ZJUAP + 创变者独立图案</dd></div>
+          <div><dt>SIDES</dt><dd>主 Logo + DeltaX + 6 组官方赞助商</dd></div>
+        </dl>
+      </aside>
+
+      <aside class="theme-color-control" aria-label="实时切换车身主题颜色">
+        <div class="theme-color-heading">
+          <span>BODY COLOR · 主体颜色</span>
+          <output id="theme-color-name">NYU 紫</output>
+        </div>
+        <div class="theme-color-swatches">
+          <button type="button" class="is-active" data-theme-color="#57068c" data-theme-name="NYU 紫" style="--swatch:#57068c"><i></i><span>NYU 紫</span></button>
+          <button type="button" data-theme-color="#e10600" data-theme-name="竞速红" style="--swatch:#e10600"><i></i><span>竞速红</span></button>
+          <button type="button" data-theme-color="#0067ff" data-theme-name="电光蓝" style="--swatch:#0067ff"><i></i><span>电光蓝</span></button>
+          <button type="button" data-theme-color="#ff8700" data-theme-name="活力橙" style="--swatch:#ff8700"><i></i><span>活力橙</span></button>
+          <button type="button" data-theme-color="#ffd400" data-theme-name="亮黄" style="--swatch:#ffd400"><i></i><span>亮黄</span></button>
+          <button type="button" data-theme-color="#00a86b" data-theme-name="翡翠绿" style="--swatch:#00a86b"><i></i><span>翡翠绿</span></button>
+          <button type="button" data-theme-color="#00b8d9" data-theme-name="青色" style="--swatch:#00b8d9"><i></i><span>青色</span></button>
+          <button type="button" data-theme-color="#d000ff" data-theme-name="品红" style="--swatch:#d000ff"><i></i><span>品红</span></button>
+          <button type="button" data-theme-color="#d9d9d6" data-theme-name="银白" style="--swatch:#d9d9d6"><i></i><span>银白</span></button>
+          <button type="button" data-theme-color="#151515" data-theme-name="哑光黑" style="--swatch:#151515"><i></i><span>哑光黑</span></button>
+        </div>
+        <div class="livery-scheme-heading">
+          <span>分区涂装</span>
+          <output id="livery-scheme-name">纯色</output>
+        </div>
+        <div class="livery-scheme-buttons">
+          <button type="button" class="is-active" data-livery-scheme="clean">纯色</button>
+          <button type="button" data-livery-scheme="classic">红白经典</button>
+          <button type="button" data-livery-scheme="silver">银黑青线</button>
+          <button type="button" data-livery-scheme="orange">橙黑切面</button>
+          <button type="button" data-livery-scheme="blueArrow">蓝白箭锋</button>
+          <button type="button" data-livery-scheme="violetGold">紫金翼面</button>
+          <button type="button" data-livery-scheme="greenCut">绿黑渐切</button>
+          <button type="button" data-livery-scheme="silverSpine">银白红脊</button>
+        </div>
+      </aside>
+
+      <aside class="decal-panel" aria-label="FOM 贴花调整面板">
+        <header>
+          <div>
+            <p class="eyebrow">DECAL CONTROL</p>
+            <h3>贴花调整</h3>
+          </div>
+          <button type="button" id="gui-collapse" aria-label="收起调整面板">−</button>
+        </header>
+
+        <div class="gui-body">
+          <div class="decal-targets" aria-label="选择要调整的贴花">
+            <button type="button" data-decal-target="frontCreatorSymbol">前部创变者</button>
+            <button type="button" data-decal-target="frontZjuap">前部 ZJUAP</button>
+            <button type="button" data-decal-target="rear" class="is-active">后部贴花</button>
+            <button type="button" data-decal-target="right">右侧贴花</button>
+            <button type="button" data-decal-target="left">左侧镜像</button>
+            <button type="button" data-decal-target="deltaRight">右侧 DeltaX</button>
+            <button type="button" data-decal-target="deltaLeft">左侧 DeltaX</button>
+            <button type="button" data-decal-target="sponsorDouyinRight">右·赞助 1</button>
+            <button type="button" data-decal-target="sponsorDouyinLeft">左·赞助 1</button>
+            <button type="button" data-decal-target="sponsorDownload3Right">右·赞助 2</button>
+            <button type="button" data-decal-target="sponsorDownload3Left">左·赞助 2</button>
+            <button type="button" data-decal-target="sponsorJointRight">右·联合主办</button>
+            <button type="button" data-decal-target="sponsorJointLeft">左·联合主办</button>
+            <button type="button" data-decal-target="sponsorBlueRight">右·蓝色标志</button>
+            <button type="button" data-decal-target="sponsorBlueLeft">左·蓝色标志</button>
+            <button type="button" data-decal-target="sponsorTraeRight">右·TRAE</button>
+            <button type="button" data-decal-target="sponsorTraeLeft">左·TRAE</button>
+            <button type="button" data-decal-target="sponsorJinqiuRight">右·锦秋基金</button>
+            <button type="button" data-decal-target="sponsorJinqiuLeft">左·锦秋基金</button>
+          </div>
+
+          <section>
+            <h4>大小</h4>
+            <label class="gui-row">
+              <span>整体</span>
+              <input id="decal-scale" type="range" min="0.2" max="2.5" step="0.01" value="1.49" />
+              <output data-output="decal-scale">1.49</output>
+            </label>
+            <label class="gui-row">
+              <span>宽度</span>
+              <input id="decal-width" type="range" min="0.2" max="2.5" step="0.01" value="0.64" />
+              <output data-output="decal-width">0.64</output>
+            </label>
+            <label class="gui-row">
+              <span>高度</span>
+              <input id="decal-height" type="range" min="0.2" max="2.5" step="0.01" value="1.22" />
+              <output data-output="decal-height">1.22</output>
+            </label>
+          </section>
+
+          <section>
+            <h4>移动（兼容旧配色车：X 左右 / Y 高度 / Z 前后）</h4>
+            <label class="gui-row">
+              <span>X</span>
+              <input id="decal-x" type="range" min="-1.1" max="1.1" step="0.005" value="0" />
+              <output data-output="decal-x">0.000</output>
+            </label>
+            <label class="gui-row">
+              <span>Y</span>
+              <input id="decal-y" type="range" min="0" max="1.3" step="0.002" value="0.93" />
+              <output data-output="decal-y">0.930</output>
+            </label>
+            <label class="gui-row">
+              <span>Z</span>
+              <input id="decal-z" type="range" min="-2.75" max="2.9" step="0.005" value="-2.75" />
+              <output data-output="decal-z">-2.7500</output>
+            </label>
+          </section>
+
+          <section>
+            <h4>方向（多轴）</h4>
+            <label class="gui-row">
+              <span>旋转 X</span>
+              <input id="decal-rotation-x" type="range" min="-180" max="180" step="1" value="0" />
+              <output data-output="decal-rotation-x">0°</output>
+            </label>
+            <label class="gui-row">
+              <span>旋转 Y</span>
+              <input id="decal-rotation-y" type="range" min="-180" max="180" step="1" value="0" />
+              <output data-output="decal-rotation-y">0°</output>
+            </label>
+            <label class="gui-row">
+              <span>旋转 Z</span>
+              <input id="decal-rotation-z" type="range" min="-180" max="180" step="1" value="0" />
+              <output data-output="decal-rotation-z">0°</output>
+            </label>
+            <div class="gui-buttons">
+              <button type="button" id="flip-horizontal">水平翻转</button>
+              <button type="button" id="flip-vertical">垂直翻转</button>
+              <button type="button" id="flip-facing" class="is-active">正反切换</button>
+              <button type="button" id="snap-surface">吸附当前外表面</button>
+              <button type="button" id="mirror-opposite">同步镜像到左侧</button>
+            </div>
+          </section>
+
+          <footer>
+            <span id="facing-status">等待模型加载</span>
+            <button type="button" id="decal-reset">重置参数</button>
+          </footer>
+        </div>
+      </aside>
+
+      <nav class="controls" aria-label="预览控制">
+        <button type="button" data-view="car">整车视图</button>
+        <button type="button" data-view="front">前部视图</button>
+        <button type="button" data-view="rear" class="is-active">后部视图</button>
+        <button type="button" data-view="right">右侧视图</button>
+        <button type="button" data-view="left">左侧视图</button>
+        <span></span>
+        <button type="button" id="decal-toggle" class="is-active">贴图开启</button>
+        <button type="button" id="rear-light-toggle" class="is-active">尾灯闪烁</button>
+      </nav>
+
+      <div class="loading" id="loading">
+        <div class="loading-mark">C</div>
+        <p>LOADING FOM + DECALS</p>
+      </div>
+    </main>
+
+    <script type="module" src="./src/fom-decal-preview.js?v=54"></script>
+  </body>
+</html>

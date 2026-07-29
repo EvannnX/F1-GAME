@@ -19,7 +19,7 @@ import {
   installShanghai2018MapTest,
   isShanghai2018MapTestEnabled,
 } from './ui/shanghai2018MapTest'
-import { onPlayerCarChange, readSelectedPlayerCar } from './data/playerCars'
+import { onPlayerCarChange, readSelectedPlayerCar, selectPlayerCar } from './data/playerCars'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createTransitionVideo } from './ui/transitionVideo'
@@ -73,10 +73,12 @@ import {
   optimizeLowPolyShanghaiRendering,
   type LowPolyShanghaiBundle,
   type LowPolyShanghaiGroundSampler,
+  type LowPolyShanghaiObstacleSampler,
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
 import {
+  SHANGHAI_FINISH_LINE_CENTER,
   SHANGHAI_FINISH_LINE_INDEX,
   SHANGHAI_OPTIMAL_RACING_LINE,
 } from './data/shanghaiOptimalRacingLine'
@@ -86,6 +88,8 @@ import { createRacingGuideLine } from './render/racingGuideLine'
 THREE.Cache.enabled = true
 
 const OFFLINE_8M_BUILD = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const LITE_SINGLE_CAR_BUILD = __F1TI_LITE_SINGLE_CAR__
 const OFFLINE_STORAGE_PREFIX = 'f1ti_offline_20260722_r12'
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
@@ -110,8 +114,8 @@ const GLB_LAP_ROUTE = [
   ...SHANGHAI_OPTIMAL_RACING_LINE.slice(SHANGHAI_FINISH_LINE_INDEX + 1).reverse(),
 ]
 const GLB_FINISH_SAMPLE = GLB_LAP_ROUTE[0]
-const GLB_FINISH_X = GLB_FINISH_SAMPLE[0]
-const GLB_FINISH_Z = GLB_FINISH_SAMPLE[2]
+const GLB_FINISH_X = SHANGHAI_FINISH_LINE_CENTER[0]
+const GLB_FINISH_Z = SHANGHAI_FINISH_LINE_CENTER[2]
 // The baked racing line runs opposite to the cars' actual race direction.
 const GLB_FINISH_FORWARD_X = -GLB_FINISH_SAMPLE[6]
 const GLB_FINISH_FORWARD_Z = -GLB_FINISH_SAMPLE[8]
@@ -164,7 +168,7 @@ const SCENE_CACHE_STORAGE_KEYS = [
 ]
 
 interface GlbGridPlacement {
-  id: 'player' | 'ferrari' | 'mercedes' | 'mclaren' | 'redbull' | string
+  id: 'player' | 'ferrari' | 'mercedes' | 'creator' | 'redbull' | string
   x: number
   z: number
   headingDeg: number
@@ -174,7 +178,7 @@ const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
   { id: 'player', x: -264.27, z: 520.03, headingDeg: 281.7 },
   { id: 'redbull', x: -230.42, z: 511.9, headingDeg: 281.7 },
   { id: 'ferrari', x: -257.32, z: 513.86, headingDeg: 284.4 },
-  { id: 'mclaren', x: -240.22, z: 509.83, headingDeg: 283.5 },
+  { id: 'creator', x: -240.22, z: 509.83, headingDeg: 283.5 },
   { id: 'mercedes', x: -247.97, z: 516.04, headingDeg: 282 },
 ]
 
@@ -208,6 +212,8 @@ function resetSceneCacheFromUrl(): boolean {
 }
 
 type BootReadyHandler = () => void
+const SHOW_RACE_MENU_EVENT = 'f1ti:show-race-menu'
+const BACK_TO_GARAGE_EVENT = 'f1ti:back-to-garage'
 
 function bootApp(onReady?: BootReadyHandler): void {
   const sceneCacheWasReset = resetSceneCacheFromUrl()
@@ -238,12 +244,45 @@ function bootWithHomeScreen(): void {
   const gameReady = new Promise<void>((resolve) => {
     markGameReady = resolve
   })
-  showHomeScreen(() => {
-    showHowToPlay(async () => {
-      await gameReady
-      showGarageSelection(() => { /* The prepared race settings menu is underneath. */ })
+
+  let homeController: ReturnType<typeof showHomeScreen> | null = null
+  let guideController: ReturnType<typeof showHowToPlay> | null = null
+  let garageController: ReturnType<typeof showGarageSelection> | null = null
+
+  const showHomePage = (): void => {
+    guideController?.destroy()
+    guideController = null
+    garageController?.destroy()
+    garageController = null
+    homeController?.destroy()
+    homeController = showHomeScreen(() => {
+      showGuidePage()
     })
-  })
+  }
+  const showGuidePage = (): void => {
+    homeController?.destroy()
+    homeController = null
+    garageController?.destroy()
+    garageController = null
+    guideController?.destroy()
+    guideController = showHowToPlay(async () => {
+      await gameReady
+      showGaragePage()
+    }, showHomePage)
+  }
+  const showGaragePage = (): void => {
+    homeController?.destroy()
+    homeController = null
+    guideController?.destroy()
+    guideController = null
+    garageController?.destroy()
+    garageController = showGarageSelection(() => {
+      window.dispatchEvent(new Event(SHOW_RACE_MENU_EVENT))
+    }, showGuidePage)
+  }
+
+  window.addEventListener(BACK_TO_GARAGE_EVENT, showGaragePage)
+  showHomePage()
 
   void warmRuntimeAssetCache()
 
@@ -307,7 +346,8 @@ function finiteNumber(value: unknown): number | null {
 function normalizeGlbGridPlacement(value: unknown): GlbGridPlacement | null {
   if (!value || typeof value !== 'object') return null
   const record = value as Record<string, unknown>
-  const id = typeof record.id === 'string' ? record.id : null
+  const rawId = typeof record.id === 'string' ? record.id : null
+  const id = rawId === 'mclaren' ? 'creator' : rawId
   const x = finiteNumber(record.x)
   const z = finiteNumber(record.z)
   const headingDeg = finiteNumber(record.headingDeg) ?? finiteNumber(record.yawDeg)
@@ -496,7 +536,7 @@ const GLB_GRID_OPPONENT_PROFILES: Record<string, OpponentProfile> = {
     mistakeMinS: 0,
     mistakeMaxS: 0,
   },
-  mclaren: {
+  creator: {
     name: 'Aggressor',
     color: '#ef476f',
     baseSpeed: 0,
@@ -649,6 +689,7 @@ function updateGlbThirdPersonCamera(
   heading: number,
   normal: THREE.Vector3,
   tuning: GlbCameraTuning,
+  obstacles?: LowPolyShanghaiObstacleSampler | null,
 ): void {
   if (camera.near !== 0.65) camera.near = 0.65
   const up = normal.clone().normalize()
@@ -657,10 +698,33 @@ function updateGlbThirdPersonCamera(
   if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
   forward.normalize()
   const back = forward.clone().negate()
-  camera.position
-    .copy(pos)
+  const desiredPosition = pos
+    .clone()
     .addScaledVector(back, tuning.backDistance)
     .addScaledVector(up, tuning.upDistance)
+  const cameraPathStart = pos.clone().addScaledVector(up, 0.9)
+  const cameraPath = desiredPosition.clone().sub(cameraPathStart)
+  const cameraPathDistance = cameraPath.length()
+  const cameraObstacle = obstacles && cameraPathDistance > 1e-5
+    ? obstacles.sampleObstacleBetween(cameraPathStart, desiredPosition, {
+        radius: 0.32,
+        side: forward,
+      })
+    : null
+  if (cameraObstacle && cameraPathDistance > 1e-5) {
+    cameraPath.multiplyScalar(1 / cameraPathDistance)
+    const distanceToObstacle = clamp(
+      cameraObstacle.point.clone().sub(cameraPathStart).dot(cameraPath),
+      0,
+      cameraPathDistance,
+    )
+    camera.position.copy(cameraPathStart).addScaledVector(
+      cameraPath,
+      Math.max(0.45, distanceToObstacle - 0.48),
+    )
+  } else {
+    camera.position.copy(desiredPosition)
+  }
   camera.up.copy(up)
   const lookTarget = pos
     .clone()
@@ -768,8 +832,11 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       }
       menu.hide()
       glbMenuStartHandler(cfg)
+    }, () => {
+      window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
     })
   }
+  window.addEventListener(SHOW_RACE_MENU_EVENT, showGlbStartMenu)
   if (regularGameBoot) showGlbStartMenu()
 
   const weather = pickRandomWeather()
@@ -810,8 +877,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let glbOpponentCars: OpponentCarBundle | null = null
   let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
   let audio: AudioRig | null = null
+  let audioLoadPromise: Promise<AudioRig | null> | null = null
   let countdown: ReturnType<typeof createCountdown> | null = null
-  let audioStarted = false
   let started = false
   let countdownActive = false
   let glbRaceStartTime = 0
@@ -825,6 +892,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let updateGlbRaceProgress: (dt: number) => void = () => { /* GLB race is not ready yet. */ }
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
   let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
+  let obstacleSampler: LowPolyShanghaiObstacleSampler | null = null
   let telemetryUpdateTimer = 0
 
   const finishGateCoordinate = (position: THREE.Vector3): number =>
@@ -837,11 +905,34 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.group.visible = true
   }
 
-  const startGlbAudio = (): void => {
-    if (!audio || audioStarted) return
-    audioStarted = true
+  const ensureGlbAudio = (): Promise<AudioRig | null> => {
+    if (audio) return Promise.resolve(audio)
+    if (audioLoadPromise) return audioLoadPromise
     unlockAudio()
-    audio.start()
+    audioLoadPromise = createAudioRig()
+      .then((rig) => {
+        audio = rig
+        rig.setBgmVolume(0.55)
+        rig.start()
+        return rig
+      })
+      .catch((error) => {
+        console.warn('[F1S] GLB audio rig init failed:', error)
+        audioLoadPromise = null
+        return null
+      })
+    return audioLoadPromise
+  }
+
+  const startGlbAudio = (): void => {
+    unlockAudio()
+    if (audio) {
+      // Repeated start() calls are intentional: sources are idempotent and
+      // AudioContext.resume() may only succeed on a later mobile gesture.
+      audio.start()
+      return
+    }
+    void ensureGlbAudio()
   }
   window.addEventListener('pointerdown', startGlbAudio)
   window.addEventListener('keydown', startGlbAudio)
@@ -885,13 +976,22 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.update(dt, speed01, rawInput.steer)
     firstPersonCockpit.update(dt, speed01, rawInput.steer)
     audio?.setEngine(gameInput.throttle, speed01)
-    racingGuideLine?.update(drive.state.speed, performance.now() * 0.001)
+    if (racingGuideLine?.group.visible) {
+      racingGuideLine.update(drive.state.speed, performance.now() * 0.001)
+    }
     if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
     if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
       if (cameraMode === 'first') {
         updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
       } else {
-        updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+        updateGlbThirdPersonCamera(
+          bundle.camera,
+          drive.state.pos,
+          drive.state.heading,
+          drive.state.normal,
+          glbCameraTuning,
+          obstacleSampler,
+        )
       }
     }
     if (!countdownActive) visualOptimizer?.update(drive.state.pos)
@@ -941,7 +1041,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
             .sort((a, b) => a.position.distanceToSquared(slot.position) - b.position.distanceToSquared(slot.position))
             .slice(0, 5)
           localStorage.setItem(GLB_GRID_STORAGE_KEY, JSON.stringify(nearbySlots.map((nearby, index) => ({
-            id: ['player', 'redbull', 'ferrari', 'mclaren', 'mercedes'][index],
+            id: ['player', 'redbull', 'ferrari', 'creator', 'mercedes'][index],
             x: Number(nearby.position.x.toFixed(3)),
             z: Number(nearby.position.z.toFixed(3)),
             headingDeg: Number(THREE.MathUtils.radToDeg(nearby.heading).toFixed(2)),
@@ -978,10 +1078,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       console.warn('[F1S] GLB ground grid fallback:', e)
       ground = createLowPolyShanghaiGroundSampler(lowPolyShanghai)
     }
-    const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
+    obstacleSampler = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
     const pose = findGlbStartPose(ground, gridPlacements)
     racingGuideLine = createRacingGuideLine(bundle.scene)
-    drive = createGlbDrivePhysics(ground, pose, obstacles)
+    drive = createGlbDrivePhysics(ground, pose, obstacleSampler)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
     applyCameraModeVisibility()
@@ -1006,7 +1106,14 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       glbOpponentCars?.update(glbOpponentStates)
       telemetryMap?.resetTrail()
       bundle.updateShadowFollow(drive.state.pos)
-      updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+      updateGlbThirdPersonCamera(
+        bundle.camera,
+        drive.state.pos,
+        drive.state.heading,
+        drive.state.normal,
+        glbCameraTuning,
+        obstacleSampler,
+      )
     }
     const clearGlbCountdown = (): void => {
       if (countdown) {
@@ -1088,7 +1195,12 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       }
       void (async () => {
         await transitionVideo.play()
-        await personalityCard.show(stats, telemetry)
+        const personalityAction = await personalityCard.show(stats, telemetry)
+        if (personalityAction === 'menu') {
+          resetGlbRaceGrid()
+          showGlbStartMenu()
+          return
+        }
         if (glbResultVisible) return
         glbResultVisible = true
         result.show({
@@ -1149,6 +1261,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         void (async () => {
           const transitionPlayback = transitionVideo.play()
           cameraMode = cfg.cameraMode
+          if (racingGuideLine) racingGuideLine.group.visible = cfg.racingGuideEnabled
           applyCameraModeVisibility()
           bundle.setPerformanceMode(cfg.performanceMode)
           storage.setPerformanceMode(cfg.performanceMode)
@@ -1202,18 +1315,24 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       opp.t = 0
       glbOpponentCars?.update(glbOpponentStates)
     }
-    glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
-    glbOpponentStateById = new Map(
-      gridPlacements
-        .filter((placement) => placement.id !== 'player')
-        .map((placement, index) => [placement.id, glbOpponentStates[index]]),
-    )
-    glbOpponentCars = createOpponentCars(glbOpponentStates, {
-      targetLengthM: GLB_PLAYER_TARGET_LENGTH_M,
-      groundSinkM: GLB_VISUAL_GROUND_SINK,
-    })
-    glbOpponentCars.update(glbOpponentStates)
-    bundle.scene.add(glbOpponentCars.group)
+    if (LITE_SINGLE_CAR_BUILD) {
+      glbOpponentStates = []
+      glbOpponentStateById.clear()
+      glbOpponentCars = null
+    } else {
+      glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
+      glbOpponentStateById = new Map(
+        gridPlacements
+          .filter((placement) => placement.id !== 'player')
+          .map((placement, index) => [placement.id, glbOpponentStates[index]]),
+      )
+      glbOpponentCars = createOpponentCars(glbOpponentStates, {
+        targetLengthM: GLB_PLAYER_TARGET_LENGTH_M,
+        groundSinkM: GLB_VISUAL_GROUND_SINK,
+      })
+      glbOpponentCars.update(glbOpponentStates)
+      bundle.scene.add(glbOpponentCars.group)
+    }
     const applySavedCarVisualTuning = (): void => {
       applyCarVisualTuning(readSavedCarVisualTuning(CAR_VISUAL_TUNING_STORAGE_KEY), {
         playerGroup: car.group,
@@ -1225,17 +1344,19 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap())
     telemetryMap.resetTrail()
     telemetryMap.show()
-    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
-    await glbOpponentCars.ready
+    updateGlbThirdPersonCamera(
+      bundle.camera,
+      drive.state.pos,
+      drive.state.heading,
+      drive.state.normal,
+      glbCameraTuning,
+      obstacleSampler,
+    )
+    await glbOpponentCars?.ready
     applySavedCarVisualTuning()
-    glbOpponentCars.update(glbOpponentStates)
+    glbOpponentCars?.update(glbOpponentStates)
     input = await initInput('keyboard')
-    try {
-      audio = await createAudioRig()
-      audio.setBgmVolume(0.55)
-    } catch (e) {
-      console.warn('[F1S] GLB audio rig init failed:', e)
-    }
+    await ensureGlbAudio()
     if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested || objectDeletionGuiRequested) {
       started = false
       hideStatus()
@@ -1299,7 +1420,16 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         storageKey: GLB_CAMERA_TUNING_STORAGE_KEY,
         onChange: (next) => {
           glbCameraTuning = next
-          if (drive) updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+          if (drive) {
+            updateGlbThirdPersonCamera(
+              bundle.camera,
+              drive.state.pos,
+              drive.state.heading,
+              drive.state.normal,
+              glbCameraTuning,
+              obstacleSampler,
+            )
+          }
         },
         onClose: () => {
           cameraTuningGuiActive = false
@@ -1579,6 +1709,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
   // Helper: build AIs at the chosen difficulty and add them to the scene.
   const spawnOpponents = async (): Promise<void> => {
     teardownOpponents()
+    if (LITE_SINGLE_CAR_BUILD) return
     world.opponents = createOpponents(track, ctx.difficulty)
     const opponentCars = createOpponentCars(world.opponents)
     world.opponentCars = opponentCars
@@ -2094,7 +2225,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       // Reveal the MBTI-style racer-personality card first, then fall
       // through to the regular result panel.
       await transitionVideo.play()
-      await personalityCard.show(buildPlayerStats(), {
+      const personalityAction = await personalityCard.show(buildPlayerStats(), {
         bestLapMs: ctx.raceData.bestLap ?? 0,
         topSpeedKmh: ctx.raceData.topSpeed,
         wallHits: ctx.raceData.crashes,
@@ -2102,6 +2233,12 @@ function bootstrap(onReady?: BootReadyHandler): void {
         finalPosition: ctx.raceData.finalPosition || (world.opponents.length + 1),
         fieldSize: world.opponents.length + 1,
       })
+      if (personalityAction === 'menu') {
+        ctx.raceData.bestLap = null
+        teardownOpponents()
+        void sm.transition(GameState.MENU)
+        return
+      }
       const lap = ctx.raceData.bestLap ?? 0
       const prev = storage.getBestLap()
       // Only count it as a PB if the player actually won the race.
@@ -2154,15 +2291,43 @@ function bootstrap(onReady?: BootReadyHandler): void {
 
 const bootEntry = (): void => {
   const params = new URLSearchParams(window.location.search)
-  if (params.has('amgWheelTest')) {
+  if (params.has('creatorCarMapTest')) selectPlayerCar('creator')
+  if (params.has('specialLiveryCapture')) {
+    selectPlayerCar(
+      params.get('specialLiveryCapture') === 'partners'
+        ? 'creator-partner'
+        : 'creator-special',
+    )
+    showGarageSelection(() => { /* Capture mode has no navigation. */ })
+    return
+  }
+  if (!COMPACT_30_BUILD && params.has('amgWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest()
     })
     return
   }
-  if (params.has('redbullWheelTest')) {
+  if (!COMPACT_30_BUILD && params.has('redbullWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest('redbull')
+    })
+    return
+  }
+  if (!COMPACT_30_BUILD && params.has('ferrariF175WheelTest')) {
+    void import('./ui/ferrariF175WheelTest').then(({ installFerrariF175WheelTest }) => {
+      installFerrariF175WheelTest()
+    })
+    return
+  }
+  if (!COMPACT_30_BUILD && params.has('fomWheelTest')) {
+    void import('./ui/fomWheelTest').then(({ installFomWheelTest }) => {
+      installFomWheelTest()
+    })
+    return
+  }
+  if (!COMPACT_30_BUILD && params.has('creatorCarPreview')) {
+    void import('./ui/creatorCarPreview').then(({ installCreatorCarPreview }) => {
+      installCreatorCarPreview()
     })
     return
   }

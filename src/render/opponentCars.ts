@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { OpponentState } from '../game/opponents'
-import mclarenGlbUrl from '../assets/models/McLaren_MCL35M.opt.glb?url'
+import fomCreatorGlbUrl from '../assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb?url'
 import ferrariGlbUrl from '../assets/models/Ferrari_26.opt.glb?url'
 import mercedesGlbUrl from '../assets/models/Mercedes_W13.glb?url'
 import redbullGlbUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
@@ -46,14 +46,14 @@ interface NpcModel {
  *  must match PROFILES in src/game/opponents.ts. */
 const NPC_MODELS: Record<string, NpcModel> = {
   Veteran: { url: mercedesGlbUrl, reverse: true },
-  Aggressor: { url: mclarenGlbUrl },
+  Aggressor: { url: fomCreatorGlbUrl },
   Rookie: { url: ferrariGlbUrl, reverse: true },
   RedBull: { url: redbullGlbUrl },
 }
 
 /** Target on-track HEIGHT for NPC GLBs. RB19 ends up ≈0.88 m tall after
- *  the player car's planar (length-based) fit; the McLaren / Ferrari /
- *  Mercedes packs are slightly narrower at the same length so they look
+ *  the player car's planar (length-based) fit; the Ferrari / Mercedes packs
+ *  are slightly narrower at the same length so they look
  *  "thinner" — visibly smaller — than RB19. Scaling NPCs by HEIGHT to a
  *  larger target uniformly bumps them up so they read as full-size F1
  *  cars next to the player. Tweak here if they feel too big/small. */
