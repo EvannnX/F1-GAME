@@ -3,17 +3,17 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import type { OpponentState } from '../game/opponents'
-import fomCreatorGlbUrl from '../assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb?url'
-import ferrariGlbUrl from '../assets/models/Ferrari_26.opt.glb?url'
-import mercedesGlbUrl from '../assets/models/Mercedes_W13.glb?url'
-import redbullGlbUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
+import mclarenGlbUrl from '../assets/models/McLaren_MCL35M.race.glb?url'
+import ferrariGlbUrl from '../assets/models/Ferrari_26.race.glb?url'
+import mercedesGlbUrl from '../assets/models/Mercedes_W13.race.glb?url'
+import redbullGlbUrl from '../assets/models/RB19_REDBULL.race.glb?url'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 import { loadLocalAsset } from '../utils/localAsset'
 
 export interface OpponentCarBundle {
   group: THREE.Group
   ready: Promise<void>
-  update: (opps: OpponentState[]) => void
+  update: (opps: OpponentState[], focusPosition?: THREE.Vector3) => void
   dispose: () => void
 }
 
@@ -46,7 +46,7 @@ interface NpcModel {
  *  must match PROFILES in src/game/opponents.ts. */
 const NPC_MODELS: Record<string, NpcModel> = {
   Veteran: { url: mercedesGlbUrl, reverse: true },
-  Aggressor: { url: fomCreatorGlbUrl },
+  Aggressor: { url: mclarenGlbUrl },
   Rookie: { url: ferrariGlbUrl, reverse: true },
   RedBull: { url: redbullGlbUrl },
 }
@@ -179,7 +179,10 @@ function loadScene(model: NpcModel, options: OpponentCarOptions = {}): Promise<T
       scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
-          mesh.castShadow = true
+          // Detailed dynamic shadows for four textured AI cars duplicate
+          // hundreds of thousands of triangles in every shadow refresh.
+          // Their race LODs use a cheap grounded contact shadow instead.
+          mesh.castShadow = false
           mesh.receiveShadow = false
           mesh.frustumCulled = true
         }
@@ -220,6 +223,14 @@ export function createOpponentCars(opps: OpponentState[], options: OpponentCarOp
   root.name = 'opponents'
   const shells: ShellRefs[] = []
   const loads: Promise<void>[] = []
+  const contactShadowGeometry = new THREE.CircleGeometry(1, 20)
+  const contactShadowMaterial = new THREE.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+    toneMapped: false,
+  })
 
   for (const opp of opps) {
     const shell = buildShell(opp.profile.color)
@@ -234,6 +245,13 @@ export function createOpponentCars(opps: OpponentState[], options: OpponentCarOp
         disposePlaceholder(shell)
         const cloned = scene.clone(true)
         shell.group.add(cloned)
+        const contactShadow = new THREE.Mesh(contactShadowGeometry, contactShadowMaterial)
+        contactShadow.name = 'opponent-contact-shadow'
+        contactShadow.rotation.x = -Math.PI / 2
+        contactShadow.position.y = 0.025
+        contactShadow.scale.set(1.05, 2.35, 1)
+        contactShadow.renderOrder = 1
+        shell.group.add(contactShadow)
         shell.placeholderActive = false
       }).catch(() => {
         // Keep placeholder visible.
@@ -244,11 +262,17 @@ export function createOpponentCars(opps: OpponentState[], options: OpponentCarOp
 
   const ready = Promise.all(loads).then(() => undefined)
 
-  const update = (s: OpponentState[]): void => {
+  const update = (s: OpponentState[], focusPosition?: THREE.Vector3): void => {
     for (let i = 0; i < shells.length && i < s.length; i++) {
       shells[i].group.position.copy(s[i].pos)
       shells[i].group.position.y -= options.groundSinkM ?? 0
       shells[i].group.rotation.y = s[i].heading
+      // In the GLB race these cars remain on the starting grid. Once the
+      // player is hundreds of metres away they are sub-pixel dots, yet their
+      // detailed models still submit ~240k triangles down long sightlines.
+      if (focusPosition) {
+        shells[i].group.visible = shells[i].group.position.distanceToSquared(focusPosition) <= 220 * 220
+      }
       // Wheel spin only on the procedural placeholder; GLB wheels aren't
       // tagged, and AI cars are rarely close enough for it to matter.
       if (shells[i].placeholderActive) {
@@ -267,6 +291,8 @@ export function createOpponentCars(opps: OpponentState[], options: OpponentCarOp
       // Cloned GLB scenes share the cached source's geos/mats; let GC
       // reclaim them when this root is detached from the scene.
     }
+    contactShadowGeometry.dispose()
+    contactShadowMaterial.dispose()
   }
 
   return { group: root, ready, update, dispose }

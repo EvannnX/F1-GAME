@@ -8,6 +8,7 @@ import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?
 import {
   PLAYER_CARS,
   playerCarById,
+  previewPlayerCar,
   readSelectedPlayerCar,
   selectPlayerCar,
   type PlayerCarDefinition,
@@ -501,6 +502,11 @@ export function showGarageSelection(
   controls.minPolarAngle = Math.PI * 0.2
   controls.maxPolarAngle = Math.PI * 0.47
   controls.autoRotate = false
+  let pendingRenderFrames = 3
+  const invalidateRender = (frames = 3): void => {
+    pendingRenderFrames = Math.max(pendingRenderFrames, frames)
+  }
+  controls.addEventListener('change', () => invalidateRender())
 
   const floorMaterial = new THREE.MeshPhysicalMaterial({
     color: '#eef0f3',
@@ -760,10 +766,14 @@ export function showGarageSelection(
   }
   updateLiveryButtons()
   let selectionVersion = 0
-  const showSelection = (index: number): void => {
+  const showSelection = (index: number, announcePreview = true): void => {
     selectedIndex = (index + PLAYER_CARS.length) % PLAYER_CARS.length
     const definition = PLAYER_CARS[selectedIndex]
     const version = ++selectionVersion
+    // Opening the garage is not a new user selection. In particular, a Lion
+    // choice saved from the previous visit must not replace the normal entry
+    // music until the player actually browses to or confirms Lion.
+    if (announcePreview) previewPlayerCar(definition.id)
     host.dataset.selectedCar = definition.id
     host.style.setProperty('--garage-accent', definition.accent)
     teamEl.textContent = definition.team
@@ -804,6 +814,7 @@ export function showGarageSelection(
       }
       frameModel(currentModel)
       renderer.shadowMap.needsUpdate = true
+      invalidateRender(5)
       if (captureMode) {
         window.requestAnimationFrame(() => {
           renderer.render(scene, camera)
@@ -863,13 +874,20 @@ export function showGarageSelection(
 
   let frame = 0
   let lastRenderAt = 0
+  const minimumFrameInterval = 1000 / (mobileGpu ? 24 : 30)
   const render = (now = 0): void => {
     if (destroyed) return
     frame = window.requestAnimationFrame(render)
-    if (mobileGpu && now - lastRenderAt < 1000 / 30) return
-    lastRenderAt = now
-    fomLiveries.get(PLAYER_CARS[selectedIndex].id)?.update(now)
+    if (now - lastRenderAt < minimumFrameInterval) return
+    const activeLivery = fomLiveries.get(PLAYER_CARS[selectedIndex].id)
+    if (activeLivery) {
+      activeLivery.update(now)
+      pendingRenderFrames = Math.max(pendingRenderFrames, 1)
+    }
     controls.update()
+    if (pendingRenderFrames <= 0) return
+    lastRenderAt = now
+    pendingRenderFrames--
     renderer.render(scene, camera)
   }
   const resize = (): void => {
@@ -880,11 +898,12 @@ export function showGarageSelection(
     camera.updateProjectionMatrix()
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobileGpu ? 1 : 1.35))
     renderer.setSize(width, height, false)
+    invalidateRender(4)
   }
   window.addEventListener('resize', resize)
   resize()
   render()
-  showSelection(selectedIndex)
+  showSelection(selectedIndex, false)
 
   const idleWindow = window as Window & {
     requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number

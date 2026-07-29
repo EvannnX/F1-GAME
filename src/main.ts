@@ -19,7 +19,13 @@ import {
   installShanghai2018MapTest,
   isShanghai2018MapTestEnabled,
 } from './ui/shanghai2018MapTest'
-import { onPlayerCarChange, readSelectedPlayerCar, selectPlayerCar } from './data/playerCars'
+import {
+  onPlayerCarChange,
+  onPlayerCarPreview,
+  readSelectedPlayerCar,
+  selectPlayerCar,
+  type PlayerCarId,
+} from './data/playerCars'
 import { createHud } from './ui/hud'
 import { createResult } from './ui/result'
 import { createTransitionVideo } from './ui/transitionVideo'
@@ -43,7 +49,8 @@ import {
 } from './ui/carVisualTuning'
 import type { PlayerStats } from './racerPersonality'
 import { SFX, unlockAudio } from './audio/zzfx'
-import { createAudioRig, type AudioRig } from './audio/engine'
+import { createAudioRig, type AudioRig, type BgmTrackId } from './audio/engine'
+import { createSaberVoiceSystem } from './audio/saberVoice'
 import { CommentarySystem } from './audio/commentary'
 import { CoachSystem } from './audio/coach'
 import {
@@ -84,12 +91,18 @@ import {
 } from './data/shanghaiOptimalRacingLine'
 import { warmRuntimeAssetCache } from './cache/runtimeAssets'
 import { createRacingGuideLine } from './render/racingGuideLine'
+import { createLionArcadeEffects } from './render/lionArcadeEffects'
+import { createFinishCinematic } from './render/finishCinematic'
+import {
+  createSaberReactionCutIn,
+  type SaberReactionEvent,
+} from './ui/saberReactionCutIn'
 
 THREE.Cache.enabled = true
 
 const OFFLINE_8M_BUILD = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
 const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'
-const LITE_SINGLE_CAR_BUILD = __F1TI_LITE_SINGLE_CAR__
+const LITE_SINGLE_CAR_BUILD = __F1TI_LITE_SINGLE_CAR__ || __F1TI_LITE_LION__
 const OFFLINE_STORAGE_PREFIX = 'f1ti_offline_20260722_r12'
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
@@ -98,6 +111,15 @@ const GLB_THIRD_UP_DISTANCE = 1.4
 const GLB_THIRD_LOOK_AHEAD = 13
 const GLB_THIRD_LOOK_UP = -0.75
 const GLB_THIRD_FOV = 35
+const DEFAULT_GLB_BGM_VOLUME = 0.55
+const LION_RACE_BGM_VOLUME = 0.8
+const LION_FINISH_BGM_VOLUME = 0.86
+const GLB_BGM_DUCKED_VOLUME = 0.18
+const glbBgmVolumeForTrack = (track: BgmTrackId): number => {
+  if (track === 'lion-race') return LION_RACE_BGM_VOLUME
+  if (track === 'lion-finish') return LION_FINISH_BGM_VOLUME
+  return DEFAULT_GLB_BGM_VOLUME
+}
 const DEFAULT_GLB_CAMERA_TUNING: GlbCameraTuning = {
   backDistance: GLB_THIRD_BACK_DISTANCE,
   upDistance: GLB_THIRD_UP_DISTANCE,
@@ -195,6 +217,17 @@ function shouldBootMainGame(): boolean {
   return params.has('oldMainGame') || params.has('legacyMainGame') || params.has('originalMainGame')
 }
 
+function readFinishCinematicPreviewCar(): PlayerCarId | null {
+  const value = new URLSearchParams(window.location.search).get('finishPreview')
+  return value === 'redbull'
+    || value === 'ferrari'
+    || value === 'mclaren'
+    || value === 'mercedes'
+    || value === 'lion'
+    ? value
+    : null
+}
+
 function resetSceneCacheFromUrl(): boolean {
   const params = new URLSearchParams(window.location.search)
   if (!SCENE_CACHE_RESET_PARAMS.some((param) => params.has(param))) return false
@@ -222,7 +255,8 @@ function bootApp(onReady?: BootReadyHandler): void {
 }
 
 function shouldBypassHomeScreen(): boolean {
-  return isGlbGridPlacementGuiEnabled()
+  return readFinishCinematicPreviewCar() !== null
+    || isGlbGridPlacementGuiEnabled()
     || isCarVisualTuningGuiEnabled()
     || isGlbCameraTuningGuiEnabled()
     || isCockpitPlacementGuiEnabled()
@@ -230,6 +264,15 @@ function shouldBypassHomeScreen(): boolean {
 }
 
 function bootWithHomeScreen(): void {
+  if (new URLSearchParams(window.location.search).has('lionPreview')) {
+    try {
+      localStorage.setItem('f1s_selected_player_car_v1', 'lion')
+    } catch {
+      /* The preview still opens; the garage falls back gracefully if storage is unavailable. */
+    }
+    showGarageSelection(() => { /* Standalone visual-review route. */ })
+    return
+  }
   if (isShanghai2018MapTestEnabled()) {
     const container = document.getElementById('app')
     if (!container) throw new Error('#app container not found')
@@ -689,6 +732,8 @@ function updateGlbThirdPersonCamera(
   heading: number,
   normal: THREE.Vector3,
   tuning: GlbCameraTuning,
+  carId: PlayerCarId,
+  boostStrength = 0,
   obstacles?: LowPolyShanghaiObstacleSampler | null,
 ): void {
   if (camera.near !== 0.65) camera.near = 0.65
@@ -698,10 +743,16 @@ function updateGlbThirdPersonCamera(
   if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
   forward.normalize()
   const back = forward.clone().negate()
+  const isLion = carId === 'lion'
+  const backDistance = tuning.backDistance + (isLion ? 1.0 : 0)
+  const upDistance = tuning.upDistance + (isLion ? 1.85 : 0)
+  const lookUp = tuning.lookUp + (isLion ? 1.1 : 0)
+  const targetFov = (isLion ? Math.max(50, tuning.fov) : tuning.fov)
+    + (isLion ? boostStrength * 11 : 0)
   const desiredPosition = pos
     .clone()
-    .addScaledVector(back, tuning.backDistance)
-    .addScaledVector(up, tuning.upDistance)
+    .addScaledVector(back, backDistance)
+    .addScaledVector(up, upDistance)
   const cameraPathStart = pos.clone().addScaledVector(up, 0.9)
   const cameraPath = desiredPosition.clone().sub(cameraPathStart)
   const cameraPathDistance = cameraPath.length()
@@ -729,9 +780,9 @@ function updateGlbThirdPersonCamera(
   const lookTarget = pos
     .clone()
     .addScaledVector(forward, tuning.lookAhead)
-    .addScaledVector(up, tuning.lookUp)
+    .addScaledVector(up, lookUp)
   camera.lookAt(lookTarget)
-  camera.fov += (tuning.fov - camera.fov) * 0.22
+  camera.fov += (targetFov - camera.fov) * 0.22
   camera.updateProjectionMatrix()
 }
 
@@ -772,6 +823,10 @@ function updateGlbFirstPersonCamera(
 }
 
 function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
+  // Local profiling helper: follows the baked Shanghai racing line so GPU
+  // captures cover an actual lap without requiring a second person to drive.
+  // It is inert in normal gameplay and only activates with ?autoDrive.
+  const autoDriveDiagnostic = new URLSearchParams(window.location.search).has('autoDrive')
   let readyNotified = false
   const notifyReady = (): void => {
     if (readyNotified) return
@@ -841,12 +896,94 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
 
   const weather = pickRandomWeather()
   bundle.applyWeather(weather)
-  const lowPolyShanghai = addLowPolyShanghai(bundle.scene)
+  const lowPolyShanghai = addLowPolyShanghai(
+    bundle.scene,
+    {},
+    bundle.recommendedMaxFps <= 30 ? 4 : 16,
+    bundle.recommendedMaxFps <= 30,
+  )
+  let selectedPlayerCar = readFinishCinematicPreviewCar() ?? readSelectedPlayerCar()
+  let audio: AudioRig | null = null
+  let audioStarted = false
+  let audioUnlockRequested = false
+  // Always enter with the original soundtrack. A saved Lion selection only
+  // changes the music after the player actively previews or confirms Lion.
+  let requestedBgmTrack: BgmTrackId = 'default'
+  const setRequestedBgmTrack = (track: BgmTrackId, transitionSeconds = 0.48): void => {
+    requestedBgmTrack = track
+    audio?.setBgmTrack(track, transitionSeconds)
+    if (!saberVoice?.isSpeaking()) {
+      audio?.setBgmVolume(glbBgmVolumeForTrack(track), transitionSeconds)
+    }
+  }
+  // Decode audio in parallel with the Shanghai model instead of making the
+  // garage or race start wait for the two Lion tracks.
+  const audioReady = createAudioRig().then((rig) => {
+    audio = rig
+    rig.setBgmTrack(requestedBgmTrack, 0.05)
+    rig.setBgmVolume(glbBgmVolumeForTrack(requestedBgmTrack), 0.05)
+    if (audioUnlockRequested && !audioStarted) {
+      audioStarted = true
+      rig.start()
+    }
+    return rig
+  }).catch((error) => {
+    console.warn('[F1S] GLB audio rig init failed:', error)
+    return null
+  })
+  if (new URLSearchParams(window.location.search).has('audioProbe')) {
+    ;(globalThis as typeof globalThis & {
+      __F1TI_AUDIO_PROBE__?: () => Record<string, unknown>
+    }).__F1TI_AUDIO_PROBE__ = () => ({
+      requested: requestedBgmTrack,
+      ready: audio !== null,
+      ...(audio?.getBgmState() ?? {}),
+    })
+  }
   const car = createCar({
     visualScale: GLB_PLAYER_VISUAL_SCALE,
-    carId: readSelectedPlayerCar(),
+    carId: selectedPlayerCar,
   })
-  onPlayerCarChange((carId) => { void car.setCarModel(carId) })
+  const lionArcade = createLionArcadeEffects(bundle.scene)
+  const saberVoice = createSaberVoiceSystem({
+    volume: 1,
+    onSpeakingChange: (speaking) => {
+      // Fast duck so the first syllable is clear; slower release avoids the
+      // music pumping back in abruptly at the end of a line.
+      audio?.setBgmVolume(
+        speaking ? GLB_BGM_DUCKED_VOLUME : glbBgmVolumeForTrack(requestedBgmTrack),
+        speaking ? 0.055 : 0.28,
+      )
+    },
+  })
+  const saberReaction = createSaberReactionCutIn()
+  const finishCinematic = createFinishCinematic(bundle.scene, bundle.camera)
+  let lionBoostStrength = 0
+  lionArcade.setEnabled(false)
+  saberVoice.setEnabled(selectedPlayerCar === 'lion')
+  saberReaction.setEnabled(selectedPlayerCar === 'lion')
+  if (selectedPlayerCar === 'lion') saberVoice.preload()
+  onPlayerCarPreview((carId) => {
+    setRequestedBgmTrack(carId === 'lion' ? 'lion-race' : 'default')
+  })
+  onPlayerCarChange((carId) => {
+    selectedPlayerCar = carId
+    setRequestedBgmTrack(carId === 'lion' ? 'lion-race' : 'default')
+    void car.setCarModel(carId)
+    saberVoice.setEnabled(carId === 'lion')
+    saberReaction.setEnabled(carId === 'lion')
+    if (carId === 'lion') {
+      saberVoice.preload()
+      // The garage confirmation click is a direct user gesture, so the
+      // iconic summon line can safely unlock and play here.
+      saberVoice.play('select', true)
+    }
+    if (carId !== 'lion') {
+      lionArcade.setEnabled(false)
+      lionBoostStrength = 0
+      bundle.setArcadeBoost(0)
+    }
+  })
   const carBaseScale = car.group.scale.clone()
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
@@ -876,8 +1013,6 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let glbOpponentStateById = new Map<string, OpponentState>()
   let glbOpponentCars: OpponentCarBundle | null = null
   let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
-  let audio: AudioRig | null = null
-  let audioLoadPromise: Promise<AudioRig | null> | null = null
   let countdown: ReturnType<typeof createCountdown> | null = null
   let started = false
   let countdownActive = false
@@ -894,45 +1029,103 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
   let obstacleSampler: LowPolyShanghaiObstacleSampler | null = null
   let telemetryUpdateTimer = 0
+  let lastFinishHeroRenderAt = 0
+  let finishIdleRendering = false
+  let diagnosticRouteIndex = 0
+  let diagnosticRouteOffsetM = 0
+  let diagnosticSteer = 0
+
+  const resetDiagnosticRoute = (position: THREE.Vector3): void => {
+    if (!autoDriveDiagnostic) return
+    let nearestDistanceSq = Number.POSITIVE_INFINITY
+    for (let index = 0; index < GLB_LAP_ROUTE.length; index++) {
+      const sample = GLB_LAP_ROUTE[index]
+      const dx = sample[0] - position.x
+      const dz = sample[2] - position.z
+      const distanceSq = dx * dx + dz * dz
+      if (distanceSq >= nearestDistanceSq) continue
+      nearestDistanceSq = distanceSq
+      diagnosticRouteIndex = index
+    }
+    diagnosticRouteOffsetM = 0
+    diagnosticSteer = 0
+  }
+
+  const updateDiagnosticAutoDrive = (dt: number): void => {
+    if (!autoDriveDiagnostic || !drive) return
+    const routeLength = GLB_LAP_ROUTE.length
+    let current = GLB_LAP_ROUTE[diagnosticRouteIndex]
+    const diagnosticSpeed = Math.min(68, Math.max(42, current[9]))
+    let distanceToAdvance = diagnosticSpeed * dt
+    while (distanceToAdvance > 0) {
+      const nextIndex = (diagnosticRouteIndex + 1) % routeLength
+      const next = GLB_LAP_ROUTE[nextIndex]
+      const segmentLength = Math.max(0.01, Math.hypot(
+        next[0] - current[0],
+        next[1] - current[1],
+        next[2] - current[2],
+      ))
+      const remaining = segmentLength - diagnosticRouteOffsetM
+      if (distanceToAdvance < remaining) {
+        diagnosticRouteOffsetM += distanceToAdvance
+        break
+      }
+      distanceToAdvance -= remaining
+      diagnosticRouteIndex = nextIndex
+      diagnosticRouteOffsetM = 0
+      current = next
+    }
+
+    const next = GLB_LAP_ROUTE[(diagnosticRouteIndex + 1) % routeLength]
+    const segmentLength = Math.max(0.01, Math.hypot(
+      next[0] - current[0],
+      next[1] - current[1],
+      next[2] - current[2],
+    ))
+    const alpha = Math.min(1, diagnosticRouteOffsetM / segmentLength)
+    const dx = next[0] - current[0]
+    const dz = next[2] - current[2]
+    const nextHeading = Math.atan2(dx, dz)
+    const headingDelta = Math.atan2(
+      Math.sin(nextHeading - drive.state.heading),
+      Math.cos(nextHeading - drive.state.heading),
+    )
+    diagnosticSteer = THREE.MathUtils.clamp(-headingDelta / Math.max(0.08, dt * 2.9), -1, 1)
+    drive.state.pos.set(
+      THREE.MathUtils.lerp(current[0], next[0], alpha),
+      THREE.MathUtils.lerp(current[1], next[1], alpha) + 0.09,
+      THREE.MathUtils.lerp(current[2], next[2], alpha),
+    )
+    drive.state.heading = nextHeading
+    drive.state.speed = diagnosticSpeed
+    drive.state.topSpeed = Math.max(drive.state.topSpeed, diagnosticSpeed)
+    drive.state.normal.set(
+      THREE.MathUtils.lerp(current[3], next[3], alpha),
+      THREE.MathUtils.lerp(current[4], next[4], alpha),
+      THREE.MathUtils.lerp(current[5], next[5], alpha),
+    ).normalize()
+    drive.state.onRoad = true
+  }
 
   const finishGateCoordinate = (position: THREE.Vector3): number =>
     (position.x - GLB_FINISH_X) * GLB_FINISH_FORWARD_X +
     (position.z - GLB_FINISH_Z) * GLB_FINISH_FORWARD_Z
 
   const applyCameraModeVisibility = (): void => {
-    firstPersonRig.visible = cameraMode === 'first'
-    firstPersonCockpit.group.visible = cameraMode === 'first'
+    const cinematicActive = finishCinematic.isActive()
+    firstPersonRig.visible = cameraMode === 'first' && !cinematicActive
+    firstPersonCockpit.group.visible = cameraMode === 'first' && !cinematicActive
     car.group.visible = true
   }
 
-  const ensureGlbAudio = (): Promise<AudioRig | null> => {
-    if (audio) return Promise.resolve(audio)
-    if (audioLoadPromise) return audioLoadPromise
-    unlockAudio()
-    audioLoadPromise = createAudioRig()
-      .then((rig) => {
-        audio = rig
-        rig.setBgmVolume(0.55)
-        rig.start()
-        return rig
-      })
-      .catch((error) => {
-        console.warn('[F1S] GLB audio rig init failed:', error)
-        audioLoadPromise = null
-        return null
-      })
-    return audioLoadPromise
-  }
-
   const startGlbAudio = (): void => {
+    audioUnlockRequested = true
     unlockAudio()
-    if (audio) {
-      // Repeated start() calls are intentional: sources are idempotent and
-      // AudioContext.resume() may only succeed on a later mobile gesture.
-      audio.start()
-      return
-    }
-    void ensureGlbAudio()
+    if (!audio) return
+    audioStarted = true
+    // Safe to call repeatedly: it also retries media-element playback after
+    // browsers reject an earlier non-gesture autoplay attempt.
+    audio.start()
   }
   window.addEventListener('pointerdown', startGlbAudio)
   window.addEventListener('keydown', startGlbAudio)
@@ -946,7 +1139,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
   })
 
-  const loop = new GameLoop((dt) => {
+  const loop = new GameLoop((dt, now) => {
     if (document.body.classList.contains('f1s-home-active') || document.body.classList.contains('f1s-guide-active') || document.body.classList.contains('f1s-garage-active') || document.body.classList.contains('f1s-race-menu-active')) return
     if (!drive) {
       bundle.render()
@@ -963,24 +1156,62 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       manualThrottle,
     }
     const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive && !objectDeletionGuiActive
-      ? driveInput
+      ? autoDriveDiagnostic
+        ? { steer: diagnosticSteer, throttle: 1, brake: 0, drs: true, manualThrottle: true }
+        : driveInput
       : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
-    if (started) drive.update(dt, gameInput)
+    drive.setArcadeBoost(selectedPlayerCar === 'lion' ? lionBoostStrength : 0)
+    if (started) {
+      if (autoDriveDiagnostic) updateDiagnosticAutoDrive(dt)
+      else drive.update(dt, gameInput)
+    }
+    if (drive.consumeObstacleImpact() && selectedPlayerCar === 'lion') {
+      SFX.crash()
+      saberVoice.play('hit')
+    }
     if (started && !glbFinishing) {
       updateGlbRaceProgress(dt)
     }
+    const cinematicFrame = finishCinematic.update(dt)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
     applyCameraModeVisibility()
-    const speed01 = drive.state.speed / GLB_DRIVE_MAX_SPEED
-    car.update(dt, speed01, rawInput.steer)
-    firstPersonCockpit.update(dt, speed01, rawInput.steer)
+    const awaitingFinishContinue = finishCinematic.isAwaitingContinue()
+    if (awaitingFinishContinue) {
+      if (!finishIdleRendering) {
+        finishIdleRendering = true
+      }
+      // Keep only the slow camera orbit alive. Pausing the rest of the race
+      // update avoids a full-rate stream of temporary vectors and UI work.
+      if (now - lastFinishHeroRenderAt >= 1000 / 12) {
+        lastFinishHeroRenderAt = now
+        bundle.render()
+      }
+      return
+    }
+    if (finishIdleRendering && !finishCinematic.isActive()) {
+      finishIdleRendering = false
+      lastFinishHeroRenderAt = 0
+    }
+    const speed01 = Math.min(1, drive.state.speed / GLB_DRIVE_MAX_SPEED)
+    const visualSteer = cinematicFrame.active
+      ? cinematicFrame.steer
+      : autoDriveDiagnostic
+        ? diagnosticSteer
+        : rawInput.steer
+    car.update(dt, speed01, visualSteer)
+    firstPersonCockpit.update(dt, speed01, visualSteer)
     audio?.setEngine(gameInput.throttle, speed01)
     if (racingGuideLine?.group.visible) {
       racingGuideLine.update(drive.state.speed, performance.now() * 0.001)
     }
-    if (!countdownActive) glbOpponentCars?.update(glbOpponentStates)
-    if (!gridPlacementGuiActive && !carVisualTuningGuiActive && !objectDeletionGuiActive) {
+    if (!countdownActive) glbOpponentCars?.update(glbOpponentStates, drive.state.pos)
+    if (
+      !cinematicFrame.active
+      && !gridPlacementGuiActive
+      && !carVisualTuningGuiActive
+      && !objectDeletionGuiActive
+    ) {
       if (cameraMode === 'first') {
         updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
       } else {
@@ -990,8 +1221,34 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
           drive.state.heading,
           drive.state.normal,
           glbCameraTuning,
+          selectedPlayerCar,
+          lionBoostStrength,
           obstacleSampler,
         )
+      }
+    }
+    const arcadeFrame = lionArcade.update(
+      dt,
+      drive.state.pos,
+      bundle.camera,
+      speed01,
+      started && !countdownActive && !glbFinishing,
+    )
+    lionBoostStrength = selectedPlayerCar === 'lion' ? arcadeFrame.boostStrength : 0
+    bundle.setArcadeBoost(lionBoostStrength)
+    if (lionBoostStrength > 0.025) car.emitSpeedTrail(lionBoostStrength)
+    if (arcadeFrame.coinCollected) {
+      SFX.coinPickup()
+      if (selectedPlayerCar === 'lion') {
+        saberVoice.play('coin')
+        saberReaction.show('coin')
+      }
+    }
+    if (arcadeFrame.boostCollected) {
+      SFX.arcadeBoost()
+      if (selectedPlayerCar === 'lion') {
+        saberVoice.play('boost')
+        saberReaction.show('boost')
       }
     }
     if (!countdownActive) visualOptimizer?.update(drive.state.pos)
@@ -1015,8 +1272,18 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       })
     }
     hud.update({ speedKmh: drive.state.speed * 3.6, lapMs: 0, mode: 'keyboard' })
-    bundle.render()
-  })
+    if (finishIdleRendering) {
+      // A slow orbit only needs a filmic 12 fps. Rendering the full scene at
+      // display refresh rate here would recreate the original GPU spike.
+      if (now - lastFinishHeroRenderAt >= 1000 / 12) {
+        lastFinishHeroRenderAt = now
+        bundle.render()
+      }
+    } else {
+      lastFinishHeroRenderAt = 0
+      bundle.render()
+    }
+  }, bundle.recommendedMaxFps)
   loop.start()
 
   void lowPolyShanghai.ready.then(async () => {
@@ -1082,18 +1349,28 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const pose = findGlbStartPose(ground, gridPlacements)
     racingGuideLine = createRacingGuideLine(bundle.scene)
     drive = createGlbDrivePhysics(ground, pose, obstacleSampler)
+    visualOptimizer?.update(pose.pos, true)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
     applyCameraModeVisibility()
     const resetGlbRaceGrid = (): void => {
       if (!drive) return
+      finishCinematic.cancel()
       drive.reset(pose)
+      resetDiagnosticRoute(pose.pos)
       glbRaceDistance = 0
       glbRaceArmed = false
       glbLapCheckpointStage = 0
       glbPreviousGateCoordinate = finishGateCoordinate(pose.pos)
       glbFinishing = false
       glbResultVisible = false
+      lionArcade.reset()
+      saberVoice.resetRace()
+      saberReaction.resetRace()
+      lionBoostStrength = 0
+      drive.setArcadeBoost(0)
+      bundle.setArcadeBoost(0)
+      setRequestedBgmTrack(selectedPlayerCar === 'lion' ? 'lion-race' : 'default', 0.42)
       setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
       setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
       applyCameraModeVisibility()
@@ -1112,6 +1389,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         drive.state.heading,
         drive.state.normal,
         glbCameraTuning,
+        selectedPlayerCar,
+        0,
         obstacleSampler,
       )
     }
@@ -1129,6 +1408,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       hud.update({ speedKmh: 0, lapMs: 0, mode: 'keyboard' })
       started = false
       countdownActive = true
+      lionArcade.setEnabled(selectedPlayerCar === 'lion')
       const silentCountdownRig = {
         group: new THREE.Group(),
         setLitCount: (_n: number): void => { /* screen-only countdown */ },
@@ -1145,6 +1425,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         },
         () => {
           SFX.lightsOut()
+          if (selectedPlayerCar === 'lion') {
+            saberVoice.play('start', true)
+            saberReaction.show('start')
+          }
           if (navigator.vibrate) navigator.vibrate([0, 200, 50, 100, 30, 150])
           countdownActive = false
           started = true
@@ -1152,7 +1436,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
           glbRaceDistance = 0
           glbRaceArmed = false
           glbLapCheckpointStage = 0
-          glbPreviousGateCoordinate = finishGateCoordinate(drive.state.pos)
+          glbPreviousGateCoordinate = finishGateCoordinate(drive?.state.pos ?? pose.pos)
           glbFinishing = false
           glbResultVisible = false
           countdownOverlay.flash('GO!', '#00d2be', 820)
@@ -1166,10 +1450,15 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       glbFinishing = true
       started = false
       countdownActive = false
+      lionArcade.setEnabled(false)
+      lionBoostStrength = 0
+      drive.setArcadeBoost(0)
+      bundle.setArcadeBoost(0)
+      if (selectedPlayerCar === 'lion') setRequestedBgmTrack('lion-finish', 0.58)
       hud.hide()
       const lapMs = Math.max(0, performance.now() - glbRaceStartTime)
       const topSpeedKmh = drive.state.topSpeed * 3.6
-      countdownOverlay.flash('FINISH!', '#00d2be', 1400)
+      countdownOverlay.flash('FINISH!', '#00d2be', 520)
       showToast('冲线完成，正在生成比赛结果', 1800)
       const telemetry = {
         bestLapMs: lapMs,
@@ -1194,6 +1483,26 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         management: drive.state.onRoad ? 80 : 58,
       }
       void (async () => {
+        SFX.finishHorn()
+        await finishCinematic.play(drive.state, {
+          carId: selectedPlayerCar,
+          sampleGround: (x, z) => ground.sampleGroundAt(x, z),
+          onDrift: () => {
+            SFX.tireScreech()
+            if (navigator.vibrate) navigator.vibrate([35, 30, 70])
+          },
+          onHero: () => {
+            SFX.uiClick()
+            if (selectedPlayerCar === 'lion') {
+              saberVoice.play('finish', true)
+              saberReaction.show('finish')
+            }
+            if (navigator.vibrate) navigator.vibrate([80, 45, 120])
+          },
+          onContinue: () => {
+            SFX.uiClick()
+          },
+        })
         await transitionVideo.play()
         const personalityAction = await personalityCard.show(stats, telemetry)
         if (personalityAction === 'menu') {
@@ -1241,6 +1550,13 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         drive.state.pos.z - nextCheckpoint.z,
       ) <= GLB_LAP_CHECKPOINT_RADIUS_M) {
         glbLapCheckpointStage++
+        if (selectedPlayerCar === 'lion') {
+          if (glbLapCheckpointStage === 1) saberVoice.play('midRace')
+          else if (glbLapCheckpointStage === 2) saberVoice.play('halfway')
+          else if (glbLapCheckpointStage === GLB_LAP_CHECKPOINTS.length) {
+            saberVoice.play('sprint', true)
+          }
+        }
       }
       if (
         !glbRaceArmed &&
@@ -1350,13 +1666,19 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       drive.state.heading,
       drive.state.normal,
       glbCameraTuning,
+      selectedPlayerCar,
+      0,
       obstacleSampler,
     )
     await glbOpponentCars?.ready
     applySavedCarVisualTuning()
     glbOpponentCars?.update(glbOpponentStates)
     input = await initInput('keyboard')
-    await ensureGlbAudio()
+    await audioReady
+    audio?.setBgmVolume(
+      saberVoice.isSpeaking() ? GLB_BGM_DUCKED_VOLUME : glbBgmVolumeForTrack(requestedBgmTrack),
+      0.05,
+    )
     if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested || objectDeletionGuiRequested) {
       started = false
       hideStatus()
@@ -1427,6 +1749,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
               drive.state.heading,
               drive.state.normal,
               glbCameraTuning,
+              selectedPlayerCar,
+              0,
               obstacleSampler,
             )
           }
@@ -1460,6 +1784,15 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
     if (!gridPlacementGuiRequested && !carVisualTuningGuiRequested && !cameraTuningGuiRequested && !firstPersonGuiRequested && !objectDeletionGuiRequested) {
       started = false
+    }
+    if (readFinishCinematicPreviewCar()) {
+      menu.hide()
+      hideStatus()
+      hud.hide()
+      telemetryMap?.hide()
+      drive.state.speed = 46
+      glbRaceStartTime = performance.now() - 88_000
+      window.setTimeout(() => finishGlbRace(), 450)
     }
   }).catch((e) => {
     console.warn('[F1S] GLB version failed:', e)
@@ -1533,8 +1866,12 @@ function bootstrap(onReady?: BootReadyHandler): void {
   // Build static world (track + car) once.
   const track = createTrack()
   bundle.scene.add(track.group)
-  const car = createCar({ carId: readSelectedPlayerCar() })
-  onPlayerCarChange((carId) => { void car.setCarModel(carId) })
+  let selectedPlayerCar = readSelectedPlayerCar()
+  const car = createCar({ carId: selectedPlayerCar })
+  onPlayerCarChange((carId) => {
+    selectedPlayerCar = carId
+    void car.setCarModel(carId)
+  })
   bundle.scene.add(car.group)
   bundle.scene.add(car.particles)
   const physics = createPhysics(track)
@@ -1782,8 +2119,11 @@ function bootstrap(onReady?: BootReadyHandler): void {
     const accelTarget = inp && inp.throttle > 0.7 ? 1 : 0
     accelLerp += (accelTarget - accelLerp) * 0.08 // smooth blend
     // Cruise / countdown sits 0.5 m farther back than the original camera.
-    const backDist = 4.5 + accelLerp * (5.5 - 4.5)
-    const upDist = 2.2
+    const isLion = selectedPlayerCar === 'lion'
+    const backDist = isLion
+      ? 5.8 + accelLerp * (6.6 - 5.8)
+      : 4.5 + accelLerp * (5.5 - 4.5)
+    const upDist = isLion ? 3.4 : 2.2
 
     const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading))
     const camPos = pos.clone().addScaledVector(back, backDist).add(new THREE.Vector3(0, upDist, 0))
@@ -1800,7 +2140,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       bundle.camera.position.z = pos.z + dz * k
     }
     const look = pos.clone().addScaledVector(back.negate(), 6)
-    look.y += 0.6
+    look.y += isLion ? 1.1 : 0.6
     bundle.camera.lookAt(look)
     const targetFov = 60 + (speed / PHYS_MAX_SPEED) * 20
     bundle.camera.fov += (targetFov - bundle.camera.fov) * 0.1
@@ -1931,12 +2271,13 @@ function bootstrap(onReady?: BootReadyHandler): void {
       const carP = car.group.position
       const heading = physics.state.heading
       const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading))
+      const isLion = selectedPlayerCar === 'lion'
       bundle.camera.position
         .copy(carP)
-        .addScaledVector(back, 4.5)
-        .add(new THREE.Vector3(0, 2.2, 0))
+        .addScaledVector(back, isLion ? 5.8 : 4.5)
+        .add(new THREE.Vector3(0, isLion ? 3.4 : 2.2, 0))
       const look = carP.clone().addScaledVector(back.negate(), 6)
-      look.y += 0.6
+      look.y += isLion ? 1.1 : 0.6
       bundle.camera.lookAt(look)
 
       hud.show()
@@ -2030,7 +2371,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       car.group.position.copy(physics.state.pos)
       car.group.rotation.y = physics.state.heading
       const speed01 = physics.state.speed / PHYS_MAX_SPEED
-      car.update(dt, speed01)
+      car.update(dt, speed01, inp.steer)
 
       // --- Opponents: drive around the track and detect AI body bumps.
       const COLLIDE_DIST = 3.5 // metres: car length / 2 + buffer
@@ -2283,7 +2624,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       world.audio.setEngine(throttle, speed01)
     }
     bundle.render()
-  })
+  }, bundle.recommendedMaxFps)
   loop.start()
 
   void sm.transition(GameState.MENU).then(() => onReady?.())
@@ -2299,6 +2640,22 @@ const bootEntry = (): void => {
         : 'creator-special',
     )
     showGarageSelection(() => { /* Capture mode has no navigation. */ })
+    return
+  }
+  const reactionPreview = params.get('reactionPreview')
+  if (
+    reactionPreview === 'start'
+    || reactionPreview === 'coin'
+    || reactionPreview === 'boost'
+    || reactionPreview === 'finish'
+  ) {
+    document.body.style.background = 'linear-gradient(135deg, #9fb1c9 0%, #e7ebf1 48%, #8295ad 100%)'
+    const preview = createSaberReactionCutIn()
+    preview.setEnabled(true)
+    window.setTimeout(() => {
+      preview.show(reactionPreview as SaberReactionEvent)
+      document.querySelector('.f1s-saber-reaction')?.classList.add('is-preview-static')
+    }, 120)
     return
   }
   if (!COMPACT_30_BUILD && params.has('amgWheelTest')) {

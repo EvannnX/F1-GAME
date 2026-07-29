@@ -30,6 +30,18 @@ def mat(name, color, roughness=0.55, metallic=0.0):
     return m
 
 
+def softly_emissive_mat(name, color, roughness=0.55, emission_strength=0.18):
+    m = mat(name, color, roughness)
+    bsdf = m.node_tree.nodes.get('Principled BSDF')
+    emission_color = bsdf.inputs.get('Emission Color')
+    emission_strength_input = bsdf.inputs.get('Emission Strength')
+    if emission_color is not None:
+        emission_color.default_value = (*color, 1)
+    if emission_strength_input is not None:
+        emission_strength_input.default_value = emission_strength
+    return m
+
+
 M = {}
 
 
@@ -160,6 +172,18 @@ def curve(name, points, bevel, material, cyclic=False):
     return obj
 
 
+def flat_polygon(name, points_xz, y, material):
+    """Create a zero-thickness X/Z decal that sits flush against the face."""
+    verts = [(x, y, z) for x, z in points_xz]
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], [tuple(range(len(verts)))])
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
+    assign(obj, material)
+    return obj
+
+
 def parent(child, root):
     child.parent = root
     return child
@@ -206,24 +230,15 @@ def build_lion(root):
     face = uv('LionFace', (0, -0.18, 0), (0.91, 0.62, 0.79), M['light_orange'])
     parent(face, head)
 
-    for i in range(22):
-        angle = math.tau * i / 22
-        x = math.cos(angle) * 0.93
-        z = math.sin(angle) * 0.76
-        clump = ico(
-            f'ManeClump_{i:02d}',
-            (x, 0.05, z),
-            (0.33 + 0.05 * (i % 2), 0.27, 0.27),
-            M['mane'] if i % 2 else M['mane_light'],
-            2,
-        )
-        clump.rotation_euler[1] = angle
-        parent(clump, head)
+    mane_base = uv('ManeBase', (0, 0.10, 0), (1.08, 0.34, 0.92), M['mane'], 48, 32)
+    parent(mane_base, head)
+    for i in range(18):
+        angle = math.tau * i / 18
         tip = pointed_clump(
             f'ManeTip_{i:02d}',
-            (math.cos(angle) * 1.11, 0.04, math.sin(angle) * 0.91),
-            0.2,
-            0.32,
+            (math.cos(angle) * 1.10, 0.02, math.sin(angle) * 0.92),
+            0.25 if i % 2 else 0.22,
+            0.43 if i % 2 else 0.37,
             (math.cos(angle), 0, math.sin(angle)),
             M['mane'] if i % 2 else M['mane_light'],
         )
@@ -317,143 +332,246 @@ def build_hair_clump(name, loc, radius, length, tilt=0.0):
     return obj
 
 
+def smooth_hair_lock(name, loc, width, height, tilt=0.0, depth_scale=0.42):
+    ring_count = 22
+    side_count = 32
+    verts = []
+    for ring in range(ring_count):
+        t = ring / (ring_count - 1)
+        z = height * (0.5 - t)
+        # Broad root, a softly swollen upper third, then a continuous pointed taper.
+        profile = (1.0 - t) ** 0.68 * (0.76 + 0.24 * math.sin(math.pi * t))
+        radius_x = max(0.004, width * 0.5 * profile)
+        radius_y = max(0.003, width * depth_scale * profile)
+        center_y = -width * 0.85 * math.sin(t * math.pi / 2)
+        for side_index in range(side_count):
+            angle = math.tau * side_index / side_count
+            verts.append((
+                radius_x * math.cos(angle),
+                center_y + radius_y * math.sin(angle),
+                z,
+            ))
+    faces = []
+    for ring in range(ring_count - 1):
+        start = ring * side_count
+        next_start = (ring + 1) * side_count
+        for side_index in range(side_count):
+            next_side = (side_index + 1) % side_count
+            faces.append((start + side_index, start + next_side, next_start + next_side, next_start + side_index))
+    faces.append(tuple(reversed(range(side_count))))
+    last_start = (ring_count - 1) * side_count
+    faces.append(tuple(last_start + i for i in range(side_count)))
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new(name, mesh)
+    obj.location = loc
+    obj.rotation_euler[2] = tilt
+    bpy.context.collection.objects.link(obj)
+    assign(smooth(obj), M['hair'])
+    return obj
+
+
+def fringe_plate(name, x, z, width, height, tilt=0.0, front=-0.405):
+    """A flattened, pointed anime hair lock with a clean illustrated silhouette."""
+    lock = tapered_panel(
+        name,
+        (x, front, z),
+        width,
+        width * 0.22,
+        height,
+        0.075,
+        M['hair_light'],
+        0.022,
+        rotation=(0, 0, tilt),
+    )
+    return lock
+
+
 def build_driver(root):
     driver = empty('SaberDriver', (0, 0.02, 1.54))
     parent(driver, root)
 
     # Skirt and the white ruffle sit over the lion body rather than inside it.
-    skirt = cone('BlueSkirt', (0, 0.25, -0.03), 1.31, 0.52, 0.68, M['blue'], vertices=64)
-    skirt.scale.y = 1.05
+    skirt_radius = 1.22
+    skirt = cone('BlueSkirt', (0, 0.25, 0.08), skirt_radius, 0.50, 0.68, M['blue'], vertices=64)
+    skirt.scale.y = 1.04
     parent(skirt, driver)
-    ruffle = cylinder('WhiteSkirtHem', (0, 0.28, -0.39), 1.32, 0.11, M['ivory'], vertices=64)
-    ruffle.scale.y = 1.05
+    gold_trim = cylinder('GoldSkirtTrim', (0, 0.28, -0.255), skirt_radius + 0.012, 0.035, M['gold'], vertices=64)
+    gold_trim.scale.y = 1.04
+    parent(gold_trim, driver)
+    ruffle = cylinder('WhiteSkirtHem', (0, 0.28, -0.28), skirt_radius + 0.025, 0.10, M['ivory'], vertices=64)
+    ruffle.scale.y = 1.04
     parent(ruffle, driver)
-    for i in range(18):
-        angle = math.tau * i / 18
-        x, y = math.cos(angle) * 1.31, 0.28 + math.sin(angle) * 1.31
-        point = cone(f'Ruffle_{i:02d}', (x, y, -0.47), 0.02, 0.105, 0.18, M['ivory'], vertices=24)
+    for i in range(16):
+        angle = math.tau * i / 16
+        x, y = math.cos(angle) * skirt_radius, 0.28 + math.sin(angle) * skirt_radius * 1.04
+        point = cone(f'Ruffle_{i:02d}', (x, y, -0.36), 0.02, 0.105, 0.18, M['ivory'], vertices=24)
         parent(point, driver)
 
     torso = uv('TorsoBlue', (0, -0.12, 0.43), (0.42, 0.31, 0.5), M['blue'], 40, 26)
     parent(torso, driver)
-    chest = cone('ChestArmor', (0, -0.43, 0.45), 0.36, 0.29, 0.56, M['silver'], vertices=48)
-    chest.scale.y = 0.26
+    chest = tapered_panel('ChestArmor', (0, -0.405, 0.48), 0.46, 0.55, 0.44, 0.085, M['silver'], 0.065)
     parent(chest, driver)
-    center_seam = rounded_cube('ChestCenterSeam', (0, -0.528, 0.45), (0.018, 0.012, 0.25), M['armor_dark'], 0.01)
-    parent(center_seam, driver)
     for side in (-1, 1):
-        seam = rounded_cube(
+        seam = curve(
             f'ChestSeam_{side}',
-            (side * 0.13, -0.522, 0.47),
-            (0.018, 0.015, 0.27),
+            [
+                (side * 0.19, -0.462, 0.65),
+                (side * 0.08, -0.468, 0.50),
+                (side * 0.18, -0.462, 0.30),
+            ],
+            0.012,
             M['armor_dark'],
-            0.01,
-            rotation=(0, side * 0.2, side * 0.45),
         )
         parent(seam, driver)
+        cross = curve(
+            f'ChestCross_{side}',
+            [
+                (side * 0.19, -0.464, 0.61),
+                (side * 0.05, -0.470, 0.47),
+                (side * 0.15, -0.464, 0.34),
+            ],
+            0.008,
+            M['armor_dark'],
+        )
+        parent(cross, driver)
     belt = rounded_cube('WaistBelt', (0, -0.24, 0.08), (0.48, 0.22, 0.07), M['silver'], 0.045)
     parent(belt, driver)
 
-    # Head uses a softened anime proportion and a shallow face plane.
-    head = rounded_cube('SaberHead', (0, -0.08, 1.2), (0.41, 0.36, 0.43), M['skin'], 0.2)
+    # Smooth vinyl-figure head; facial colour layers sit almost flush on its curved surface.
+    head = uv('SaberHead', (0, -0.08, 1.21), (0.405, 0.31, 0.405), M['skin_flat'], 72, 48)
     parent(head, driver)
-    hair_cap = uv('HairCap', (0, -0.005, 1.32), (0.55, 0.48, 0.51), M['hair'], 56, 36)
+    hair_cap = uv('HairCap', (0, 0.06, 1.35), (0.52, 0.37, 0.49), M['hair'], 72, 48)
     parent(hair_cap, driver)
-    forehead_hair = uv('ForeheadHair', (0, -0.425, 1.48), (0.43, 0.055, 0.22), M['hair'], 48, 24)
-    parent(forehead_hair, driver)
     for side in (-1, 1):
-        side_hair = cone(f'SideHair_{side}', (side * 0.4, -0.1, 1.08), 0.1, 0.17, 0.58, M['hair'], vertices=40)
-        side_hair.scale.y = 0.72
+        crown_line = curve(
+            f'CrownPart_{side}',
+            [
+                (side * 0.035, -0.407, 1.74),
+                (side * 0.15, -0.425, 1.67),
+                (side * 0.27, -0.42, 1.58),
+            ],
+            0.005,
+            M['hair_dark'],
+        )
+        parent(crown_line, driver)
+    for side in (-1, 1):
+        side_hair = uv(
+            f'SideHair_{side}',
+            (side * 0.385, -0.18, 1.18),
+            (0.14, 0.18, 0.31),
+            M['hair'],
+            40,
+            26,
+        )
         parent(side_hair, driver)
-        shoulder = uv(f'BlueShoulder_{side}', (side * 0.43, -0.08, 0.66), (0.22, 0.23, 0.22), M['blue'], 32, 20)
+        side_outline = curve(
+            f'SideHairOutline_{side}',
+            [
+                (side * 0.425, -0.36, 1.37),
+                (side * 0.44, -0.37, 1.15),
+                (side * 0.40, -0.36, 0.96),
+            ],
+            0.005,
+            M['hair_dark'],
+        )
+        parent(side_outline, driver)
+        shoulder = uv(f'BlueShoulder_{side}', (side * 0.38, -0.08, 0.65), (0.17, 0.18, 0.17), M['blue'], 40, 24)
         parent(shoulder, driver)
 
-    # Seven individually shaped fringe locks reproduce the reference silhouette.
+    # Overlapping, rounded 3D fringe locks reproduce the smooth figure-reference hair.
     fringe = [
-        (-0.31, 1.25, 0.18), (-0.21, 1.23, 0.11), (-0.105, 1.21, 0.05),
-        (0.0, 1.2, 0.0), (0.105, 1.21, -0.05), (0.21, 1.23, -0.11), (0.31, 1.25, -0.18),
+        (-0.275, 1.43, 0.23, 0.35, 0.15),
+        (-0.145, 1.405, 0.22, 0.41, 0.07),
+        (-0.005, 1.39, 0.23, 0.46, 0.0),
+        (0.14, 1.41, 0.22, 0.40, -0.07),
+        (0.275, 1.435, 0.23, 0.34, -0.15),
     ]
-    for i, (x, z, tilt) in enumerate(fringe):
-        lock = build_hair_clump(
-            f'Fringe_{i}',
-            (x, -0.43, z),
-            0.12 if i in (0, 6) else 0.105,
-            0.47 - abs(x) * 0.25,
+    for i, (x, z, width, height, tilt) in enumerate(fringe):
+        lock = smooth_hair_lock(
+            f'FringeLock_{i}',
+            (x, -0.22, z),
+            width,
+            height,
             tilt,
+            0.38,
         )
         parent(lock, driver)
-    for i, x in enumerate((-0.265, -0.16, -0.053, 0.053, 0.16, 0.265)):
-        lean = (i - 2.5) * 0.012
-        divider = curve(
-            f'FringeDivider_{i}',
-            [(x, -0.495, 1.45), (x + lean, -0.5, 1.36), (x + lean * 1.45, -0.496, 1.27)],
-            0.0045,
-            M['hair_dark'],
-        )
-        parent(divider, driver)
 
+    # Rounded face-framing locks sit in front of the voluminous side hair.
     for side in (-1, 1):
-        sclera = rounded_cube(
-            f'EyeWhite_{side}',
-            (side * 0.17, -0.452, 1.15),
-            (0.078, 0.011, 0.095),
-            M['white'],
-            0.06,
+        side_lock = smooth_hair_lock(
+            f'FaceFramingLock_{side}',
+            (side * 0.35, -0.24, 1.18),
+            0.21,
+            0.55,
+            -side * 0.035,
+            0.48,
         )
-        parent(sclera, driver)
-        iris = rounded_cube(
-            f'Iris_{side}',
-            (side * 0.17, -0.478, 1.14),
-            (0.062, 0.009, 0.087),
-            M['teal'],
-            0.05,
-        )
+        parent(side_lock, driver)
+
+    # Eyes are layered decals separated by fractions of a millimetre, not solid geometry.
+    outer_eye = [
+        (0.073 * math.cos(math.tau * i / 20), 0.130 * math.sin(math.tau * i / 20))
+        for i in range(20)
+    ]
+    inner_eye = [
+        (0.054 * math.cos(math.tau * i / 20), 0.104 * math.sin(math.tau * i / 20))
+        for i in range(20)
+    ]
+    for side in (-1, 1):
+        cx, cz = side * 0.17, 1.16
+        def mirror(points):
+            return [(cx + side * x, cz + z) for x, z in points]
+        eye_outline = flat_polygon(f'EyeOutline_{side}', mirror(outer_eye), -0.395, M['eye_dark'])
+        parent(eye_outline, driver)
+        iris = flat_polygon(f'Iris_{side}', mirror(inner_eye), -0.396, M['teal'])
         parent(iris, driver)
-        pupil = rounded_cube(
+        upper_shade = flat_polygon(
+            f'EyeUpperShade_{side}',
+            mirror([(-0.050, 0.071), (0.028, 0.082), (0.052, 0.050), (0.044, 0.025), (-0.047, 0.028)]),
+            -0.397,
+            M['teal_dark'],
+        )
+        parent(upper_shade, driver)
+        pupil = flat_polygon(
             f'Pupil_{side}',
-            (side * 0.17, -0.49, 1.13),
-            (0.021, 0.008, 0.068),
+            mirror([(-0.013, 0.052), (0.012, 0.052), (0.014, -0.058), (-0.012, -0.058)]),
+            -0.398,
             M['eye_dark'],
-            0.02,
         )
         parent(pupil, driver)
-        highlight = uv(f'EyeHighlight_{side}', (side * 0.145, -0.5, 1.2), (0.02, 0.009, 0.03), M['white'], 20, 12)
+        highlight = flat_polygon(
+            f'EyeHighlight_{side}',
+            mirror([(-0.026, 0.044), (-0.012, 0.048), (-0.010, 0.030), (-0.024, 0.027)]),
+            -0.399,
+            M['white'],
+        )
         parent(highlight, driver)
-        upper_lash = curve(
-            f'UpperLash_{side}',
-            [
-                (side * 0.27, -0.505, 1.285),
-                (side * 0.17, -0.512, 1.27),
-                (side * 0.07, -0.505, 1.245),
-            ],
-            0.014,
-            M['eye_dark'],
-        )
-        parent(upper_lash, driver)
-        outer_x = side * 0.265
-        outer_lash = curve(
-            f'OuterLash_{side}',
-            [(outer_x, -0.506, 1.275), (outer_x + side * 0.008, -0.51, 1.18), (outer_x - side * 0.006, -0.506, 1.08)],
-            0.011,
-            M['eye_dark'],
-        )
-        parent(outer_lash, driver)
-        lower_lash = curve(
-            f'LowerLash_{side}',
-            [(side * 0.255, -0.505, 1.075), (side * 0.17, -0.51, 1.055), (side * 0.09, -0.505, 1.075)],
-            0.007,
-            M['eye_dark'],
-        )
-        parent(lower_lash, driver)
-        eyebrow = curve(
+        eyebrow = flat_polygon(
             f'Eyebrow_{side}',
-            [(side * 0.26, -0.485, 1.37), (side * 0.17, -0.491, 1.345), (side * 0.08, -0.485, 1.31)],
-            0.012,
-            M['hair_dark'],
+            [
+                (side * 0.075, 1.305), (side * 0.255, 1.35),
+                (side * 0.25, 1.325), (side * 0.078, 1.282),
+            ],
+            -0.400,
+            M['eye_dark'],
         )
         parent(eyebrow, driver)
 
-    mouth = curve('SaberMouth', [(-0.047, -0.486, 0.99), (0, -0.49, 0.988), (0.047, -0.486, 0.99)], 0.007, M['eye_dark'])
+    nose_points = [
+        (0.009 * math.cos(math.tau * i / 12), 1.035 + 0.010 * math.sin(math.tau * i / 12))
+        for i in range(12)
+    ]
+    nose_dot = flat_polygon('SaberNoseDot', nose_points, -0.395, M['nose_soft'])
+    parent(nose_dot, driver)
+    mouth = flat_polygon(
+        'SaberMouth',
+        [(-0.030, 0.958), (0.030, 0.958), (0.027, 0.951), (-0.027, 0.951)],
+        -0.395,
+        M['eye_dark'],
+    )
     parent(mouth, driver)
 
     # Braided bun: central coil plus two rings of interlocking braid segments.
@@ -482,42 +600,80 @@ def build_driver(root):
     parent(ahoge, driver)
 
     for side in (-1, 1):
-        upper = uv(f'UpperArm_{side}', (side * 0.49, -0.17, 0.5), (0.15, 0.14, 0.28), M['blue'], 28, 18)
+        upper = uv(f'UpperArm_{side}', (side * 0.45, -0.16, 0.49), (0.12, 0.12, 0.25), M['blue'], 36, 22)
         parent(upper, driver)
-        forearm_root = empty(f'Gauntlet_{side}', (side * 0.54, -0.45, 0.32))
-        forearm_root.rotation_euler = (math.radians(70), 0, side * math.radians(7))
+        side_armor = tapered_panel(
+            f'WaistArmor_{side}',
+            (side * 0.39, -0.31, 0.22),
+            0.18,
+            0.24,
+            0.34,
+            0.075,
+            M['silver'],
+            0.035,
+            rotation=(0, 0, -side * 0.08),
+        )
+        parent(side_armor, driver)
+        forearm_root = empty(f'Gauntlet_{side}', (side * 0.49, -0.35, 0.42))
+        forearm_root.rotation_euler = (math.radians(12), 0, side * math.radians(4))
         parent(forearm_root, driver)
         for segment in range(4):
             plate = cylinder(
                 f'GauntletPlate_{side}_{segment}',
-                (0, 0, segment * 0.115),
-                0.125 - segment * 0.008,
-                0.105,
+                (0, 0, -segment * 0.11),
+                0.13 - segment * 0.006,
+                0.10,
                 M['silver'] if segment % 2 == 0 else M['armor_light'],
                 vertices=24,
             )
             parent(plate, forearm_root)
-        hand = uv(f'Glove_{side}', (side * 0.54, -0.72, 0.18), (0.13, 0.15, 0.12), M['silver'], 28, 18)
+        hand = uv(f'Glove_{side}', (side * 0.49, -0.30, 0.03), (0.12, 0.11, 0.10), M['armor_dark'], 32, 20)
         parent(hand, driver)
 
     # Blue bow, visible in the rear reference.
-    knot = uv('BowKnot', (0, 0.59, 1.05), (0.12, 0.08, 0.12), M['blue_dark'], 28, 18)
+    knot = uv('BowKnot', (0, 0.61, 1.06), (0.13, 0.07, 0.13), M['blue_dark'], 28, 18)
     parent(knot, driver)
     for side in (-1, 1):
-        loop = uv(f'BowLoop_{side}', (side * 0.24, 0.61, 1.05), (0.25, 0.07, 0.14), M['blue_dark'], 32, 20)
-        loop.rotation_euler[1] = side * 0.35
-        parent(loop, driver)
-        ribbon = rounded_cube(
-            f'BowRibbon_{side}',
-            (side * 0.16, 0.63, 0.78),
-            (0.09, 0.035, 0.28),
+        loop = tapered_panel(
+            f'BowLoop_{side}',
+            (side * 0.25, 0.60, 1.07),
+            0.30,
+            0.12,
+            0.46,
+            0.08,
             M['blue_dark'],
-            0.05,
-            rotation=(0, side * 0.18, side * 0.42),
+            0.065,
+            rotation=(0, 0, -side * math.pi / 2),
+        )
+        parent(loop, driver)
+        ribbon = tapered_panel(
+            f'BowRibbon_{side}',
+            (side * 0.17, 0.61, 0.78),
+            0.14,
+            0.23,
+            0.48,
+            0.07,
+            M['blue_dark'],
+            0.04,
+            rotation=(0, 0, side * 0.16),
         )
         parent(ribbon, driver)
-    back_armor = tapered_panel('BackArmor', (0, 0.34, 0.45), 0.52, 0.42, 0.55, 0.08, M['silver'], 0.06)
+    back_armor = tapered_panel('BackArmor', (0, 0.35, 0.48), 0.63, 0.52, 0.64, 0.09, M['silver'], 0.06)
     parent(back_armor, driver)
+    back_center = rounded_cube('BackArmorCenter', (0, 0.405, 0.48), (0.012, 0.012, 0.27), M['armor_dark'], 0.007)
+    parent(back_center, driver)
+    for side in (-1, 1):
+        back_seam = curve(
+            f'BackArmorSeam_{side}',
+            [
+                (side * 0.25, 0.408, 0.70),
+                (side * 0.11, 0.414, 0.50),
+                (side * 0.23, 0.408, 0.24),
+            ],
+            0.009,
+            M['armor_dark'],
+        )
+        parent(back_seam, driver)
 
 
 def setup_materials():
@@ -533,9 +689,11 @@ def setup_materials():
         'tire': mat('Tire rubber', (0.018, 0.018, 0.022), 0.86),
         'rim': mat('Wheel hub orange', (0.58, 0.27, 0.05), 0.48, 0.08),
         'ivory': mat('Ruffle and fangs', (0.96, 0.92, 0.82), 0.5),
+        'gold': mat('Dress gold trim', (0.85, 0.43, 0.045), 0.36, 0.18),
         'skin': mat('Saber skin', (1.0, 0.8, 0.71), 0.55),
-        'hair': mat('Saber blonde', (0.95, 0.56, 0.17), 0.55),
-        'hair_light': mat('Saber hair light', (1.0, 0.72, 0.29), 0.5),
+        'skin_flat': softly_emissive_mat('Saber illustrated face', (1.0, 0.72, 0.58), 0.62, 0.22),
+        'hair': mat('Saber blonde', (0.90, 0.50, 0.10), 0.42),
+        'hair_light': mat('Saber hair light', (1.0, 0.72, 0.28), 0.38),
         'hair_dark': mat('Saber hair line', (0.3, 0.18, 0.06), 0.6),
         'blue': mat('Saber dress blue', (0.008, 0.07, 0.36), 0.6),
         'blue_dark': mat('Saber ribbon navy', (0.004, 0.025, 0.18), 0.62),
@@ -543,7 +701,9 @@ def setup_materials():
         'armor_light': mat('Armor highlight', (0.84, 0.86, 0.86), 0.38, 0.32),
         'armor_dark': mat('Armor seams', (0.21, 0.23, 0.24), 0.38, 0.5),
         'eye_dark': mat('Anime eye outline', (0.025, 0.04, 0.035), 0.4),
-        'teal': mat('Saber teal iris', (0.002, 0.12, 0.085), 0.42),
+        'teal': softly_emissive_mat('Saber teal iris', (0.002, 0.34, 0.22), 0.42, 0.16),
+        'teal_dark': mat('Saber iris upper shade', (0.002, 0.085, 0.060), 0.42),
+        'nose_soft': mat('Saber tiny nose', (0.42, 0.055, 0.035), 0.5),
         'white': mat('Eye highlight', (1.0, 1.0, 0.98), 0.24),
     })
 
@@ -600,6 +760,12 @@ def render_views(root):
         point_camera(camera, (0, 0, 1.0 if name != 'bottom' else 0.7))
         scene.render.filepath = os.path.join(RENDER_DIR, f'{name}.png')
         bpy.ops.render.render(write_still=True)
+    ground.hide_render = True
+    camera.data.ortho_scale = 1.45
+    camera.location = (0, -7.5, 2.78)
+    point_camera(camera, (0, 0, 2.78))
+    scene.render.filepath = os.path.join(RENDER_DIR, 'face_closeup.png')
+    bpy.ops.render.render(write_still=True)
     ground.hide_render = True
 
 

@@ -53,6 +53,10 @@ const FRONT_STEER_MAX_RAD = THREE.MathUtils.degToRad(18)
 export const PLAYER_WHEEL_SPIN_RATE = 42
 const WHEEL_SPIN_AXIS = new THREE.Vector3(0, 0, 1)
 const WHEEL_STEER_AXIS = new THREE.Vector3(0, 1, 0)
+const LION_MAX_BODY_ROLL_RAD = THREE.MathUtils.degToRad(16)
+const LION_HALF_TRACK_M = 0.82
+const LION_ROLL_SPRING = 46
+const LION_ROLL_DAMPING = 9
 const FRONT_WHEEL_ROLL_SHELL_RATIO = 0.76
 const FRONT_WHEEL_INNER_SIDE_MARGIN = 0.04
 const REAR_WHEEL_ROLL_SHELL_RATIO = 0.42
@@ -1963,7 +1967,7 @@ function createSteerOnlyRig(
 }
 
 /** Auto-orient & scale a freshly loaded GLB so wheels touch y=0 and nose points +Z. */
-function fitGltfToTrack(model: THREE.Object3D): void {
+function fitGltfToTrack(model: THREE.Object3D, carId: PlayerCarId): void {
   // Initial bbox at native scale & orientation.
   let bbox = new THREE.Box3().setFromObject(model)
   let size = bbox.getSize(new THREE.Vector3())
@@ -1973,7 +1977,11 @@ function fitGltfToTrack(model: THREE.Object3D): void {
   // makes some packs with tall rear wings visibly smaller than others.
   const planarLongest = Math.max(size.x, size.z)
   if (planarLongest > 0) {
-    const s = TARGET_LENGTH_M / planarLongest
+    // The lion includes a large chibi rider, so matching an F1 car's full
+    // five-metre length also makes it nearly six metres tall. Give this
+    // novelty vehicle its own compact footprint instead.
+    const targetLength = carId === 'lion' ? 2.6 : TARGET_LENGTH_M
+    const s = targetLength / planarLongest
     model.scale.setScalar(s)
   }
 
@@ -2324,10 +2332,16 @@ export function createCar(options: CarOptions = {}): CarBundle {
   const group = new THREE.Group()
   group.name = 'car'
   group.scale.setScalar(options.visualScale ?? 1)
+  // Vehicle-specific presentation lives below the world-space driving pose.
+  // This lets the lion tip around its longitudinal axis without disturbing
+  // heading, ground-normal alignment, physics or the chase camera.
+  const visualRoot = new THREE.Group()
+  visualRoot.name = 'car-visual-root'
+  group.add(visualRoot)
 
   // ---- Placeholder shown immediately, replaced when GLB resolves.
   const placeholder = buildPlaceholder()
-  group.add(placeholder.group)
+  visualRoot.add(placeholder.group)
   let placeholderActive = true
   let activeModel: THREE.Object3D = placeholder.group
   let activeWheels: THREE.Mesh[] = placeholder.wheels
@@ -2336,6 +2350,8 @@ export function createCar(options: CarOptions = {}): CarBundle {
   let liveryElapsedMs = 0
   let steerOnlyRigs: SteerOnlyRig[] = []
   let smoothSteer = 0
+  let lionRoll = 0
+  let lionRollVelocity = 0
 
   // ---- Particle effects in WORLD space (parented to `particles`, not the
   // car group, so they don't drag along when the car moves/turns).
@@ -2430,9 +2446,10 @@ export function createCar(options: CarOptions = {}): CarBundle {
     requestedCarId = carId
     const version = ++loadVersion
     const definition = playerCarById(carId)
+    const modelUrl = definition.raceUrl ?? definition.url
     try {
       log(`fetching ${carId} [${definition.wheelStrategy}]:\n${definition.url.slice(0, 120)}${definition.url.length > 120 ? '…' : ''}`)
-      const buf = await loadLocalAsset(definition.url)
+      const buf = await loadLocalAsset(modelUrl)
       log(`fetched ${buf.byteLength} bytes, parsing…`)
 
       const gltf = await new Promise<{ scene: THREE.Group }>((resolve, reject) => {
@@ -2455,7 +2472,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
       })
       log(`parsed OK, meshes=${meshCount}, fitting…`)
 
-      fitGltfToTrack(model)
+      fitGltfToTrack(model, carId)
       if (definition.id === 'creator') {
         applyFomThemeColor(model, readFomThemeColor())
       } else if (definition.id === 'audi') {
@@ -2470,6 +2487,13 @@ export function createCar(options: CarOptions = {}): CarBundle {
         )
         : null
       sharpenCarTextures(model)
+      if (definition.reverse) {
+        // Ferrari and Mercedes are authored tail-first relative to the game's
+        // +Z forward convention. Rotate the complete model before extracting
+        // wheel slots so their front axle is classified correctly as well.
+        model.rotation.y += Math.PI
+        model.updateMatrixWorld(true)
+      }
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
@@ -2493,16 +2517,16 @@ export function createCar(options: CarOptions = {}): CarBundle {
       }
 
       if (placeholderActive) {
-        group.remove(placeholder.group)
+        visualRoot.remove(placeholder.group)
         disposePlaceholder(placeholder)
         placeholderActive = false
       } else {
         activeFomLivery?.dispose()
         clearCustomLivery(group, activeModel)
-        group.remove(activeModel)
+        visualRoot.remove(activeModel)
         disposeLoadedModel(activeModel)
       }
-      group.add(model)
+      visualRoot.add(model)
       if (definition.id === 'audi') {
         try {
           await applyCustomLivery(group, model)
@@ -2512,7 +2536,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
       }
       if (disposed || version !== loadVersion) {
         clearCustomLivery(group, model)
-        group.remove(model)
+        visualRoot.remove(model)
         nextFomLivery?.dispose()
         disposeLoadedModel(model)
         return
@@ -2525,6 +2549,10 @@ export function createCar(options: CarOptions = {}): CarBundle {
       liveryElapsedMs = 0
       steerOnlyRigs = []
       smoothSteer = 0
+      lionRoll = 0
+      lionRollVelocity = 0
+      visualRoot.position.y = 0
+      visualRoot.rotation.z = 0
       const bbox = new THREE.Box3().setFromObject(model)
       const sz = bbox.getSize(new THREE.Vector3())
       log(
@@ -2566,7 +2594,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
       const baseX = group.position.x + back.x * 2.4
       const baseZ = group.position.z + back.z * 2.4
       trailPos[idx * 3 + 0] = baseX + (Math.random() - 0.5) * 1.6
-      trailPos[idx * 3 + 1] = 0.4 + Math.random() * 0.3
+      trailPos[idx * 3 + 1] = group.position.y + 0.4 + Math.random() * 0.3
       trailPos[idx * 3 + 2] = baseZ + (Math.random() - 0.5) * 1.6
       trailLife[idx] = PARTICLE_LIFE
     }
@@ -2595,13 +2623,44 @@ export function createCar(options: CarOptions = {}): CarBundle {
     for (const w of activeWheels) w.rotation.x += spin
     smoothSteer += (THREE.MathUtils.clamp(steer, -1, 1) - smoothSteer) * Math.min(1, dt * 14)
 
-    updatePlayerWheelRigs(wheelRigs, spin, smoothSteer)
+    const isLion = requestedCarId === 'lion'
+    // The lion's front wheels remain visually straight. Its steering cue is
+    // instead the whole kart tipping outward under lateral load.
+    const visualWheelSteer = isLion ? 0 : smoothSteer
+    updatePlayerWheelRigs(wheelRigs, isLion ? 0 : spin, visualWheelSteer)
     const steerOnlyQuat = new THREE.Quaternion().setFromAxisAngle(
       WHEEL_STEER_AXIS,
-      -smoothSteer * FRONT_STEER_MAX_RAD,
+      -visualWheelSteer * FRONT_STEER_MAX_RAD,
     )
     for (const rig of steerOnlyRigs) {
       rig.steerPivot.pivot.quaternion.copy(rig.steerPivot.baseQuaternion).multiply(steerOnlyQuat)
+    }
+
+    if (isLion) {
+      // Lateral load rises roughly with v². A damped spring gives the heavy,
+      // playful left/right rock and a small rebound when steering is released.
+      // This is a deliberately readable arcade exaggeration: the kart starts
+      // transferring weight at city speed and reaches near-full lean well
+      // before an F1 car's maximum velocity.
+      const speedLoad = THREE.MathUtils.smoothstep(speed01, 0.02, 0.24)
+      const targetRoll = smoothSteer * speedLoad * LION_MAX_BODY_ROLL_RAD
+      lionRollVelocity += (targetRoll - lionRoll) * LION_ROLL_SPRING * dt
+      lionRollVelocity *= Math.exp(-LION_ROLL_DAMPING * dt)
+      lionRoll += lionRollVelocity * dt
+      lionRoll = THREE.MathUtils.clamp(
+        lionRoll,
+        -LION_MAX_BODY_ROLL_RAD * 1.12,
+        LION_MAX_BODY_ROLL_RAD * 1.12,
+      )
+      visualRoot.rotation.z = lionRoll
+      // Arcade lion behaviour: pivot around the inside contact line so the
+      // outside wheels lift visibly during a turn.
+      visualRoot.position.y = Math.abs(Math.sin(lionRoll)) * LION_HALF_TRACK_M
+    } else {
+      lionRoll = 0
+      lionRollVelocity = 0
+      visualRoot.rotation.z = 0
+      visualRoot.position.y = 0
     }
 
     // Trails: tick down life; on death move to sentinel so they vanish.

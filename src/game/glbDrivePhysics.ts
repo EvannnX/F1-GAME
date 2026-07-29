@@ -13,6 +13,8 @@ import {
 } from './wallCollision'
 
 const MAX_SPEED = 82
+const ARCADE_BOOST_SPEED_ADD = 16
+const ARCADE_BOOST_ACCEL_ADD = 30
 const ACCEL = 48
 const BRAKE = 72
 const DRAG = 0.42
@@ -51,6 +53,8 @@ export interface GlbDriveState {
 export interface GlbDrivePhysics {
   state: GlbDriveState
   reset: (pose: { pos: THREE.Vector3; heading: number; normal?: THREE.Vector3 }) => void
+  setArcadeBoost: (strength: number) => void
+  consumeObstacleImpact: () => boolean
   update: (dt: number, input: GameInput) => void
   coast: (dt: number, drag?: number) => void
 }
@@ -75,6 +79,8 @@ export function createGlbDrivePhysics(
     locked: false,
     normal: new THREE.Vector3(),
   }
+  let arcadeBoostStrength = 0
+  let obstacleImpactPending = false
 
   const applyHit = (hit: LowPolyShanghaiGroundHit, dt = 0, immediate = false): void => {
     const targetY = hit.point.y + RIDE_HEIGHT
@@ -190,6 +196,8 @@ export function createGlbDrivePhysics(
     state.normal.copy(pose.normal ?? new THREE.Vector3(0, 1, 0)).normalize()
     state.onRoad = true
     resetWallContact(wallContact)
+    arcadeBoostStrength = 0
+    obstacleImpactPending = false
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading))
     const hit = sampleChassisGround(forward)
     if (hit) applyHit(hit, 0, true)
@@ -199,8 +207,10 @@ export function createGlbDrivePhysics(
   const update = (dt: number, input: GameInput): void => {
     const manualThrottle = input.manualThrottle === true
     const was = state.pos.clone()
+    const speedLimit = MAX_SPEED + ARCADE_BOOST_SPEED_ADD * arcadeBoostStrength
 
     state.speed += input.throttle * ACCEL * dt
+    state.speed += arcadeBoostStrength * ARCADE_BOOST_ACCEL_ADD * dt
     state.speed -= input.brake * BRAKE * dt
     state.speed -= state.speed * DRAG * dt
     if (!manualThrottle && input.brake < 0.05 && state.speed < AUTO_CRUISE_SPEED) {
@@ -209,10 +219,10 @@ export function createGlbDrivePhysics(
     if (!manualThrottle && state.speed > AUTO_CRUISE_SPEED) {
       state.speed = Math.max(AUTO_CRUISE_SPEED, state.speed - AUTO_CRUISE_DECEL * dt)
     }
-    state.speed = clamp(state.speed, 0, MAX_SPEED)
+    state.speed = clamp(state.speed, 0, speedLimit)
     if (state.speed > state.topSpeed) state.topSpeed = state.speed
 
-    const turnFactor = 1 - (state.speed / MAX_SPEED) * 0.52
+    const turnFactor = 1 - Math.min(1, state.speed / MAX_SPEED) * 0.52
     state.heading -= input.steer * TURN_RATE * turnFactor * dt
 
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading))
@@ -222,7 +232,7 @@ export function createGlbDrivePhysics(
     const gravityOnSurface = new THREE.Vector3(0, -9.81, 0)
       .addScaledVector(state.normal, 9.81 * state.normal.y)
     const slopeAccel = gravityOnSurface.dot(forward) * SLOPE_GRAVITY_FACTOR
-    state.speed = clamp(state.speed + slopeAccel * dt, 0, MAX_SPEED)
+    state.speed = clamp(state.speed + slopeAccel * dt, 0, speedLimit)
     if (state.speed > state.topSpeed) state.topSpeed = state.speed
 
     state.pos.x += forward.x * state.speed * dt
@@ -240,7 +250,10 @@ export function createGlbDrivePhysics(
         wallContact,
       )
       if (wallMove.corrected) hit = sampleChassisGround(forward)
-      if (wallMove.impacted) state.speed *= wallMove.speedRetention
+      if (wallMove.impacted) {
+        obstacleImpactPending = true
+        state.speed *= wallMove.speedRetention
+      }
       if (wallMove.scraping) {
         state.speed = Math.min(state.speed, WALL_SCRAPE_MAX_SPEED)
         state.speed *= Math.exp(-WALL_SCRAPE_DRAG * dt)
@@ -281,7 +294,17 @@ export function createGlbDrivePhysics(
     state.speed *= Math.exp(-drag * dt)
   }
 
-  return { state, reset, update, coast }
+  const setArcadeBoost = (strength: number): void => {
+    arcadeBoostStrength = clamp(strength, 0, 1)
+  }
+
+  const consumeObstacleImpact = (): boolean => {
+    const impacted = obstacleImpactPending
+    obstacleImpactPending = false
+    return impacted
+  }
+
+  return { state, reset, setArcadeBoost, consumeObstacleImpact, update, coast }
 }
 
 export const GLB_DRIVE_MAX_SPEED = MAX_SPEED

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
 import shanghaiModelUrl from '../shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb?url'
 import { loadLocalAsset } from '../utils/localAsset'
@@ -433,7 +434,71 @@ function normalizeShanghai2018AdUvs(root: THREE.Object3D): number {
   return correctedComponents
 }
 
-async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void> {
+function createIntegratedGpuTrackMaterial(
+  source: THREE.MeshStandardMaterial,
+): THREE.MeshPhongMaterial {
+  const roughness = THREE.MathUtils.clamp(source.roughness, 0, 1)
+  const material = new THREE.MeshPhongMaterial({
+    color: source.color,
+    map: source.map,
+    lightMap: source.lightMap,
+    lightMapIntensity: source.lightMapIntensity,
+    aoMap: source.aoMap,
+    aoMapIntensity: source.aoMapIntensity,
+    emissive: source.emissive,
+    emissiveMap: source.emissiveMap,
+    emissiveIntensity: source.emissiveIntensity,
+    bumpMap: source.bumpMap,
+    bumpScale: source.bumpScale,
+    normalMap: source.normalMap,
+    normalMapType: source.normalMapType,
+    normalScale: source.normalScale,
+    displacementMap: source.displacementMap,
+    displacementScale: source.displacementScale,
+    displacementBias: source.displacementBias,
+    alphaMap: source.alphaMap,
+    envMap: source.envMap,
+    combine: THREE.MixOperation,
+    reflectivity: source.metalness * 0.08,
+    refractionRatio: 0.98,
+    specular: new THREE.Color().setScalar(0.035 + (1 - roughness) * 0.055),
+    shininess: 2 + (1 - roughness) * 18,
+    flatShading: source.flatShading,
+    fog: source.fog,
+    vertexColors: source.vertexColors,
+    opacity: source.opacity,
+    transparent: source.transparent,
+    alphaTest: source.alphaTest,
+    side: source.side,
+    depthTest: source.depthTest,
+    depthWrite: source.depthWrite,
+    colorWrite: source.colorWrite,
+    blending: source.blending,
+    blendSrc: source.blendSrc,
+    blendDst: source.blendDst,
+    blendEquation: source.blendEquation,
+    premultipliedAlpha: source.premultipliedAlpha,
+    dithering: source.dithering,
+    polygonOffset: source.polygonOffset,
+    polygonOffsetFactor: source.polygonOffsetFactor,
+    polygonOffsetUnits: source.polygonOffsetUnits,
+    alphaToCoverage: source.alphaToCoverage,
+  })
+  material.name = source.name
+  material.visible = source.visible
+  material.toneMapped = source.toneMapped
+  // The transparent circuit surfaces are flat decals, sponsor panels and
+  // fence cards; separate back/front passes only duplicate submissions.
+  material.forceSinglePass = true
+  if (material.map) material.map.needsUpdate = true
+  return material
+}
+
+async function prepareShanghai2018Materials(
+  root: THREE.Object3D,
+  maxTextureAnisotropy = 16,
+  useIntegratedGpuMaterials = false,
+): Promise<void> {
   const overrideTargets = new Map<string, THREE.MeshStandardMaterial[]>()
   const blueRunoffMaterials: THREE.MeshStandardMaterial[] = []
   const blueRunoffContinuation: Array<{
@@ -456,7 +521,7 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
         blueRunoffContinuation.push({ material, object: obj })
       }
       if (material.map) {
-        material.map.anisotropy = 16
+        material.map.anisotropy = Math.min(16, maxTextureAnisotropy)
         material.map.needsUpdate = true
       }
       if (SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS.has(material.name)) {
@@ -536,7 +601,7 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
         texture.generateMipmaps = true
         texture.magFilter = THREE.LinearFilter
         texture.minFilter = THREE.LinearMipmapLinearFilter
-        texture.anisotropy = 8
+        texture.anisotropy = Math.min(8, maxTextureAnisotropy)
         if (materialName === 'Prato') {
           texture.wrapS = THREE.RepeatWrapping
           texture.wrapT = THREE.RepeatWrapping
@@ -562,6 +627,30 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
       () => resolve(),
     )
   })))
+
+  if (useIntegratedGpuMaterials) {
+    // Keep the original textures, normal maps, alpha policy and color data,
+    // while replacing the expensive PBR BRDF used even on flat baked boards.
+    // Player and opponent cars keep their full PBR materials.
+    const replacements = new Map<THREE.MeshStandardMaterial, THREE.MeshPhongMaterial>()
+    const replace = (material: THREE.Material): THREE.Material => {
+      if (!(material instanceof THREE.MeshStandardMaterial)) {
+        material.forceSinglePass = true
+        return material
+      }
+      const cached = replacements.get(material)
+      if (cached) return cached
+      const replacement = createIntegratedGpuTrackMaterial(material)
+      replacements.set(material, replacement)
+      return replacement
+    }
+    root.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.material = Array.isArray(object.material)
+        ? object.material.map(replace)
+        : replace(object.material)
+    })
+  }
 }
 
 function shanghai2018MaterialGuide(root: THREE.Object3D, materialName: string): {
@@ -782,9 +871,15 @@ function visualCullDistanceForMesh(mesh: THREE.Mesh): number {
   const name = meshSearchName(mesh)
   if (meshIsStartAreaEssentialVisual(mesh)) return 10000
   if (name.includes('tree')) return 520
-  if (name.includes('barrier') || name.includes('fence') || name.includes('wall')) return 460
+  if (
+    name.includes('barrier')
+    || name.includes('barriere')
+    || name.includes('fence')
+    || name.includes('wall')
+    || name.includes('rail')
+  ) return 420
   if (name.includes('garage') || name.includes('tent') || name.includes('stand')) return 820
-  return 950
+  return 700
 }
 
 function shouldChunkShanghaiVisualMesh(mesh: THREE.Mesh): boolean {
@@ -792,7 +887,14 @@ function shouldChunkShanghaiVisualMesh(mesh: THREE.Mesh): boolean {
   if (meshSearchName(mesh).includes('collider')) return false
   if (meshIsStartAreaEssentialVisual(mesh)) return false
   const position = mesh.geometry?.getAttribute('position')
-  return Boolean(position && position.count > 30000)
+  if (!position || position.count <= 8000) return false
+  mesh.geometry.computeBoundingBox()
+  mesh.updateWorldMatrix(true, false)
+  const worldSize = mesh.geometry.boundingBox
+    ?.clone()
+    .applyMatrix4(mesh.matrixWorld)
+    .getSize(new THREE.Vector3())
+  return Boolean(worldSize && Math.max(worldSize.x, worldSize.z) > 240)
 }
 
 function attributeValue(
@@ -817,40 +919,67 @@ function cloneMeshTransform(source: THREE.Mesh, target: THREE.Mesh): void {
 }
 
 function chunkShanghaiVisualMesh(mesh: THREE.Mesh, gridSize = 120): THREE.Mesh[] {
-  const source = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry
+  const source = mesh.geometry
   const position = source.getAttribute('position')
   if (!position || position.count < 3) return []
+  mesh.updateWorldMatrix(true, false)
+  const worldCenter = new THREE.Vector3()
   const attrNames = Object.keys(source.attributes)
-  const buckets = new Map<string, Record<string, number[]>>()
+  interface ChunkBucket {
+    attributes: Record<string, number[]>
+    indices: number[]
+    remap: Map<number, number>
+  }
+  const buckets = new Map<string, ChunkBucket>()
   const metas = new Map<string, { itemSize: number; normalized: boolean }>()
   for (const name of attrNames) {
     const attr = source.getAttribute(name)
     metas.set(name, { itemSize: attr.itemSize, normalized: attr.normalized })
   }
 
-  const bucketForTriangle = (i: number): Record<string, number[]> => {
-    const cx = (position.getX(i) + position.getX(i + 1) + position.getX(i + 2)) / 3
-    const cz = (position.getZ(i) + position.getZ(i + 1) + position.getZ(i + 2)) / 3
-    const key = `${Math.floor(cx / gridSize)}:${Math.floor(cz / gridSize)}`
+  const bucketForTriangle = (a: number, b: number, c: number): ChunkBucket => {
+    const cx = (position.getX(a) + position.getX(b) + position.getX(c)) / 3
+    const cy = (position.getY(a) + position.getY(b) + position.getY(c)) / 3
+    const cz = (position.getZ(a) + position.getZ(b) + position.getZ(c)) / 3
+    // The source GLB stores several primitives in normalized local space and
+    // reaches its 3.5 km world size through node transforms. Bucketing local
+    // coordinates therefore left an entire circuit in one "120 m" chunk.
+    // Choose the bucket in world space while preserving local vertex data.
+    worldCenter.set(cx, cy, cz).applyMatrix4(mesh.matrixWorld)
+    const key = `${Math.floor(worldCenter.x / gridSize)}:${Math.floor(worldCenter.z / gridSize)}`
     let bucket = buckets.get(key)
     if (!bucket) {
-      bucket = {}
-      for (const name of attrNames) bucket[name] = []
+      const attributes: Record<string, number[]> = {}
+      for (const name of attrNames) attributes[name] = []
+      bucket = { attributes, indices: [], remap: new Map() }
       buckets.set(key, bucket)
     }
     return bucket
   }
 
-  for (let i = 0; i < position.count; i += 3) {
-    const bucket = bucketForTriangle(i)
-    for (let vertex = i; vertex < i + 3; vertex++) {
-      for (const name of attrNames) {
-        const attr = source.getAttribute(name)
-        const values = bucket[name]
-        for (let component = 0; component < attr.itemSize; component++) {
-          values.push(attributeValue(attr, vertex, component))
+  const sourceIndex = source.getIndex()
+  const elementCount = sourceIndex?.count ?? position.count
+  for (let i = 0; i + 2 < elementCount; i += 3) {
+    const triangle = [
+      sourceIndex ? sourceIndex.getX(i) : i,
+      sourceIndex ? sourceIndex.getX(i + 1) : i + 1,
+      sourceIndex ? sourceIndex.getX(i + 2) : i + 2,
+    ]
+    const bucket = bucketForTriangle(triangle[0], triangle[1], triangle[2])
+    for (const vertex of triangle) {
+      let localIndex = bucket.remap.get(vertex)
+      if (localIndex === undefined) {
+        localIndex = bucket.remap.size
+        bucket.remap.set(vertex, localIndex)
+        for (const name of attrNames) {
+          const attr = source.getAttribute(name)
+          const values = bucket.attributes[name]
+          for (let component = 0; component < attr.itemSize; component++) {
+            values.push(attributeValue(attr, vertex, component))
+          }
         }
       }
+      bucket.indices.push(localIndex)
     }
   }
 
@@ -864,9 +993,10 @@ function chunkShanghaiVisualMesh(mesh: THREE.Mesh, gridSize = 120): THREE.Mesh[]
       if (!meta) continue
       chunkGeometry.setAttribute(
         name,
-        new THREE.BufferAttribute(new Float32Array(bucket[name]), meta.itemSize, meta.normalized),
+        new THREE.BufferAttribute(new Float32Array(bucket.attributes[name]), meta.itemSize, meta.normalized),
       )
     }
+    chunkGeometry.setIndex(bucket.indices)
     chunkGeometry.computeBoundingBox()
     chunkGeometry.computeBoundingSphere()
     const chunk = new THREE.Mesh(chunkGeometry, mesh.material)
@@ -877,30 +1007,74 @@ function chunkShanghaiVisualMesh(mesh: THREE.Mesh, gridSize = 120): THREE.Mesh[]
     chunks.push(chunk)
   }
 
-  if (source !== mesh.geometry) source.dispose()
   return chunks
 }
 
 export function optimizeLowPolyShanghaiRendering(
   root: THREE.Object3D,
 ): LowPolyShanghaiRenderOptimization {
+  const candidates: THREE.Mesh[] = []
+  root.updateMatrixWorld(true)
   root.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return
     obj.frustumCulled = true
     if (meshIsColliderOnly(obj)) obj.visible = false
+    else if (shouldChunkShanghaiVisualMesh(obj) && !Array.isArray(obj.material)) candidates.push(obj)
   })
-  return { chunkCount: 0, hiddenOriginals: 0 }
+
+  let chunkCount = 0
+  let hiddenOriginals = 0
+  for (const mesh of candidates) {
+    const parent = mesh.parent
+    if (!parent) continue
+    const chunks = chunkShanghaiVisualMesh(mesh)
+    if (chunks.length <= 1) {
+      for (const chunk of chunks) chunk.geometry.dispose()
+      continue
+    }
+    for (const chunk of chunks) parent.add(chunk)
+    // Keep the source mesh and geometry for the ground/obstacle samplers, but
+    // render only its spatial chunks. This changes neither texture quality nor
+    // triangle density; it simply lets Three.js reject off-screen track areas.
+    mesh.visible = false
+    mesh.userData.driveHiddenVisualOriginal = true
+    chunkCount += chunks.length
+    hiddenOriginals++
+  }
+  root.updateMatrixWorld(true)
+  return { chunkCount, hiddenOriginals }
 }
 
 export function createLowPolyShanghaiVisualOptimizer(
   root: THREE.Object3D,
 ): LowPolyShanghaiVisualOptimizer {
-  const update = (focus: THREE.Vector3, force = false): void => {
-    void focus
-    void force
-  }
+  const chunks: Array<{
+    mesh: THREE.Mesh
+    center: THREE.Vector3
+    cullDistanceSq: number
+  }> = []
+  root.updateMatrixWorld(true)
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || !obj.userData.driveVisualChunk) return
+    obj.geometry.computeBoundingSphere()
+    const center = (obj.geometry.boundingSphere?.center ?? new THREE.Vector3())
+      .clone()
+      .applyMatrix4(obj.matrixWorld)
+    chunks.push({
+      mesh: obj,
+      center,
+      cullDistanceSq: Number(obj.userData.driveCullDistanceSq) || 950 * 950,
+    })
+  })
 
-  void root
+  const lastFocus = new THREE.Vector3(Number.POSITIVE_INFINITY, 0, 0)
+  const update = (focus: THREE.Vector3, force = false): void => {
+    if (!force && lastFocus.distanceToSquared(focus) < 28 * 28) return
+    lastFocus.copy(focus)
+    for (const chunk of chunks) {
+      chunk.mesh.visible = chunk.center.distanceToSquared(focus) <= chunk.cullDistanceSq
+    }
+  }
   return { update }
 }
 
@@ -1058,6 +1232,8 @@ function getDracoLoader(): DRACOLoader {
 export function addLowPolyShanghai(
   scene: THREE.Scene,
   initialPlacement: Partial<LowPolyShanghaiPlacement> = {},
+  maxTextureAnisotropy = 16,
+  useIntegratedGpuMaterials = false,
 ): LowPolyShanghaiBundle {
   const group = new THREE.Group()
   group.name = 'lowpoly-shanghai-root'
@@ -1085,7 +1261,11 @@ export function addLowPolyShanghai(
       async (gltf) => {
         const model = gltf.scene
         model.name = 'shanghai-international-circuit-full-model'
-        await prepareShanghai2018Materials(model)
+        await prepareShanghai2018Materials(
+          model,
+          maxTextureAnisotropy,
+          useIntegratedGpuMaterials,
+        )
         model.updateMatrixWorld(true)
         const normalizedAdComponents = normalizeShanghai2018AdUvs(model)
         console.info(`[F1S] normalized ${normalizedAdComponents} ad UV components`)
@@ -1479,9 +1659,29 @@ export function createLowPolyShanghaiGroundSampler(
   const down = new THREE.Vector3(0, -1, 0)
   const roadTargets = collectRoadSurfaceTargets(lowPolyShanghai.group)
   const groundTargets = collectGroundSurfaceTargets(lowPolyShanghai.group)
+  const raycastTargets = groundTargets.length
+    ? groundTargets
+    : (roadTargets.length ? roadTargets : [lowPolyShanghai.group])
   const cache = new Map<string, LowPolyShanghaiGroundHit | null>()
   let lastPlacementKey = ''
   let matrixWorldFresh = false
+
+  // The Shanghai circuit has well over a million triangles. THREE's default
+  // Mesh.raycast checks every triangle, which made each physics ground probe
+  // take longer than a frame while the car was moving. Build one reusable BVH
+  // per source geometry and keep the exact same hit/material filtering below.
+  raycastTargets.forEach((target) => {
+    target.traverse((obj) => {
+      if (!(obj instanceof THREE.Mesh)) return
+      if (!obj.geometry.boundsTree) {
+        obj.geometry.boundsTree = new MeshBVH(obj.geometry, {
+          targetLeafSize: 10,
+          setBoundingBox: true,
+        })
+      }
+      obj.raycast = acceleratedRaycast
+    })
+  })
 
   const placementKey = (): string => {
     const p = lowPolyShanghai.getPlacement()
@@ -1516,8 +1716,7 @@ export function createLowPolyShanghaiGroundSampler(
     raycaster.set(origin, down)
     raycaster.near = 0
     raycaster.far = 6000
-    const targets = groundTargets.length ? groundTargets : (roadTargets.length ? roadTargets : [lowPolyShanghai.group])
-    const hits = raycaster.intersectObjects(targets, true)
+    const hits = raycaster.intersectObjects(raycastTargets, true)
     const runoffHit = hits.find((hit) =>
       SHANGHAI_2018_ROADLIKE_RUNOFF_MATERIALS.has(materialNameForHit(hit)),
     ) ?? null
@@ -1570,6 +1769,14 @@ export async function createLowPolyShanghaiGroundGridSampler(
   const cols = Math.max(2, Math.ceil((maxX - minX) / cellSize) + 1)
   const rows = Math.max(2, Math.ceil((maxZ - minZ) / cellSize) + 1)
   const total = cols * rows
+  // Baking the whole 3.5 km circuit at a six-to-eight metre resolution would
+  // require hundreds of thousands of probes and can never fit the loading
+  // screen's time budget. The BVH-backed sampler is already fast enough to use
+  // directly and remains exact at kerbs and elevation changes.
+  if (total > 50_000 && Number.isFinite(timeBudgetMs)) {
+    options.onProgress?.(1, 'ground acceleration ready')
+    return rawSampler
+  }
   const y = new Float32Array(total)
   const nx = new Float32Array(total)
   const ny = new Float32Array(total)

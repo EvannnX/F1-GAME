@@ -3,8 +3,9 @@ import ferrariUrl from '../assets/已压缩车模型/2022_ferrari_f1-75 (1)-opti
 import mclarenUrl from '../assets/models/McLaren_MCL35M.opt.glb?url'
 import mercedesUrl from '../assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb?url'
 import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
-import saberLionUrl from '../assets/models/SaberLion.glb?url'
 import fomCreatorUrl from '../assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb?url'
+import saberLionUrl from '../assets/models/SaberLionCandidate.opt.glb?url'
+import saberLionRaceUrl from '../assets/models/SaberLionCandidate.race.glb?url'
 
 export type PlayerCarId =
   | 'audi'
@@ -32,6 +33,8 @@ export interface PlayerCarDefinition {
   team: string
   model: string
   url: string
+  /** Optional lighter in-race LOD; the garage continues to use `url`. */
+  raceUrl?: string
   reverse: boolean
   teamId: TeamId
   accent: string
@@ -101,6 +104,7 @@ const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
     team: 'Holy Grail Racing',
     model: 'SABER LION',
     url: saberLionUrl,
+    raceUrl: saberLionRaceUrl,
     reverse: false,
     teamId: 'redbull',
     accent: '#d9911b',
@@ -150,12 +154,15 @@ const LITE_PLAYER_CAR_IDS = new Set<PlayerCarId>([
   'creator-partner',
 ])
 
-export const PLAYER_CARS: readonly PlayerCarDefinition[] = __F1TI_LITE_SINGLE_CAR__
-  ? FULL_PLAYER_CARS.filter((car) => LITE_PLAYER_CAR_IDS.has(car.id))
-  : FULL_PLAYER_CARS
+export const PLAYER_CARS: readonly PlayerCarDefinition[] = __F1TI_LITE_LION__
+  ? FULL_PLAYER_CARS.filter((car) => car.id === 'lion')
+  : __F1TI_LITE_SINGLE_CAR__
+    ? FULL_PLAYER_CARS.filter((car) => LITE_PLAYER_CAR_IDS.has(car.id))
+    : FULL_PLAYER_CARS
 
 const STORAGE_KEY = 'f1s_selected_player_car_v1'
 const CHANGE_EVENT = 'f1s-player-car-change'
+const PREVIEW_EVENT = 'f1s-player-car-preview'
 
 export function playerCarById(id: PlayerCarId): PlayerCarDefinition {
   return PLAYER_CARS.find((car) => car.id === id) ?? PLAYER_CARS[0]
@@ -173,7 +180,11 @@ export function wheelStrategyForPlayerCar(
 }
 
 export function readSelectedPlayerCar(): PlayerCarId {
-  const defaultCar = __F1TI_LITE_SINGLE_CAR__ ? 'audi' : 'redbull'
+  const defaultCar = __F1TI_LITE_LION__
+    ? 'lion'
+    : __F1TI_LITE_SINGLE_CAR__
+      ? 'audi'
+      : 'redbull'
   try {
     const value = localStorage.getItem(STORAGE_KEY)
     return PLAYER_CARS.some((car) => car.id === value) ? value as PlayerCarId : defaultCar
@@ -191,10 +202,22 @@ export function selectPlayerCar(id: PlayerCarId): void {
   window.dispatchEvent(new CustomEvent<PlayerCarId>(CHANGE_EVENT, { detail: id }))
 }
 
+export function previewPlayerCar(id: PlayerCarId): void {
+  window.dispatchEvent(new CustomEvent<PlayerCarId>(PREVIEW_EVENT, { detail: id }))
+}
+
 export function onPlayerCarChange(listener: (id: PlayerCarId) => void): () => void {
   const handler = (event: Event): void => {
     listener((event as CustomEvent<PlayerCarId>).detail)
   }
   window.addEventListener(CHANGE_EVENT, handler)
   return () => window.removeEventListener(CHANGE_EVENT, handler)
+}
+
+export function onPlayerCarPreview(listener: (id: PlayerCarId) => void): () => void {
+  const handler = (event: Event): void => {
+    listener((event as CustomEvent<PlayerCarId>).detail)
+  }
+  window.addEventListener(PREVIEW_EVENT, handler)
+  return () => window.removeEventListener(PREVIEW_EVENT, handler)
 }

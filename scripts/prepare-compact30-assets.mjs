@@ -71,6 +71,8 @@ copyGlbUnchanged(
 )
 copyGlbUnchanged('src/assets/models/Ferrari_26.opt.glb', 'ferrari-opponent.glb')
 copyGlbUnchanged('src/assets/models/Mercedes_W13.glb', 'mercedes-opponent.glb')
+copyGlbUnchanged('src/assets/models/SaberLionCandidate.opt.glb', 'lion-player.glb')
+copyGlbUnchanged('src/assets/models/SaberLionCandidate.race.glb', 'lion-race.glb')
 
 ffmpeg(
   join(root, 'src/assets/background/Cloudymorning2k.hdr'),
@@ -90,6 +92,24 @@ ffmpeg(
   join(output, 'bgm-compact.mp3'),
   ['-ac', '2', '-ar', '44100', '-b:a', '96k'],
 )
+ffmpeg(
+  join(root, 'src/assets/audio/lion-super-affection-instrumental.mp3'),
+  join(output, 'lion-race-bgm-compact.mp3'),
+  ['-ac', '2', '-ar', '44100', '-b:a', '96k'],
+)
+ffmpeg(
+  join(root, 'src/assets/audio/lion-super-affection-finish.mp3'),
+  join(output, 'lion-finish-bgm-compact.mp3'),
+  ['-ac', '2', '-ar', '44100', '-b:a', '96k'],
+)
+
+for (const reactionName of ['start', 'coin', 'boost', 'finish']) {
+  ffmpeg(
+    join(root, `src/assets/ui/saberReactions/saber-${reactionName}.png`),
+    join(output, `saber-${reactionName}-compact.webp`),
+    ['-c:v', 'libwebp', '-quality', '92', '-compression_level', '6', '-frames:v', '1'],
+  )
+}
 
 cpSync(join(root, 'src/f1ti/首页背景.gif'), join(output, 'home-compact.gif'))
 
@@ -119,22 +139,33 @@ for (const sourceName of [
 }
 
 const sharpModulePath = findSharpModule()
-if (!sharpModulePath) throw new Error('A cached sharp installation is required')
-const sharp = (await import(pathToFileURL(sharpModulePath).href)).default
 mkdirSync(join(runtime, 'track-textures'), { recursive: true })
-for (const [sourceName, outputName] of [
+const trackTextures = [
   ['asphalt-new.png', 'asphalt.webp'],
   ['Meshesgrassxgrass0171_diff_18.png', 'grass.webp'],
   ['PAT_asf_out_123.png', 'paddock.webp'],
-]) {
-  await sharp(join(root, 'src/shanghai-international-circuit-2018-layout/textures', sourceName))
-    .webp({
-      quality: 88,
-      alphaQuality: 100,
-      smartSubsample: true,
-      effort: 6,
-    })
-    .toFile(join(runtime, 'track-textures', outputName))
+]
+if (sharpModulePath) {
+  const sharp = (await import(pathToFileURL(sharpModulePath).href)).default
+  for (const [sourceName, outputName] of trackTextures) {
+    await sharp(join(root, 'src/shanghai-international-circuit-2018-layout/textures', sourceName))
+      .webp({
+        quality: 88,
+        alphaQuality: 100,
+        smartSubsample: true,
+        effort: 6,
+      })
+      .toFile(join(runtime, 'track-textures', outputName))
+  }
+} else {
+  console.warn('No cached sharp installation; using ffmpeg for compact WebP textures.')
+  for (const [sourceName, outputName] of trackTextures) {
+    ffmpeg(
+      join(root, 'src/shanghai-international-circuit-2018-layout/textures', sourceName),
+      join(runtime, 'track-textures', outputName),
+      ['-c:v', 'libwebp', '-quality', '88', '-compression_level', '6', '-frames:v', '1'],
+    )
+  }
 }
 
 mkdirSync(join(runtime, 'video'), { recursive: true })

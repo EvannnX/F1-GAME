@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-lite-lion/
 *.log
 .DS_Store
 .vscode/
