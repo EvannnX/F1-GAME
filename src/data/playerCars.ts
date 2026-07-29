@@ -11,13 +11,14 @@ export type PlayerCarId =
   | 'mercedes'
   | 'creator'
   | 'creator-special'
+  | 'creator-partner'
 export type PlayerCarWheelStrategy =
   | 'redbull-github-v1'
   | 'ferrari-f1-75-named-v1'
   | 'mercedes-w15-compressed-v1'
   | 'fom-2026-material-v1'
   | 'pending'
-export type PlayerCarLivery = 'model' | 'fom-special'
+export type PlayerCarLivery = 'model' | 'fom-special' | 'fom-partner'
 
 export interface PlayerCarDefinition {
   id: PlayerCarId
@@ -32,12 +33,12 @@ export interface PlayerCarDefinition {
   livery?: PlayerCarLivery
 }
 
-export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
+const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
   {
     id: 'audi',
-    name: 'Audi DIY',
+    name: '定制你的方程式赛车',
     team: 'F1 2026 Custom Works',
-    model: 'FOM 白车 · 痛车专用',
+    model: '点击左下角按钮上传你的图片后进行生成',
     url: fomCreatorUrl,
     reverse: false,
     teamId: 'merc',
@@ -100,7 +101,30 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
     wheelStrategy: 'fom-2026-material-v1',
     livery: 'fom-special',
   },
+  {
+    id: 'creator-partner',
+    name: '合作伙伴特涂',
+    team: '抖音 AI 创变者计划合作伙伴',
+    model: 'FOM 2026 合作伙伴特涂',
+    url: fomCreatorUrl,
+    reverse: false,
+    teamId: 'ferrari',
+    accent: '#57068c',
+    wheelStrategy: 'fom-2026-material-v1',
+    livery: 'fom-partner',
+  },
 ] as const
+
+const LITE_PLAYER_CAR_IDS = new Set<PlayerCarId>([
+  'audi',
+  'creator',
+  'creator-special',
+  'creator-partner',
+])
+
+export const PLAYER_CARS: readonly PlayerCarDefinition[] = __F1TI_LITE_SINGLE_CAR__
+  ? FULL_PLAYER_CARS.filter((car) => LITE_PLAYER_CAR_IDS.has(car.id))
+  : FULL_PLAYER_CARS
 
 const STORAGE_KEY = 'f1s_selected_player_car_v1'
 const CHANGE_EVENT = 'f1s-player-car-change'
@@ -121,11 +145,12 @@ export function wheelStrategyForPlayerCar(
 }
 
 export function readSelectedPlayerCar(): PlayerCarId {
+  const defaultCar = __F1TI_LITE_SINGLE_CAR__ ? 'audi' : 'redbull'
   try {
     const value = localStorage.getItem(STORAGE_KEY)
-    return PLAYER_CARS.some((car) => car.id === value) ? value as PlayerCarId : 'redbull'
+    return PLAYER_CARS.some((car) => car.id === value) ? value as PlayerCarId : defaultCar
   } catch {
-    return 'redbull'
+    return defaultCar
   }
 }
 

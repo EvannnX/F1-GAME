@@ -124,6 +124,27 @@ function makeMaterialInteriorVisible(material: THREE.Material): void {
   }
 }
 
+function sharpenCarTextures(root: THREE.Object3D): void {
+  const textures = new Set<THREE.Texture>()
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (!mesh.isMesh || !mesh.material) return
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    for (const material of materials) {
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) textures.add(value)
+      }
+    }
+  })
+  for (const texture of textures) {
+    texture.generateMipmaps = true
+    texture.minFilter = THREE.LinearMipmapLinearFilter
+    texture.magFilter = THREE.LinearFilter
+    texture.anisotropy = Math.max(texture.anisotropy, 8)
+    texture.needsUpdate = true
+  }
+}
+
 function prepareMeshForInteriorCamera(mesh: THREE.Mesh): void {
   mesh.frustumCulled = false
   const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
@@ -2338,6 +2359,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
   loader.setDRACOLoader(getDracoLoader())
   let loadVersion = 0
   let requestedCarId: PlayerCarId | null = null
+  let activeCarId: PlayerCarId | null = null
   let disposed = false
 
   const disposeLoadedModel = (model: THREE.Object3D): void => {
@@ -2353,7 +2375,17 @@ export function createCar(options: CarOptions = {}): CarBundle {
   }
 
   const setCarModel = async (carId: PlayerCarId): Promise<void> => {
-    if (requestedCarId === carId || disposed) return
+    if (disposed) return
+    if (requestedCarId === carId) {
+      if (carId === 'audi' && activeCarId === carId && !placeholderActive) {
+        try {
+          await applyCustomLivery(group, activeModel)
+        } catch (error) {
+          console.warn('[F1S] custom livery refresh failed:', error)
+        }
+      }
+      return
+    }
     requestedCarId = carId
     const version = ++loadVersion
     const definition = playerCarById(carId)
@@ -2385,10 +2417,18 @@ export function createCar(options: CarOptions = {}): CarBundle {
       fitGltfToTrack(model)
       if (definition.id === 'creator') {
         applyFomThemeColor(model, readFomThemeColor())
+      } else if (definition.id === 'audi') {
+        applyFomThemeColor(model, '#ffffff')
       }
       const nextFomLivery = definition.livery === 'fom-special'
-        ? await applyFomSpecialLivery(model)
+        || definition.livery === 'fom-partner'
+        ? await applyFomSpecialLivery(
+          model,
+          undefined,
+          definition.livery === 'fom-partner' ? 'partners' : 'core',
+        )
         : null
+      sharpenCarTextures(model)
       model.traverse((obj) => {
         const mesh = obj as THREE.Mesh
         if (mesh.isMesh) {
@@ -2437,6 +2477,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
         return
       }
       activeModel = model
+      activeCarId = carId
       activeWheels = []
       wheelRigs = nextWheelRigs
       activeFomLivery = nextFomLivery

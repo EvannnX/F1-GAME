@@ -18,6 +18,8 @@
 
 const COMMENTARY_DEBUG = false
 const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const COMPACT_30 = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const COMMENTARY_DISABLED_BUILD = OFFLINE_8M || COMPACT_30
 
 export type CommentaryEvent =
   | 'countdown'
@@ -78,7 +80,7 @@ const COMMENTARY_CLIPS: Record<CommentaryEvent, ClipConfig> = {
   podium_reveal:       { url: 'audio/commentary/31_podium_reveal.mp3',       priority: 95, cooldownMs: 999_999 },
 }
 
-export const COMMENTARY_ASSET_URLS = OFFLINE_8M
+export const COMMENTARY_ASSET_URLS = COMMENTARY_DISABLED_BUILD
   ? []
   : [...new Set(Object.values(COMMENTARY_CLIPS).map((clip) => clip.url))]
 
@@ -182,7 +184,7 @@ export class CommentarySystem {
   /** Build an `Audio` per clip and start preloading. Failures here are
    *  non-fatal — the clip just stays missing and `trigger()` will skip. */
   preload(): Promise<void> {
-    if (OFFLINE_8M) return Promise.resolve()
+    if (COMMENTARY_DISABLED_BUILD) return Promise.resolve()
     const tasks: Array<Promise<void>> = []
     for (const key of Object.keys(COMMENTARY_CLIPS) as CommentaryEvent[]) {
       const cfg = COMMENTARY_CLIPS[key]

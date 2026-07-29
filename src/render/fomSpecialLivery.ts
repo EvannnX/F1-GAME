@@ -192,6 +192,14 @@ const DECALS: readonly DecalPreset[] = [
   ...sidePair('trae', traeUrl, 0.48, 0.091, 0.74, 0.405, 0.66, -0.15),
   ...sidePair('jinqiu', jinqiuUrl, 0.52, 0.118, 0.53, 0.405, 0.43, 2.195),
 ]
+const CORE_DECAL_NAMES = new Set([
+  'creator-front',
+  'main-right',
+  'main-left',
+  'rear',
+])
+
+export type FomSpecialLiveryVariant = 'core' | 'partners'
 
 interface RearLightEntry {
   material: THREE.MeshStandardMaterial
@@ -416,6 +424,7 @@ function createSurfaceDecal(
 export async function applyFomSpecialLivery(
   root: THREE.Object3D,
   renderer?: THREE.WebGLRenderer,
+  variant: FomSpecialLiveryVariant = 'core',
 ): Promise<FomSpecialLivery> {
   const themeMaterials = new Set<THREE.MeshStandardMaterial>()
   root.traverse((object) => {
@@ -456,7 +465,10 @@ export async function applyFomSpecialLivery(
     textureByUrl.set(url, texture)
     textures.add(texture)
   }
-  for (const preset of DECALS) {
+  const decalPresets = variant === 'partners'
+    ? DECALS
+    : DECALS.filter((preset) => CORE_DECAL_NAMES.has(preset.name))
+  for (const preset of decalPresets) {
     const texture = textureByUrl.get(preset.url)
     if (!texture) continue
     const decal = createSurfaceDecal(

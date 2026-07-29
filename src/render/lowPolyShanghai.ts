@@ -7,25 +7,35 @@ import shanghaiModelUrl from '../shanghai-international-circuit-2018-layout/sour
 import { loadLocalAsset } from '../utils/localAsset'
 
 const OFFLINE_8M = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const COMPACT_30 = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const USE_EMBEDDED_TRACK_TEXTURES = __F1TI_USE_EMBEDDED_TRACK_TEXTURES__
+const USE_COMPRESSED_TRACK_TEXTURES = __F1TI_COMPRESSED_TRACK_TEXTURES__
+const PACKAGED_BUILD = OFFLINE_8M || COMPACT_30
 const SHANGHAI_CANONICAL_CENTER = new THREE.Vector3(
   195.47552490234375,
   40.55998707532034,
   -147.96149939140832,
 )
 const SHANGHAI_CANONICAL_MIN_Y = -64.77343086012478
-const SHANGHAI_2018_ROOT = OFFLINE_8M
+const SHANGHAI_2018_ROOT = PACKAGED_BUILD
   ? 'offline'
   : 'src/shanghai-international-circuit-2018-layout'
 const lowPolyShanghaiUrl = shanghaiModelUrl
-const textureUrl = (fullName: string, mobileName: string): string => OFFLINE_8M
+const textureUrl = (
+  fullName: string,
+  mobileName: string,
+  compactName: string,
+): string => OFFLINE_8M
   ? `${SHANGHAI_2018_ROOT}/textures/${mobileName}`
+  : USE_COMPRESSED_TRACK_TEXTURES
+    ? `track-textures/${compactName}`
   : `${SHANGHAI_2018_ROOT}/textures/${fullName}`
-const SHANGHAI_2018_TEXTURE_OVERRIDES: Record<string, string> = {
-  Prato: textureUrl('Meshesgrassxgrass0171_diff_18.png', 'grass.jpg'),
-  tarmac: textureUrl('asphalt-new.png', 'asphalt.jpg'),
-  '14': textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
-  '15': textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
-  Pit_lane: textureUrl('PAT_asf_out_123.png', 'paddock.jpg'),
+const SHANGHAI_2018_TEXTURE_OVERRIDES: Record<string, string> = USE_EMBEDDED_TRACK_TEXTURES ? {} : {
+  Prato: textureUrl('Meshesgrassxgrass0171_diff_18.png', 'grass.jpg', 'grass.webp'),
+  tarmac: textureUrl('asphalt-new.png', 'asphalt.jpg', 'asphalt.webp'),
+  '14': textureUrl('PAT_asf_out_123.png', 'paddock.jpg', 'paddock.webp'),
+  '15': textureUrl('PAT_asf_out_123.png', 'paddock.jpg', 'paddock.webp'),
+  Pit_lane: textureUrl('PAT_asf_out_123.png', 'paddock.jpg', 'paddock.webp'),
 }
 export const LOW_POLY_SHANGHAI_RUNTIME_URLS = [
   lowPolyShanghaiUrl,
@@ -35,7 +45,7 @@ const SHANGHAI_2018_ALPHA_CUTOUT_MATERIALS = new Set([
   'lg_pit_exit_light_b_01', 'Recinto', 'sha_barrier_grandstandboundary_a',
   'sha_grandstand_group_d', 'core_start_lights_a', 'lg_marshal_light_b_light',
   'lg_marshal_light_b_screen', 'tree04a', 'tree04b', 'tree06a', 'treeline',
-  'sha_distantbuildings_a', 'standard_1!0', 'sha_grandstand_group_d!0',
+  'standard_1!0', 'sha_grandstand_group_d!0',
   'sha_gridlines_a', 'sha_grandstand_underbrolly_b_02',
   'sha_grandstand_underbrolly_b_03', 'aa_4', 'aa_3', 'sha_barrier_pitwall_a!0',
 ])
@@ -238,6 +248,16 @@ async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void>
         material.transparent = true
         material.depthWrite = false
         material.side = THREE.DoubleSide
+      }
+      if (material.name === 'sha_distantbuildings_a') {
+        // This is a 3.5 km-wide horizon card embedded in the GLB. Applying
+        // the race fog to it makes it disappear into the HDR background.
+        material.alphaTest = 0.01
+        material.alphaToCoverage = true
+        material.transparent = false
+        material.depthWrite = true
+        material.side = THREE.DoubleSide
+        material.fog = false
       }
       if (material.name === 'RUG_blu') {
         material.transparent = false
@@ -858,10 +878,10 @@ export function addLowPolyShanghai(
 
         const initialBox = new THREE.Box3().setFromObject(model)
         const initialCenter = initialBox.getCenter(new THREE.Vector3())
-        const alignmentCenter = OFFLINE_8M ? SHANGHAI_CANONICAL_CENTER : initialCenter
+        const alignmentCenter = PACKAGED_BUILD ? SHANGHAI_CANONICAL_CENTER : initialCenter
         model.position.x -= alignmentCenter.x
         model.position.z -= alignmentCenter.z
-        model.position.y -= OFFLINE_8M ? SHANGHAI_CANONICAL_MIN_Y : initialBox.min.y
+        model.position.y -= PACKAGED_BUILD ? SHANGHAI_CANONICAL_MIN_Y : initialBox.min.y
         group.add(model)
 
         const box = new THREE.Box3().setFromObject(model)

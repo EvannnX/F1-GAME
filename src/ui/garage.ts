@@ -311,6 +311,15 @@ function installStyles(): void {
       pointer-events: none;
       transition: opacity .28s ease;
     }
+    .f1s-garage--capture .f1s-garage__topline,
+    .f1s-garage--capture .f1s-garage__heading,
+    .f1s-garage--capture .f1s-garage__identity,
+    .f1s-garage--capture .f1s-garage__arrow,
+    .f1s-garage--capture .f1s-garage__liveries,
+    .f1s-garage--capture .f1s-garage__diy,
+    .f1s-garage--capture .f1s-garage__footer {
+      display: none;
+    }
     @media (max-height: 620px) {
       .f1s-garage__heading {
         top: 14px;
@@ -417,11 +426,16 @@ export function showGarageSelection(
   onBack?: () => void,
 ): GarageController {
   installStyles()
+  const params = new URLSearchParams(window.location.search)
+  const captureMode = params.has('specialLiveryCapture')
+  const captureYawDeg = THREE.MathUtils.clamp(Number(params.get('captureYaw') ?? 0), -18, 18)
+  const capturePitchDeg = THREE.MathUtils.clamp(Number(params.get('capturePitch') ?? 8), 3, 18)
   const mobileGpu = window.matchMedia('(pointer: coarse)').matches
 
   let selectedIndex = Math.max(0, PLAYER_CARS.findIndex((car) => car.id === readSelectedPlayerCar()))
   const host = document.createElement('section')
   host.className = 'f1s-garage'
+  host.classList.toggle('f1s-garage--capture', captureMode)
   host.setAttribute('aria-label', '赛车车库')
   host.innerHTML = `
     <div class="f1s-garage__topline"></div>
@@ -576,16 +590,22 @@ export function showGarageSelection(
     const target = new THREE.Vector3(0, box.min.y + size.y * 0.46, 0)
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const fitDistance = sphere.radius / Math.max(0.1, Math.sin(halfVerticalFov)) * 1.12
-    const displayDistance = fitDistance * 0.7
-    const viewDirection = new THREE.Vector3(0.58, 0.24, 0.78).normalize()
+    const displayDistance = fitDistance * (captureMode ? 0.42 : 0.7)
+    const viewDirection = captureMode
+      ? new THREE.Vector3(
+        Math.sin(THREE.MathUtils.degToRad(captureYawDeg)),
+        Math.tan(THREE.MathUtils.degToRad(capturePitchDeg)),
+        Math.cos(THREE.MathUtils.degToRad(captureYawDeg)),
+      ).normalize()
+      : new THREE.Vector3(0.58, 0.24, 0.78).normalize()
 
     controls.target.copy(target)
     camera.position.copy(target).addScaledVector(viewDirection, displayDistance)
     camera.near = Math.max(0.05, displayDistance * 0.02)
     camera.far = Math.max(80, fitDistance * 8)
     camera.updateProjectionMatrix()
-    controls.minDistance = fitDistance * 0.66
-    controls.maxDistance = fitDistance * 1.55
+    controls.minDistance = captureMode ? displayDistance * 0.95 : fitDistance * 0.66
+    controls.maxDistance = captureMode ? displayDistance * 1.05 : fitDistance * 1.55
     controls.update()
   }
 
@@ -607,9 +627,18 @@ export function showGarageSelection(
       fitForGarage(gltf.scene, definition)
       if (definition.id === 'creator') {
         applyFomThemeColor(gltf.scene, readFomThemeColor())
+      } else if (definition.id === 'audi') {
+        applyFomThemeColor(gltf.scene, '#ffffff')
       }
-      if (definition.livery === 'fom-special') {
-        fomLiveries.set(definition.id, await applyFomSpecialLivery(gltf.scene, renderer))
+      if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        fomLiveries.set(
+          definition.id,
+          await applyFomSpecialLivery(
+            gltf.scene,
+            renderer,
+            definition.livery === 'fom-partner' ? 'partners' : 'core',
+          ),
+        )
       }
       if (destroyed) {
         disposeModel(gltf.scene)
@@ -719,7 +748,10 @@ export function showGarageSelection(
     button.addEventListener('click', () => {
       selectedFomScheme = scheme.id
       selectFomLiveryScheme(scheme.id)
-      fomLiveries.get('creator-special')?.setScheme(scheme.id)
+      const selectedDefinition = PLAYER_CARS[selectedIndex]
+      if (selectedDefinition.livery === 'fom-special' || selectedDefinition.livery === 'fom-partner') {
+        fomLiveries.get(selectedDefinition.id)?.setScheme(scheme.id)
+      }
       updateLiveryButtons()
       renderer.shadowMap.needsUpdate = true
     })
@@ -739,7 +771,8 @@ export function showGarageSelection(
     modelEl.textContent = definition.model
     countEl.textContent = `${selectedIndex + 1} / ${PLAYER_CARS.length}`
     colorsEl.hidden = definition.id !== 'creator'
-    liveriesEl.hidden = definition.id !== 'creator-special'
+    liveriesEl.hidden = definition.livery !== 'fom-special'
+      && definition.livery !== 'fom-partner'
     diyEl.hidden = definition.id !== 'audi'
     controls.autoRotate = false
     if (currentModel) {
@@ -754,7 +787,7 @@ export function showGarageSelection(
       if (definition.id === 'creator') {
         applyFomThemeColor(currentModel, selectedFomColor)
       }
-      if (definition.id === 'creator-special') {
+      if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
         fomLiveries.get(definition.id)?.setScheme(selectedFomScheme)
       }
       if (definition.id === 'audi') {
@@ -771,6 +804,12 @@ export function showGarageSelection(
       }
       frameModel(currentModel)
       renderer.shadowMap.needsUpdate = true
+      if (captureMode) {
+        window.requestAnimationFrame(() => {
+          renderer.render(scene, camera)
+          document.body.dataset.captureReady = 'true'
+        })
+      }
     }).catch((error) => {
       console.warn('[F1S] garage car load failed:', definition.id, error)
     })

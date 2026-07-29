@@ -87,6 +87,8 @@ import { createRacingGuideLine } from './render/racingGuideLine'
 THREE.Cache.enabled = true
 
 const OFFLINE_8M_BUILD = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const LITE_SINGLE_CAR_BUILD = __F1TI_LITE_SINGLE_CAR__
 const OFFLINE_STORAGE_PREFIX = 'f1ti_offline_20260722_r12'
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
@@ -850,8 +852,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let glbOpponentCars: OpponentCarBundle | null = null
   let telemetryMap: ReturnType<typeof createTelemetryMap> | null = null
   let audio: AudioRig | null = null
+  let audioLoadPromise: Promise<AudioRig | null> | null = null
   let countdown: ReturnType<typeof createCountdown> | null = null
-  let audioStarted = false
   let started = false
   let countdownActive = false
   let glbRaceStartTime = 0
@@ -877,11 +879,34 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     car.group.visible = true
   }
 
-  const startGlbAudio = (): void => {
-    if (!audio || audioStarted) return
-    audioStarted = true
+  const ensureGlbAudio = (): Promise<AudioRig | null> => {
+    if (audio) return Promise.resolve(audio)
+    if (audioLoadPromise) return audioLoadPromise
     unlockAudio()
-    audio.start()
+    audioLoadPromise = createAudioRig()
+      .then((rig) => {
+        audio = rig
+        rig.setBgmVolume(0.55)
+        rig.start()
+        return rig
+      })
+      .catch((error) => {
+        console.warn('[F1S] GLB audio rig init failed:', error)
+        audioLoadPromise = null
+        return null
+      })
+    return audioLoadPromise
+  }
+
+  const startGlbAudio = (): void => {
+    unlockAudio()
+    if (audio) {
+      // Repeated start() calls are intentional: sources are idempotent and
+      // AudioContext.resume() may only succeed on a later mobile gesture.
+      audio.start()
+      return
+    }
+    void ensureGlbAudio()
   }
   window.addEventListener('pointerdown', startGlbAudio)
   window.addEventListener('keydown', startGlbAudio)
@@ -1250,18 +1275,24 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       opp.t = 0
       glbOpponentCars?.update(glbOpponentStates)
     }
-    glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
-    glbOpponentStateById = new Map(
-      gridPlacements
-        .filter((placement) => placement.id !== 'player')
-        .map((placement, index) => [placement.id, glbOpponentStates[index]]),
-    )
-    glbOpponentCars = createOpponentCars(glbOpponentStates, {
-      targetLengthM: GLB_PLAYER_TARGET_LENGTH_M,
-      groundSinkM: GLB_VISUAL_GROUND_SINK,
-    })
-    glbOpponentCars.update(glbOpponentStates)
-    bundle.scene.add(glbOpponentCars.group)
+    if (LITE_SINGLE_CAR_BUILD) {
+      glbOpponentStates = []
+      glbOpponentStateById.clear()
+      glbOpponentCars = null
+    } else {
+      glbOpponentStates = createGlbGridOpponentStates(gridPlacements, ground)
+      glbOpponentStateById = new Map(
+        gridPlacements
+          .filter((placement) => placement.id !== 'player')
+          .map((placement, index) => [placement.id, glbOpponentStates[index]]),
+      )
+      glbOpponentCars = createOpponentCars(glbOpponentStates, {
+        targetLengthM: GLB_PLAYER_TARGET_LENGTH_M,
+        groundSinkM: GLB_VISUAL_GROUND_SINK,
+      })
+      glbOpponentCars.update(glbOpponentStates)
+      bundle.scene.add(glbOpponentCars.group)
+    }
     const applySavedCarVisualTuning = (): void => {
       applyCarVisualTuning(readSavedCarVisualTuning(CAR_VISUAL_TUNING_STORAGE_KEY), {
         playerGroup: car.group,
@@ -1274,16 +1305,11 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     telemetryMap.resetTrail()
     telemetryMap.show()
     updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
-    await glbOpponentCars.ready
+    await glbOpponentCars?.ready
     applySavedCarVisualTuning()
-    glbOpponentCars.update(glbOpponentStates)
+    glbOpponentCars?.update(glbOpponentStates)
     input = await initInput('keyboard')
-    try {
-      audio = await createAudioRig()
-      audio.setBgmVolume(0.55)
-    } catch (e) {
-      console.warn('[F1S] GLB audio rig init failed:', e)
-    }
+    await ensureGlbAudio()
     if (gridPlacementGuiRequested || carVisualTuningGuiRequested || cameraTuningGuiRequested || firstPersonGuiRequested || objectDeletionGuiRequested) {
       started = false
       hideStatus()
@@ -1627,6 +1653,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
   // Helper: build AIs at the chosen difficulty and add them to the scene.
   const spawnOpponents = async (): Promise<void> => {
     teardownOpponents()
+    if (LITE_SINGLE_CAR_BUILD) return
     world.opponents = createOpponents(track, ctx.difficulty)
     const opponentCars = createOpponentCars(world.opponents)
     world.opponentCars = opponentCars
@@ -2209,31 +2236,40 @@ function bootstrap(onReady?: BootReadyHandler): void {
 const bootEntry = (): void => {
   const params = new URLSearchParams(window.location.search)
   if (params.has('creatorCarMapTest')) selectPlayerCar('creator')
-  if (params.has('amgWheelTest')) {
+  if (params.has('specialLiveryCapture')) {
+    selectPlayerCar(
+      params.get('specialLiveryCapture') === 'partners'
+        ? 'creator-partner'
+        : 'creator-special',
+    )
+    showGarageSelection(() => { /* Capture mode has no navigation. */ })
+    return
+  }
+  if (!COMPACT_30_BUILD && params.has('amgWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest()
     })
     return
   }
-  if (params.has('redbullWheelTest')) {
+  if (!COMPACT_30_BUILD && params.has('redbullWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest('redbull')
     })
     return
   }
-  if (params.has('ferrariF175WheelTest')) {
+  if (!COMPACT_30_BUILD && params.has('ferrariF175WheelTest')) {
     void import('./ui/ferrariF175WheelTest').then(({ installFerrariF175WheelTest }) => {
       installFerrariF175WheelTest()
     })
     return
   }
-  if (params.has('fomWheelTest')) {
+  if (!COMPACT_30_BUILD && params.has('fomWheelTest')) {
     void import('./ui/fomWheelTest').then(({ installFomWheelTest }) => {
       installFomWheelTest()
     })
     return
   }
-  if (params.has('creatorCarPreview')) {
+  if (!COMPACT_30_BUILD && params.has('creatorCarPreview')) {
     void import('./ui/creatorCarPreview').then(({ installCreatorCarPreview }) => {
       installCreatorCarPreview()
     })
