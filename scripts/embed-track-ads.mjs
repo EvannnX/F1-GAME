@@ -8,6 +8,7 @@ const replacements = new Map([
   ['Blocchi _dist', 'douyin_ai_Blocchi_dist.png'],
   ['helix_board_c', 'douyin_ai_track_ad_double.png'],
   ['fly_better', 'douyin_ai_track_ad_double.png'],
+  ['Formula_1000', 'douyin_ai_track_ad_double.png'],
   ['PIT_animato', 'douyin_ai_PIT_animato.png'],
   ['rolex_board_a', 'rolex_board_a_6.png'],
   ['Emirates_better', 'douyin_ai_track_ad_double.png'],
@@ -23,6 +24,7 @@ const replacements = new Map([
   ['f1_board_a', 'f1_board_a_120.png'],
   ['rolex_terrain_a', 'rolex_terrain_a_142.png'],
   ['allianz_board_a', 'allianz_board_a_143.png'],
+  ['sponsor_backboard_02', 'douyin_ai_track_ad_double.png'],
 ])
 
 const align4 = (value) => (value + 3) & ~3

@@ -109,6 +109,7 @@ const OBSTACLE_SURFACE_HINTS = [
 const SHANGHAI_2018_AD_MATERIALS = new Set([
   'Dispaly_pit_IN',
   'sha_sponsors_2012_03_01',
+  'sha_sponsors_2012_01_02',
   'Emirates_bet',
   'Pirelli_1',
   'Rolex_pan',
@@ -126,6 +127,7 @@ const SHANGHAI_2018_AD_MATERIALS = new Set([
   'new_heineken',
   'Blocchi',
   'Fly_bettrer',
+  'Formula__1000',
   'sha_sponsors_2012_03_02',
   'Blok_DIST',
   '#Material-03',
@@ -136,6 +138,7 @@ const SHANGHAI_2018_AD_MATERIALS = new Set([
 ])
 const SHANGHAI_2018_FULL_PANEL_AD_MATERIALS = new Set([
   'sha_sponsors_2012_03_01',
+  'sha_sponsors_2012_01_02',
   'Emirates_bet',
   'Pirelli_1',
   'Rolex_pan',
@@ -152,13 +155,22 @@ const SHANGHAI_2018_FULL_PANEL_AD_MATERIALS = new Set([
   'NeverD',
   'new_heineken',
   'Fly_bettrer',
+  'Formula__1000',
   'sha_sponsors_2012_03_02',
   'test_Heinek',
 ])
 const SHANGHAI_2018_NON_COLLIDING_AD_MATERIALS = new Set([
+  'sha_sponsors_2012_01_02',
   'high_floor_sponsors_09',
   'high_floor_sponsors_08',
   'wall8',
+])
+const SHANGHAI_2018_BACKBOARD_OVERLAY_MATERIALS = new Set([
+  'sha_sponsors_2012_02_02',
+  'new_DHL',
+  'Pertonas_pan',
+  'Pirelli_1',
+  'Fly_bettrer',
 ])
 const SHANGHAI_2018_AD_OBSTACLE_MATERIALS = new Set(
   Array.from(SHANGHAI_2018_AD_MATERIALS)
@@ -417,7 +429,9 @@ function normalizeShanghai2018AdUvs(root: THREE.Object3D): number {
       }
       const uSpan = correction.maxU - correction.minU
       const vSpan = correction.maxV - correction.minV
-      const repeatCount = Math.max(1, Math.round(Math.abs(uSpan)))
+      const repeatCount = materialName === 'sha_sponsors_2012_01_02'
+        ? 1
+        : Math.max(1, Math.round(Math.abs(uSpan)))
       if (uSpan > 1e-5) {
         uv.setX(vertex, (uv.getX(vertex) - correction.minU) / uSpan * repeatCount)
       }
@@ -431,6 +445,175 @@ function normalizeShanghai2018AdUvs(root: THREE.Object3D): number {
   })
 
   return correctedComponents
+}
+
+function removeShanghai2018BackboardOverlays(root: THREE.Object3D): number {
+  let backboard: THREE.Mesh | null = null
+  root.updateMatrixWorld(true)
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    if (materials.length === 1 && materials[0]?.name === 'sha_sponsors_2012_01_02') {
+      backboard = obj
+    }
+  })
+  if (!backboard) return 0
+
+  const backboardMesh = backboard as THREE.Mesh
+  const position = backboardMesh.geometry.getAttribute('position')
+  const index = backboardMesh.geometry.getIndex()
+  if (!position || !index) return 0
+
+  const parent = new Int32Array(position.count)
+  for (let vertex = 0; vertex < parent.length; vertex++) parent[vertex] = vertex
+  const find = (vertex: number): number => {
+    let rootVertex = vertex
+    while (parent[rootVertex] !== rootVertex) rootVertex = parent[rootVertex]
+    while (parent[vertex] !== vertex) {
+      const next = parent[vertex]
+      parent[vertex] = rootVertex
+      vertex = next
+    }
+    return rootVertex
+  }
+  const join = (a: number, b: number): void => {
+    const rootA = find(a)
+    const rootB = find(b)
+    if (rootA !== rootB) parent[rootB] = rootA
+  }
+  for (let offset = 0; offset + 2 < index.count; offset += 3) {
+    join(index.getX(offset), index.getX(offset + 1))
+    join(index.getX(offset + 1), index.getX(offset + 2))
+  }
+  const sharedVertices = new Map<string, number>()
+  for (let vertex = 0; vertex < position.count; vertex++) {
+    const precision = 10000
+    const key = [
+      Math.round(position.getX(vertex) * precision),
+      Math.round(position.getY(vertex) * precision),
+      Math.round(position.getZ(vertex) * precision),
+    ].join(':')
+    const shared = sharedVertices.get(key)
+    if (shared === undefined) sharedVertices.set(key, vertex)
+    else join(shared, vertex)
+  }
+
+  const point = new THREE.Vector3()
+  const boxesByComponent = new Map<number, THREE.Box3>()
+  for (let vertex = 0; vertex < position.count; vertex++) {
+    const component = find(vertex)
+    const box = boxesByComponent.get(component) ?? new THREE.Box3()
+    point.fromBufferAttribute(position, vertex).applyMatrix4(backboardMesh.matrixWorld)
+    box.expandByPoint(point)
+    boxesByComponent.set(component, box)
+  }
+  const backboardBoxes = Array.from(boxesByComponent.values())
+    .map((box) => box.expandByScalar(0.25))
+
+  let removedTriangles = 0
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    if (
+      materials.length !== 1 ||
+      !SHANGHAI_2018_BACKBOARD_OVERLAY_MATERIALS.has(materials[0]?.name ?? '')
+    ) return
+
+    const source = obj.geometry.index ? obj.geometry.toNonIndexed() : obj.geometry.clone()
+    const sourcePosition = source.getAttribute('position')
+    if (!sourcePosition || sourcePosition.count < 3) return
+
+    const triangleCount = Math.floor(sourcePosition.count / 3)
+    const triangleParent = new Int32Array(triangleCount)
+    for (let triangle = 0; triangle < triangleCount; triangle++) triangleParent[triangle] = triangle
+    const findTriangle = (triangle: number): number => {
+      let rootTriangle = triangle
+      while (triangleParent[rootTriangle] !== rootTriangle) rootTriangle = triangleParent[rootTriangle]
+      while (triangleParent[triangle] !== triangle) {
+        const next = triangleParent[triangle]
+        triangleParent[triangle] = rootTriangle
+        triangle = next
+      }
+      return rootTriangle
+    }
+    const joinTriangles = (a: number, b: number): void => {
+      const rootA = findTriangle(a)
+      const rootB = findTriangle(b)
+      if (rootA !== rootB) triangleParent[rootB] = rootA
+    }
+    const triangleByVertex = new Map<string, number>()
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      const offset = triangle * 3
+      for (let vertex = 0; vertex < 3; vertex++) {
+        const vertexIndex = offset + vertex
+        const precision = 10000
+        const key = [
+          Math.round(sourcePosition.getX(vertexIndex) * precision),
+          Math.round(sourcePosition.getY(vertexIndex) * precision),
+          Math.round(sourcePosition.getZ(vertexIndex) * precision),
+        ].join(':')
+        const shared = triangleByVertex.get(key)
+        if (shared === undefined) triangleByVertex.set(key, triangle)
+        else joinTriangles(shared, triangle)
+      }
+    }
+
+    const componentBoxes = new Map<number, THREE.Box3>()
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      const component = findTriangle(triangle)
+      const box = componentBoxes.get(component) ?? new THREE.Box3()
+      const offset = triangle * 3
+      for (let vertex = 0; vertex < 3; vertex++) {
+        point.fromBufferAttribute(sourcePosition, offset + vertex).applyMatrix4(obj.matrixWorld)
+        box.expandByPoint(point)
+      }
+      componentBoxes.set(component, box)
+    }
+    const removedComponents = new Set<number>()
+    for (const [component, box] of componentBoxes) {
+      if (backboardBoxes.some((backboardBox) => backboardBox.intersectsBox(box))) {
+        removedComponents.add(component)
+      }
+    }
+
+    const keep: number[] = []
+    let removedFromMesh = 0
+    for (let triangle = 0; triangle < triangleCount; triangle++) {
+      const offset = triangle * 3
+      if (removedComponents.has(findTriangle(triangle))) {
+        removedFromMesh++
+      } else {
+        keep.push(offset, offset + 1, offset + 2)
+      }
+    }
+    if (removedFromMesh === 0) return
+    removedTriangles += removedFromMesh
+    if (keep.length === 0) {
+      obj.visible = false
+      return
+    }
+
+    const next = new THREE.BufferGeometry()
+    for (const name of Object.keys(source.attributes)) {
+      const attr = source.getAttribute(name)
+      const values: number[] = []
+      for (const vertexIndex of keep) {
+        for (let component = 0; component < attr.itemSize; component++) {
+          values.push(attributeValue(attr, vertexIndex, component))
+        }
+      }
+      next.setAttribute(
+        name,
+        new THREE.BufferAttribute(new Float32Array(values), attr.itemSize, attr.normalized),
+      )
+    }
+    next.setIndex(Array.from({ length: keep.length }, (_, vertex) => vertex))
+    next.computeBoundingBox()
+    next.computeBoundingSphere()
+    obj.geometry = next
+  })
+
+  return removedTriangles
 }
 
 async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void> {
@@ -1087,6 +1270,8 @@ export function addLowPolyShanghai(
         model.name = 'shanghai-international-circuit-full-model'
         await prepareShanghai2018Materials(model)
         model.updateMatrixWorld(true)
+        const removedBackboardOverlayTriangles = removeShanghai2018BackboardOverlays(model)
+        console.info(`[F1S] removed ${removedBackboardOverlayTriangles} overlapping backboard triangles`)
         const normalizedAdComponents = normalizeShanghai2018AdUvs(model)
         console.info(`[F1S] normalized ${normalizedAdComponents} ad UV components`)
 
