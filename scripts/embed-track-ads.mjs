@@ -10,17 +10,17 @@ const replacements = new Map([
   ['fly_better', 'douyin_ai_track_ad_double.png'],
   ['PIT_animato', 'douyin_ai_PIT_animato.png'],
   ['rolex_board_a', 'rolex_board_a_6.png'],
-  ['Emirates_better', 'Emirates_better_11.png'],
+  ['Emirates_better', 'douyin_ai_track_ad_double.png'],
   ['Pirelli_pan', 'Pirelli_pan_12.png'],
   ['rolex_board_b', 'rolex_board_b_13.png'],
   ['Heine_no', 'Heine_no_14.png'],
-  ['PAT_Einak_basso', 'Heine_no_14.png'],
-  ['f1_board_b', 'douyin_ai_track_ad_double.png'],
+  ['PAT_Einak_basso', 'douyin_ai_track_ad_double.png'],
+  ['f1_board_b', 'f1_board_b_16.png'],
   ['Petronas_sign_cina', 'Petronas_sign_cina_17.png'],
-  ['Petronas_sign', 'Petronas_sign_cina_17.png'],
+  ['Petronas_sign', 'douyin_ai_track_ad_double.png'],
   ['lg_board_a', 'lg_board_a_51.png'],
   ['fly_emirates_terrain_a', 'fly_emirates_terrain_a_89.png'],
-  ['f1_board_a', 'douyin_ai_track_ad_double.png'],
+  ['f1_board_a', 'f1_board_a_120.png'],
   ['rolex_terrain_a', 'rolex_terrain_a_142.png'],
   ['allianz_board_a', 'allianz_board_a_143.png'],
 ])
@@ -52,12 +52,16 @@ for (const image of json.images ?? []) {
   if (!filename || typeof image.bufferView !== 'number') continue
   const bytes = fs.readFileSync(path.join(textureDir, filename))
   const bufferView = json.bufferViews[image.bufferView]
-  bufferView.byteOffset = nextOffset
+  const currentOffset = bufferView.byteOffset ?? 0
+  const currentLength = bufferView.byteLength
+  const canReplaceInPlace = bytes.length <= currentLength
+  const replacementOffset = canReplaceInPlace ? currentOffset : nextOffset
+  bufferView.byteOffset = replacementOffset
   bufferView.byteLength = bytes.length
   image.mimeType = 'image/png'
   image.name = `douyin_ai_${originalName}`
-  additions.push({ offset: nextOffset, bytes })
-  nextOffset = align4(nextOffset + bytes.length)
+  additions.push({ offset: replacementOffset, bytes })
+  if (!canReplaceInPlace) nextOffset = align4(nextOffset + bytes.length)
 }
 if (additions.length === 0) throw new Error('No original ad images found; GLB may already be branded')
 

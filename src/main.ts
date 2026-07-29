@@ -73,6 +73,7 @@ import {
   optimizeLowPolyShanghaiRendering,
   type LowPolyShanghaiBundle,
   type LowPolyShanghaiGroundSampler,
+  type LowPolyShanghaiObstacleSampler,
   type LowPolyShanghaiTriangleErase,
 } from './render/lowPolyShanghai'
 import { createGlbDrivePhysics, GLB_DRIVE_MAX_SPEED } from './game/glbDrivePhysics'
@@ -688,6 +689,7 @@ function updateGlbThirdPersonCamera(
   heading: number,
   normal: THREE.Vector3,
   tuning: GlbCameraTuning,
+  obstacles?: LowPolyShanghaiObstacleSampler | null,
 ): void {
   if (camera.near !== 0.65) camera.near = 0.65
   const up = normal.clone().normalize()
@@ -696,10 +698,33 @@ function updateGlbThirdPersonCamera(
   if (forward.lengthSq() < 1e-5) forward.set(Math.sin(heading), 0, Math.cos(heading))
   forward.normalize()
   const back = forward.clone().negate()
-  camera.position
-    .copy(pos)
+  const desiredPosition = pos
+    .clone()
     .addScaledVector(back, tuning.backDistance)
     .addScaledVector(up, tuning.upDistance)
+  const cameraPathStart = pos.clone().addScaledVector(up, 0.9)
+  const cameraPath = desiredPosition.clone().sub(cameraPathStart)
+  const cameraPathDistance = cameraPath.length()
+  const cameraObstacle = obstacles && cameraPathDistance > 1e-5
+    ? obstacles.sampleObstacleBetween(cameraPathStart, desiredPosition, {
+        radius: 0.32,
+        side: forward,
+      })
+    : null
+  if (cameraObstacle && cameraPathDistance > 1e-5) {
+    cameraPath.multiplyScalar(1 / cameraPathDistance)
+    const distanceToObstacle = clamp(
+      cameraObstacle.point.clone().sub(cameraPathStart).dot(cameraPath),
+      0,
+      cameraPathDistance,
+    )
+    camera.position.copy(cameraPathStart).addScaledVector(
+      cameraPath,
+      Math.max(0.45, distanceToObstacle - 0.48),
+    )
+  } else {
+    camera.position.copy(desiredPosition)
+  }
   camera.up.copy(up)
   const lookTarget = pos
     .clone()
@@ -867,6 +892,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   let updateGlbRaceProgress: (dt: number) => void = () => { /* GLB race is not ready yet. */ }
   let visualOptimizer: ReturnType<typeof createLowPolyShanghaiVisualOptimizer> | null = null
   let racingGuideLine: ReturnType<typeof createRacingGuideLine> | null = null
+  let obstacleSampler: LowPolyShanghaiObstacleSampler | null = null
   let telemetryUpdateTimer = 0
 
   const finishGateCoordinate = (position: THREE.Vector3): number =>
@@ -958,7 +984,14 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       if (cameraMode === 'first') {
         updateGlbFirstPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, firstPersonCockpit)
       } else {
-        updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+        updateGlbThirdPersonCamera(
+          bundle.camera,
+          drive.state.pos,
+          drive.state.heading,
+          drive.state.normal,
+          glbCameraTuning,
+          obstacleSampler,
+        )
       }
     }
     if (!countdownActive) visualOptimizer?.update(drive.state.pos)
@@ -1045,10 +1078,10 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       console.warn('[F1S] GLB ground grid fallback:', e)
       ground = createLowPolyShanghaiGroundSampler(lowPolyShanghai)
     }
-    const obstacles = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
+    obstacleSampler = createLowPolyShanghaiObstacleSampler(lowPolyShanghai)
     const pose = findGlbStartPose(ground, gridPlacements)
     racingGuideLine = createRacingGuideLine(bundle.scene)
-    drive = createGlbDrivePhysics(ground, pose, obstacles)
+    drive = createGlbDrivePhysics(ground, pose, obstacleSampler)
     setObjectOnGroundHeading(car.group, drive.state.pos, drive.state.heading, drive.state.normal)
     setObjectOnGroundHeading(firstPersonRig, drive.state.pos, drive.state.heading, drive.state.normal)
     applyCameraModeVisibility()
@@ -1073,7 +1106,14 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       glbOpponentCars?.update(glbOpponentStates)
       telemetryMap?.resetTrail()
       bundle.updateShadowFollow(drive.state.pos)
-      updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+      updateGlbThirdPersonCamera(
+        bundle.camera,
+        drive.state.pos,
+        drive.state.heading,
+        drive.state.normal,
+        glbCameraTuning,
+        obstacleSampler,
+      )
     }
     const clearGlbCountdown = (): void => {
       if (countdown) {
@@ -1304,7 +1344,14 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     telemetryMap = createTelemetryMap(createGlbTelemetryRouteMap())
     telemetryMap.resetTrail()
     telemetryMap.show()
-    updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+    updateGlbThirdPersonCamera(
+      bundle.camera,
+      drive.state.pos,
+      drive.state.heading,
+      drive.state.normal,
+      glbCameraTuning,
+      obstacleSampler,
+    )
     await glbOpponentCars?.ready
     applySavedCarVisualTuning()
     glbOpponentCars?.update(glbOpponentStates)
@@ -1373,7 +1420,16 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         storageKey: GLB_CAMERA_TUNING_STORAGE_KEY,
         onChange: (next) => {
           glbCameraTuning = next
-          if (drive) updateGlbThirdPersonCamera(bundle.camera, drive.state.pos, drive.state.heading, drive.state.normal, glbCameraTuning)
+          if (drive) {
+            updateGlbThirdPersonCamera(
+              bundle.camera,
+              drive.state.pos,
+              drive.state.heading,
+              drive.state.normal,
+              glbCameraTuning,
+              obstacleSampler,
+            )
+          }
         },
         onClose: () => {
           cameraTuningGuiActive = false

@@ -96,7 +96,80 @@ const OBSTACLE_SURFACE_HINTS = [
   'armco',
   'railing',
   'rail',
+  'bollard',
+  'recinto',
+  'muro',
+  'blocchi',
+  'blok_dist',
+  'sponsor',
+  'banner',
+  'advert',
+  '_pan',
 ]
+const SHANGHAI_2018_AD_MATERIALS = new Set([
+  'Dispaly_pit_IN',
+  'sha_sponsors_2012_03_01',
+  'Emirates_bet',
+  'Pirelli_1',
+  'Rolex_pan',
+  'never_D',
+  'Heinek',
+  'DHL_pan',
+  'Pertonas_pan',
+  'Emirates_better',
+  'sha_sponsors_2012_02_02',
+  'sha_sponsors_2012_02_01',
+  'sha_sponsors_2012_11_02',
+  'new_DHL',
+  'Heinek_BIG',
+  'NeverD',
+  'new_heineken',
+  'Blocchi',
+  'Fly_bettrer',
+  'sha_sponsors_2012_03_02',
+  'Blok_DIST',
+  '#Material-03',
+  'test_Heinek',
+  'high_floor_sponsors_09',
+  'high_floor_sponsors_08',
+  'wall8',
+])
+const SHANGHAI_2018_FULL_PANEL_AD_MATERIALS = new Set([
+  'sha_sponsors_2012_03_01',
+  'Emirates_bet',
+  'Pirelli_1',
+  'Rolex_pan',
+  'never_D',
+  'Heinek',
+  'DHL_pan',
+  'Pertonas_pan',
+  'Emirates_better',
+  'sha_sponsors_2012_02_02',
+  'sha_sponsors_2012_02_01',
+  'sha_sponsors_2012_11_02',
+  'new_DHL',
+  'Heinek_BIG',
+  'NeverD',
+  'new_heineken',
+  'Fly_bettrer',
+  'sha_sponsors_2012_03_02',
+  'test_Heinek',
+])
+const SHANGHAI_2018_NON_COLLIDING_AD_MATERIALS = new Set([
+  'high_floor_sponsors_09',
+  'high_floor_sponsors_08',
+  'wall8',
+])
+const SHANGHAI_2018_AD_OBSTACLE_MATERIALS = new Set(
+  Array.from(SHANGHAI_2018_AD_MATERIALS)
+    .filter((name) => !SHANGHAI_2018_NON_COLLIDING_AD_MATERIALS.has(name)),
+)
+const SHANGHAI_2018_EXACT_OBSTACLE_MATERIALS = new Set([
+  ...SHANGHAI_2018_AD_OBSTACLE_MATERIALS,
+  '25',
+  '26!0',
+  '26',
+])
 
 export interface LowPolyShanghaiLoadResult {
   model: THREE.Group
@@ -208,6 +281,156 @@ function meshHasGroundSurfaceHint(mesh: THREE.Mesh): boolean {
   if (name.includes('collider') || name.includes('tree') || name.includes('startlight')) return false
   return materialNamesForMesh(mesh).some((materialName) => SHANGHAI_2018_DRIVE_SURFACE_MATERIALS.has(materialName)) ||
     GROUND_SURFACE_HINTS.some((hint) => name.includes(hint))
+}
+
+function normalizeShanghai2018AdUvs(root: THREE.Object3D): number {
+  const correctedGeometries = new WeakSet<THREE.BufferGeometry>()
+  let correctedComponents = 0
+  root.updateMatrixWorld(true)
+
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh) || correctedGeometries.has(obj.geometry)) return
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material]
+    const materialName = materials[0]?.name ?? ''
+    if (materials.length !== 1 || !SHANGHAI_2018_AD_MATERIALS.has(materialName)) return
+    const position = obj.geometry.getAttribute('position')
+    const uv = obj.geometry.getAttribute('uv')
+    const index = obj.geometry.getIndex()
+    if (!position || !uv || uv.count !== position.count || !index) return
+
+    const parent = new Int32Array(position.count)
+    for (let vertex = 0; vertex < parent.length; vertex++) parent[vertex] = vertex
+    const find = (vertex: number): number => {
+      let rootVertex = vertex
+      while (parent[rootVertex] !== rootVertex) rootVertex = parent[rootVertex]
+      while (parent[vertex] !== vertex) {
+        const next = parent[vertex]
+        parent[vertex] = rootVertex
+        vertex = next
+      }
+      return rootVertex
+    }
+    const join = (a: number, b: number): void => {
+      const rootA = find(a)
+      const rootB = find(b)
+      if (rootA !== rootB) parent[rootB] = rootA
+    }
+    for (let offset = 0; offset + 2 < index.count; offset += 3) {
+      const a = index.getX(offset)
+      const b = index.getX(offset + 1)
+      const c = index.getX(offset + 2)
+      join(a, b)
+      join(b, c)
+    }
+    const verticesByPositionAndUv = new Map<string, number>()
+    for (let vertex = 0; vertex < position.count; vertex++) {
+      const precision = 10000
+      const key = [
+        Math.round(position.getX(vertex) * precision),
+        Math.round(position.getY(vertex) * precision),
+        Math.round(position.getZ(vertex) * precision),
+        Math.round(uv.getX(vertex) * precision),
+        Math.round(uv.getY(vertex) * precision),
+      ].join(':')
+      const shared = verticesByPositionAndUv.get(key)
+      if (shared === undefined) verticesByPositionAndUv.set(key, vertex)
+      else join(shared, vertex)
+    }
+
+    interface ComponentStats {
+      count: number
+      sumY: number
+      sumV: number
+      sumYV: number
+      minY: number
+      maxY: number
+      minV: number
+      maxV: number
+      minU: number
+      maxU: number
+    }
+    const stats = new Map<number, ComponentStats>()
+    const world = obj.matrixWorld.elements
+    for (let vertex = 0; vertex < position.count; vertex++) {
+      const component = find(vertex)
+      const worldY = world[1] * position.getX(vertex) +
+        world[5] * position.getY(vertex) +
+        world[9] * position.getZ(vertex) +
+        world[13]
+      const v = uv.getY(vertex)
+      const current = stats.get(component) ?? {
+        count: 0,
+        sumY: 0,
+        sumV: 0,
+        sumYV: 0,
+        minY: Infinity,
+        maxY: -Infinity,
+        minV: Infinity,
+        maxV: -Infinity,
+        minU: Infinity,
+        maxU: -Infinity,
+      }
+      current.count++
+      current.sumY += worldY
+      current.sumV += v
+      current.sumYV += worldY * v
+      current.minY = Math.min(current.minY, worldY)
+      current.maxY = Math.max(current.maxY, worldY)
+      current.minV = Math.min(current.minV, v)
+      current.maxV = Math.max(current.maxV, v)
+      current.minU = Math.min(current.minU, uv.getX(vertex))
+      current.maxU = Math.max(current.maxU, uv.getX(vertex))
+      stats.set(component, current)
+    }
+
+    interface ComponentCorrection {
+      flipV: boolean
+      normalize: boolean
+      minU: number
+      maxU: number
+      minV: number
+      maxV: number
+    }
+    const componentCorrections = new Map<number, ComponentCorrection>()
+    const normalize = SHANGHAI_2018_FULL_PANEL_AD_MATERIALS.has(materialName)
+    for (const [component, current] of stats) {
+      if (current.maxY - current.minY < 1e-4 || current.maxV - current.minV < 1e-4) continue
+      const covariance = current.sumYV - current.sumY * current.sumV / current.count
+      const flipV = covariance > 1e-6
+      if (!normalize && !flipV) continue
+      componentCorrections.set(component, {
+        flipV,
+        normalize,
+        minU: current.minU,
+        maxU: current.maxU,
+        minV: current.minV,
+        maxV: current.maxV,
+      })
+    }
+    if (componentCorrections.size === 0) return
+    for (let vertex = 0; vertex < uv.count; vertex++) {
+      const correction = componentCorrections.get(find(vertex))
+      if (!correction) continue
+      if (!correction.normalize) {
+        uv.setY(vertex, -uv.getY(vertex))
+        continue
+      }
+      const uSpan = correction.maxU - correction.minU
+      const vSpan = correction.maxV - correction.minV
+      const repeatCount = Math.max(1, Math.round(Math.abs(uSpan)))
+      if (uSpan > 1e-5) {
+        uv.setX(vertex, (uv.getX(vertex) - correction.minU) / uSpan * repeatCount)
+      }
+      let normalizedV = (uv.getY(vertex) - correction.minV) / vSpan
+      if (correction.flipV) normalizedV = 1 - normalizedV
+      uv.setY(vertex, normalizedV)
+    }
+    uv.needsUpdate = true
+    correctedGeometries.add(obj.geometry)
+    correctedComponents += componentCorrections.size
+  })
+
+  return correctedComponents
 }
 
 async function prepareShanghai2018Materials(root: THREE.Object3D): Promise<void> {
@@ -529,6 +752,7 @@ function meshHasObstacleSurfaceHint(mesh: THREE.Mesh): boolean {
 
 function materialHasObstacleSurfaceHint(mesh: THREE.Mesh, materialName: string, materialCount: number): boolean {
   if (materialName === 'wall8') return false
+  if (SHANGHAI_2018_EXACT_OBSTACLE_MATERIALS.has(materialName)) return true
   const materialSearchName = materialName.toLowerCase()
   if (ROAD_SURFACE_HINTS.some((hint) => materialSearchName.includes(hint))) return false
   if (OBSTACLE_SURFACE_HINTS.some((hint) => materialSearchName.includes(hint))) return true
@@ -863,6 +1087,8 @@ export function addLowPolyShanghai(
         model.name = 'shanghai-international-circuit-full-model'
         await prepareShanghai2018Materials(model)
         model.updateMatrixWorld(true)
+        const normalizedAdComponents = normalizeShanghai2018AdUvs(model)
+        console.info(`[F1S] normalized ${normalizedAdComponents} ad UV components`)
 
         model.traverse((obj) => {
           if (!(obj instanceof THREE.Mesh)) return
@@ -972,6 +1198,12 @@ function collectObstacleSurfaceTargets(root: THREE.Object3D): THREE.Mesh[] {
 export function createLowPolyShanghaiObstacleSampler(
   lowPolyShanghai: LowPolyShanghaiBundle,
 ): LowPolyShanghaiObstacleSampler {
+  interface ObstaclePoint {
+    point: THREE.Vector3
+    minY: number
+    maxY: number
+  }
+
   interface ObstacleSegment {
     a: THREE.Vector3
     b: THREE.Vector3
@@ -980,12 +1212,15 @@ export function createLowPolyShanghaiObstacleSampler(
   }
 
   const obstacleTargets = collectObstacleSurfaceTargets(lowPolyShanghai.group)
-  const cellSize = 8
-  const maxPointsPerMesh = 20000
-  const maxPointsPerCell = 36
-  const maxSegmentsPerCell = 180
+  const cellSize = 4
+  const maxPointsPerMesh = 30000
+  const maxPointsPerCell = 512
+  const maxSegmentsPerCell = 320
   const obstaclePadding = 0.2
-  const grid = new Map<string, THREE.Vector3[]>()
+  const densePointSpacing = 0.55
+  const densePointHeightStep = 1.25
+  const grid = new Map<string, ObstaclePoint[]>()
+  const pointsByQuantizedPosition = new Map<string, ObstaclePoint>()
   const segmentGrid = new Map<string, ObstacleSegment[]>()
   let segmentCount = 0
   const tmp = new THREE.Vector3()
@@ -998,15 +1233,29 @@ export function createLowPolyShanghaiObstacleSampler(
   const triangleEdgeB = new THREE.Vector3()
 
   const cellKey = (x: number, z: number): string => `${Math.floor(x / cellSize)}:${Math.floor(z / cellSize)}`
-  const addPoint = (point: THREE.Vector3): void => {
+  const addPoint = (
+    point: THREE.Vector3,
+    minY = point.y,
+    maxY = point.y,
+  ): void => {
     const key = cellKey(point.x, point.z)
     const bucket = grid.get(key)
-    if (bucket) {
-      if (bucket.length >= maxPointsPerCell) return
-      bucket.push(point.clone())
-    } else {
-      grid.set(key, [point.clone()])
+    const pointKey = [
+      Math.round(point.x / densePointSpacing),
+      Math.round(point.z / densePointSpacing),
+      Math.floor(((minY + maxY) * 0.5) / densePointHeightStep),
+    ].join(':')
+    const existing = pointsByQuantizedPosition.get(pointKey)
+    if (existing) {
+      existing.minY = Math.min(existing.minY, minY)
+      existing.maxY = Math.max(existing.maxY, maxY)
+      return
     }
+    if (bucket && bucket.length >= maxPointsPerCell) return
+    const sample = { point: point.clone(), minY, maxY }
+    pointsByQuantizedPosition.set(pointKey, sample)
+    if (bucket) bucket.push(sample)
+    else grid.set(key, [sample])
   }
   const addSegment = (a: THREE.Vector3, b: THREE.Vector3): void => {
     const dx = b.x - a.x
@@ -1034,6 +1283,19 @@ export function createLowPolyShanghaiObstacleSampler(
       }
     }
   }
+  const addDenseEdgePoints = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    minY: number,
+    maxY: number,
+  ): void => {
+    const planarLength = Math.hypot(b.x - a.x, b.z - a.z)
+    const steps = Math.max(1, Math.ceil(planarLength / densePointSpacing))
+    for (let step = 0; step <= steps; step++) {
+      tmp.lerpVectors(a, b, step / steps)
+      addPoint(tmp, minY, maxY)
+    }
+  }
 
   lowPolyShanghai.group.updateMatrixWorld(true)
   for (const target of obstacleTargets) {
@@ -1050,7 +1312,14 @@ export function createLowPolyShanghaiObstacleSampler(
         ? [{ start: 0, count: index?.count ?? position.count, materialIndex: 0 }]
         : []
     const eligibleTriangleCount = ranges.reduce((sum, range) => sum + Math.floor(range.count / 3), 0)
-    const triangleStep = Math.max(1, Math.ceil(eligibleTriangleCount / maxPointsPerMesh))
+    // The main barrier mesh contains hundreds of thousands of small triangles.
+    // Skipping every Nth triangle creates literal holes in the collider. For
+    // dense meshes, scan every triangle once and collapse it into a quantized
+    // point footprint instead of retaining millions of triangle edges.
+    const useDensePointFootprint = eligibleTriangleCount > maxPointsPerMesh
+    const triangleStep = useDensePointFootprint
+      ? 1
+      : Math.max(1, Math.ceil(eligibleTriangleCount / maxPointsPerMesh))
     for (const range of ranges) {
       const end = Math.min(range.start + range.count, index?.count ?? position.count)
       for (let offset = range.start; offset + 2 < end; offset += triangleStep * 3) {
@@ -1067,19 +1336,28 @@ export function createLowPolyShanghaiObstacleSampler(
         triangleNormal.normalize()
         if (Math.abs(triangleNormal.y) > 0.5) continue
         const verticalSpan = Math.max(triangleA.y, triangleB.y, triangleC.y) - Math.min(triangleA.y, triangleB.y, triangleC.y)
-        if (verticalSpan < 0.35) continue
+        if (verticalSpan < 0.12) continue
         triangleCenter.copy(triangleA).add(triangleB).add(triangleC).multiplyScalar(1 / 3)
         if (Number.isFinite(triangleCenter.x) && Number.isFinite(triangleCenter.y) && Number.isFinite(triangleCenter.z)) {
-          addSegment(triangleA, triangleB)
-          addSegment(triangleB, triangleC)
-          addSegment(triangleC, triangleA)
-          addPoint(triangleCenter)
-          tmp.copy(triangleA).add(triangleB).multiplyScalar(0.5)
-          addPoint(tmp)
-          tmp.copy(triangleB).add(triangleC).multiplyScalar(0.5)
-          addPoint(tmp)
-          tmp.copy(triangleC).add(triangleA).multiplyScalar(0.5)
-          addPoint(tmp)
+          const minY = Math.min(triangleA.y, triangleB.y, triangleC.y)
+          const maxY = Math.max(triangleA.y, triangleB.y, triangleC.y)
+          if (useDensePointFootprint) {
+            addPoint(triangleCenter, minY, maxY)
+            addDenseEdgePoints(triangleA, triangleB, minY, maxY)
+            addDenseEdgePoints(triangleB, triangleC, minY, maxY)
+            addDenseEdgePoints(triangleC, triangleA, minY, maxY)
+          } else {
+            addSegment(triangleA, triangleB)
+            addSegment(triangleB, triangleC)
+            addSegment(triangleC, triangleA)
+            addPoint(triangleCenter, minY, maxY)
+            tmp.copy(triangleA).add(triangleB).multiplyScalar(0.5)
+            addPoint(tmp, minY, maxY)
+            tmp.copy(triangleB).add(triangleC).multiplyScalar(0.5)
+            addPoint(tmp, minY, maxY)
+            tmp.copy(triangleC).add(triangleA).multiplyScalar(0.5)
+            addPoint(tmp, minY, maxY)
+          }
         }
       }
     }
@@ -1146,9 +1424,9 @@ export function createLowPolyShanghaiObstacleSampler(
         const bucket = grid.get(`${ix}:${iz}`)
         if (!bucket) continue
         for (const candidate of bucket) {
-          if (candidate.y < minY || candidate.y > maxY) continue
-          const dx = point.x - candidate.x
-          const dz = point.z - candidate.z
+          if (candidate.maxY < minY || candidate.minY > maxY) continue
+          const dx = point.x - candidate.point.x
+          const dz = point.z - candidate.point.z
           const dSq = dx * dx + dz * dz
           if (dSq > queryRadiusSq) continue
           if (!closest || dSq < closest.distance * closest.distance) {
@@ -1158,7 +1436,11 @@ export function createLowPolyShanghaiObstacleSampler(
             }
             normal.normalize()
             closest = {
-              point: candidate.clone(),
+              point: new THREE.Vector3(
+                candidate.point.x,
+                THREE.MathUtils.clamp(point.y, candidate.minY, candidate.maxY),
+                candidate.point.z,
+              ),
               normal,
               distance: Math.sqrt(dSq),
             }
@@ -1177,7 +1459,7 @@ export function createLowPolyShanghaiObstacleSampler(
   ): LowPolyShanghaiObstacleHit | null => {
     const distance = from.distanceTo(to)
     const radius = options.radius ?? 1.1
-    const steps = Math.max(1, Math.ceil(distance / Math.max(0.2, radius * 0.5)))
+    const steps = Math.max(1, Math.ceil(distance / Math.max(0.12, radius * 0.3)))
     for (let step = 1; step <= steps; step++) {
       tmp.lerpVectors(from, to, step / steps)
       const hit = sampleObstacleNear(tmp, options)

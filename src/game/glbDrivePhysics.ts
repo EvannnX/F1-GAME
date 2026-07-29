@@ -6,6 +6,11 @@ import type {
   LowPolyShanghaiObstacleSampler,
 } from '../render/lowPolyShanghai'
 import { clamp } from '../utils/math'
+import {
+  resetWallContact,
+  resolveWallMovement,
+  type WallContactState,
+} from './wallCollision'
 
 const MAX_SPEED = 82
 const ACCEL = 48
@@ -18,6 +23,7 @@ const TURN_RATE = 2.9
 const RIDE_HEIGHT = 0.09
 const SLOPE_GRAVITY_FACTOR = 0.42
 const CAR_COLLISION_RADIUS = 0.82
+const CAR_COLLISION_FRONT_OFFSET = 1
 const CHASSIS_SAMPLE_OFFSET = 1.35
 const CHASSIS_HALF_WIDTH = 0.68
 const MAX_GROUND_SAMPLE_DELTA = 0.28
@@ -30,6 +36,8 @@ const NORMAL_SPEED_RESPONSE = 0.04
 const MAX_VISUAL_PENETRATION = 0.02
 const MAX_VISUAL_CLEARANCE = 0.05
 const MAX_NORMAL_LAG_RAD = THREE.MathUtils.degToRad(3)
+const WALL_SCRAPE_MAX_SPEED = 60 / 3.6
+const WALL_SCRAPE_DRAG = 1.8
 
 export interface GlbDriveState {
   pos: THREE.Vector3
@@ -63,8 +71,10 @@ export function createGlbDrivePhysics(
   let lastGood = state.pos.clone()
   const sampleOffset = new THREE.Vector3()
   const chassisSide = new THREE.Vector3()
-  const collisionNormal = new THREE.Vector3()
-  let collisionLocked = false
+  const wallContact: WallContactState = {
+    locked: false,
+    normal: new THREE.Vector3(),
+  }
 
   const applyHit = (hit: LowPolyShanghaiGroundHit, dt = 0, immediate = false): void => {
     const targetY = hit.point.y + RIDE_HEIGHT
@@ -179,8 +189,7 @@ export function createGlbDrivePhysics(
     state.topSpeed = 0
     state.normal.copy(pose.normal ?? new THREE.Vector3(0, 1, 0)).normalize()
     state.onRoad = true
-    collisionNormal.set(0, 0, 0)
-    collisionLocked = false
+    resetWallContact(wallContact)
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading))
     const hit = sampleChassisGround(forward)
     if (hit) applyHit(hit, 0, true)
@@ -210,50 +219,31 @@ export function createGlbDrivePhysics(
     forward.addScaledVector(state.normal, -forward.dot(state.normal))
     if (forward.lengthSq() < 1e-5) forward.set(Math.sin(state.heading), 0, Math.cos(state.heading))
     forward.normalize()
-    let blockedByContact = false
-    if (collisionLocked) {
-      if (forward.dot(collisionNormal) > 0.08) {
-        collisionLocked = false
-        collisionNormal.set(0, 0, 0)
-      } else {
-        state.speed = 0
-        blockedByContact = true
-      }
-    }
     const gravityOnSurface = new THREE.Vector3(0, -9.81, 0)
       .addScaledVector(state.normal, 9.81 * state.normal.y)
     const slopeAccel = gravityOnSurface.dot(forward) * SLOPE_GRAVITY_FACTOR
     state.speed = clamp(state.speed + slopeAccel * dt, 0, MAX_SPEED)
-    if (blockedByContact) state.speed = 0
     if (state.speed > state.topSpeed) state.topSpeed = state.speed
 
     state.pos.x += forward.x * state.speed * dt
     state.pos.z += forward.z * state.speed * dt
 
-    const hit = sampleChassisGround(forward)
-    if (hit?.isRunoff) {
-      collisionLocked = false
-      collisionNormal.set(0, 0, 0)
-    }
-
-    if (obstacles && !hit?.isRunoff && was.distanceToSquared(state.pos) > 1e-10) {
-      const side = forward.clone().negate()
-      const startObstacle = obstacles.sampleObstacleNear(was, {
-        radius: CAR_COLLISION_RADIUS,
-        side,
-      })
-      const obstacle = obstacles.sampleObstacleBetween(was, state.pos, {
-        radius: CAR_COLLISION_RADIUS,
-        side,
-      })
-      const movingAwayFromContact = startObstacle
-        ? forward.dot(startObstacle.normal) > 0.08
-        : false
-      if (obstacle && !movingAwayFromContact) {
-        state.pos.copy(was)
-        state.speed = 0
-        collisionNormal.copy(startObstacle?.normal ?? obstacle.normal).normalize()
-        collisionLocked = true
+    let hit = sampleChassisGround(forward)
+    if (obstacles && was.distanceToSquared(state.pos) > 1e-10) {
+      const wallMove = resolveWallMovement(
+        was,
+        state.pos,
+        forward,
+        obstacles,
+        CAR_COLLISION_RADIUS,
+        CAR_COLLISION_FRONT_OFFSET,
+        wallContact,
+      )
+      if (wallMove.corrected) hit = sampleChassisGround(forward)
+      if (wallMove.impacted) state.speed *= wallMove.speedRetention
+      if (wallMove.scraping) {
+        state.speed = Math.min(state.speed, WALL_SCRAPE_MAX_SPEED)
+        state.speed *= Math.exp(-WALL_SCRAPE_DRAG * dt)
       }
     }
 
