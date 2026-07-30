@@ -52,7 +52,7 @@ function installStyles(): void {
       inset: 0;
       z-index: 460;
       overflow: hidden;
-      background: #d7d9de;
+      background: #fff;
       color: #15171c;
       font-family: Inter, "Helvetica Neue", Arial, sans-serif;
       isolation: isolate;
@@ -472,7 +472,7 @@ export function showGarageSelection(
   host.prepend(canvasHost)
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color('#d7d9de')
+  scene.background = new THREE.Color('#ffffff')
   const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 80)
   camera.position.set(6.5, 2.9, 8.2)
 

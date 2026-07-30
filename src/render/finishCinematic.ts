@@ -181,14 +181,16 @@ function createOverlay(): {
       }
       .f1s-finish-cinematic__checker-band {
         position: absolute;
-        /* A skewed rectangle loses horizontal coverage at its top-right and
-           bottom-left corners. Overdraw by a full quarter viewport on both
-           sides so even ultrawide screens never expose a right-edge seam. */
-        left: -25vw;
+        /* Keep the finished band permanently wider than the viewport. Its
+           reveal is animated with clipping rather than horizontal translation,
+           so the final right edge cannot stop short on a scaled viewport. */
+        left: -30vw;
         top: 50%;
-        width: 150vw;
+        width: 160vw;
+        max-width: none;
         height: clamp(90px, 16vh, 156px);
-        transform: translate(-160vw, -50%) skewX(-10deg);
+        transform: translateY(-50%) skewX(-10deg);
+        clip-path: inset(0 100% 0 0);
         background:
           linear-gradient(90deg, rgba(0,0,0,.24), rgba(0,0,0,.3) 50%, rgba(0,0,0,.24)),
           conic-gradient(
@@ -205,7 +207,7 @@ function createOverlay(): {
           0 12px 42px rgba(0,0,0,.62);
         opacity: .96;
         filter: contrast(1.12);
-        will-change: transform;
+        will-change: clip-path;
       }
       .f1s-finish-cinematic.is-finish-intro .f1s-finish-cinematic__checker-band {
         animation: f1s-finish-band-in 820ms cubic-bezier(.12,.72,.16,1) 40ms forwards;
@@ -374,9 +376,9 @@ function createOverlay(): {
         mix-blend-mode: screen;
       }
       @keyframes f1s-finish-band-in {
-        0% { transform: translate(-160vw, -50%) skewX(-10deg); }
-        72% { transform: translate(2.5vw, -50%) skewX(-10deg); }
-        100% { transform: translate(0, -50%) skewX(-10deg); }
+        0% { clip-path: inset(0 100% 0 0); }
+        72% { clip-path: inset(0 0 0 0); }
+        100% { clip-path: inset(0 0 0 0); }
       }
       @keyframes f1s-finish-word-in {
         0% {

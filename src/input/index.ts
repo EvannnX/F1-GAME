@@ -166,7 +166,7 @@ export async function initInput(preferred?: InputMode): Promise<InputController>
     const kbBrake = keyboard.isBrakeHeld()
     const kbBoost = keyboard.isBoostHeld()
     const drs = kbBoost
-    const manualThrottle = mode !== 'keyboard'
+    const manualThrottle = mode !== 'keyboard' || kbThrottle || kbBoost
     let throttle = manualThrottle ? 0 : DEFAULT_THROTTLE
     let brake = 0
 
