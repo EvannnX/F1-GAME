@@ -160,7 +160,7 @@ export const PLAYER_CARS: readonly PlayerCarDefinition[] = __F1TI_LITE_LION__
     ? FULL_PLAYER_CARS.filter((car) => LITE_PLAYER_CAR_IDS.has(car.id))
     : FULL_PLAYER_CARS
 
-const STORAGE_KEY = 'f1s_selected_player_car_v1'
+const STORAGE_KEY = 'f1s_selected_player_car_v2'
 const CHANGE_EVENT = 'f1s-player-car-change'
 const PREVIEW_EVENT = 'f1s-player-car-preview'
 
@@ -184,7 +184,7 @@ export function readSelectedPlayerCar(): PlayerCarId {
     ? 'lion'
     : __F1TI_LITE_SINGLE_CAR__
       ? 'audi'
-      : 'redbull'
+      : 'creator-special'
   try {
     const value = localStorage.getItem(STORAGE_KEY)
     return PLAYER_CARS.some((car) => car.id === value) ? value as PlayerCarId : defaultCar

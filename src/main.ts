@@ -306,7 +306,7 @@ function shouldBypassHomeScreen(): boolean {
 function bootWithHomeScreen(): void {
   if (new URLSearchParams(window.location.search).has('lionPreview')) {
     try {
-      localStorage.setItem('f1s_selected_player_car_v1', 'lion')
+      localStorage.setItem('f1s_selected_player_car_v2', 'lion')
     } catch {
       /* The preview still opens; the garage falls back gracefully if storage is unavailable. */
     }
