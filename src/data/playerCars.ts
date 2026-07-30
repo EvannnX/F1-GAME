@@ -1,7 +1,4 @@
 import type { TeamId } from '../utils/storage'
-import ferrariUrl from '../assets/已压缩车模型/2022_ferrari_f1-75 (1)-optimized 2.glb?url'
-import mercedesUrl from '../assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb?url'
-import redbullUrl from '../assets/models/RB19_REDBULL.opt.glb?url'
 import fomCreatorUrl from '../assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb?url'
 
 export type PlayerCarId =
@@ -33,7 +30,7 @@ export interface PlayerCarDefinition {
   livery?: PlayerCarLivery
 }
 
-const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
+export const PLAYER_CARS: readonly PlayerCarDefinition[] = [
   {
     id: 'audi',
     name: '定制你的方程式赛车',
@@ -44,39 +41,6 @@ const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
     teamId: 'merc',
     accent: '#d41222',
     wheelStrategy: 'fom-2026-material-v1',
-  },
-  {
-    id: 'redbull',
-    name: 'Red Bull Racing',
-    team: 'Oracle Red Bull Racing',
-    model: 'RB19',
-    url: redbullUrl,
-    reverse: false,
-    teamId: 'redbull',
-    accent: '#3158ff',
-    wheelStrategy: 'redbull-github-v1',
-  },
-  {
-    id: 'ferrari',
-    name: 'Scuderia Ferrari',
-    team: 'Scuderia Ferrari',
-    model: 'F1-75',
-    url: ferrariUrl,
-    reverse: false,
-    teamId: 'ferrari',
-    accent: '#e3202f',
-    wheelStrategy: 'ferrari-f1-75-named-v1',
-  },
-  {
-    id: 'mercedes',
-    name: 'Mercedes-AMG',
-    team: 'Mercedes-AMG Petronas',
-    model: 'W15',
-    url: mercedesUrl,
-    reverse: true,
-    teamId: 'merc',
-    accent: '#00a99d',
-    wheelStrategy: 'mercedes-w15-compressed-v1',
   },
   {
     id: 'creator',
@@ -115,17 +79,6 @@ const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
   },
 ] as const
 
-const LITE_PLAYER_CAR_IDS = new Set<PlayerCarId>([
-  'audi',
-  'creator',
-  'creator-special',
-  'creator-partner',
-])
-
-export const PLAYER_CARS: readonly PlayerCarDefinition[] = __F1TI_LITE_SINGLE_CAR__
-  ? FULL_PLAYER_CARS.filter((car) => LITE_PLAYER_CAR_IDS.has(car.id))
-  : FULL_PLAYER_CARS
-
 const STORAGE_KEY = 'f1s_selected_player_car_v1'
 const CHANGE_EVENT = 'f1s-player-car-change'
 
@@ -145,7 +98,7 @@ export function wheelStrategyForPlayerCar(
 }
 
 export function readSelectedPlayerCar(): PlayerCarId {
-  const defaultCar = __F1TI_LITE_SINGLE_CAR__ ? 'audi' : 'redbull'
+  const defaultCar: PlayerCarId = 'audi'
   try {
     const value = localStorage.getItem(STORAGE_KEY)
     return PLAYER_CARS.some((car) => car.id === value) ? value as PlayerCarId : defaultCar

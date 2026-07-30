@@ -322,7 +322,10 @@ export function createMenu(): MenuController {
 
     const brand = document.createElement('div')
     brand.className = 'f1s-race-menu__brand'
-    brand.innerHTML = 'F1<span>TI</span>'
+    brand.append('F1')
+    const brandAccent = document.createElement('span')
+    brandAccent.textContent = 'TI'
+    brand.appendChild(brandAccent)
 
     const makeRow = (
       caption: string,

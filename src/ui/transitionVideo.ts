@@ -6,6 +6,13 @@ export interface TransitionVideoController {
 }
 
 export function createTransitionVideo(videoUrl: string): TransitionVideoController {
+  if (!videoUrl) {
+    return {
+      play: () => Promise.resolve(),
+      hide: () => undefined,
+    }
+  }
+
   let host: HTMLDivElement | null = null
   let video: HTMLVideoElement | null = null
   let finishCurrent: (() => void) | null = null

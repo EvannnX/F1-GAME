@@ -15,8 +15,8 @@ import jinqiuUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官
 const THEME_MATERIALS = new Set(['livery_audi_01', 'fom_car_dummy_decal', 'boya'])
 const REAR_LIGHT_PERIOD_MS = 500
 const REAR_LIGHT_RED = new THREE.Color('#ff1808')
-const LIVERY_STORAGE_KEY = 'f1ti_fom_livery_scheme_v54'
-const THEME_COLOR_STORAGE_KEY = 'f1ti_fom_theme_color_v50'
+const LIVERY_STORAGE_KEY = 'f1s_fom_livery_scheme_v54'
+const THEME_COLOR_STORAGE_KEY = 'f1s_fom_theme_color_v50'
 
 export interface FomThemeColor {
   name: string

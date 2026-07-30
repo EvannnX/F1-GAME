@@ -55,12 +55,20 @@ export function createResult(): ResultController {
 
     const stats = document.createElement('div')
     stats.style.cssText = 'display: flex; gap: 28px; font-size: 14px; color: #aaa; flex-wrap: wrap; justify-content: center;'
-    stats.innerHTML = `
-      <div>顶速 <span style="color:#fff;font-size:20px;font-weight:700">${Math.round(data.topSpeedKmh)}</span> km/h</div>
-      <div>撞墙 <span style="color:#fff;font-size:20px;font-weight:700">${data.crashes}</span> 次</div>
-      <div>追尾 <span style="color:#fff;font-size:20px;font-weight:700">${data.opponentHits}</span> 次</div>
-      <div>历史最佳 <span style="color:#fff;font-size:20px;font-weight:700">${storage.getBestLap() ? formatLapTime(storage.getBestLap()!) : '—'}</span></div>
-    `
+    const addStat = (label: string, value: string, suffix = ''): void => {
+      const item = document.createElement('div')
+      item.append(`${label} `)
+      const strong = document.createElement('span')
+      strong.style.cssText = 'color:#fff;font-size:20px;font-weight:700'
+      strong.textContent = value
+      item.append(strong, suffix)
+      stats.appendChild(item)
+    }
+    addStat('顶速', String(Math.round(data.topSpeedKmh)), ' km/h')
+    addStat('撞墙', String(data.crashes), ' 次')
+    addStat('追尾', String(data.opponentHits), ' 次')
+    const bestLap = storage.getBestLap()
+    addStat('历史最佳', bestLap ? formatLapTime(bestLap) : '—')
 
     const buttons = document.createElement('div')
     buttons.style.cssText = 'display: flex; gap: 16px; margin-top: 16px;'

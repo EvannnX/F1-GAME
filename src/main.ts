@@ -94,8 +94,13 @@ THREE.Cache.enabled = true
 
 const OFFLINE_8M_BUILD = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
 const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'
-const LITE_SINGLE_CAR_BUILD = __F1TI_LITE_SINGLE_CAR__
-const OFFLINE_STORAGE_PREFIX = 'f1ti_offline_20260722_r12'
+const DEVELOPMENT_TOOLS_BUILD = !OFFLINE_8M_BUILD && !COMPACT_30_BUILD
+const NO_TRANSITION_VIDEO_BUILD = import.meta.env.VITE_F1TI_NO_TRANSITION_VIDEO === '1'
+const DIAGNOSTIC_NO_MAP_BUILD = import.meta.env.VITE_F1TI_DIAGNOSTIC_NO_MAP === '1'
+// The final game is a single-player FOM experience. Keep this a literal so
+// production minification removes all opponent spawning branches and assets.
+const LITE_SINGLE_CAR_BUILD = true
+const OFFLINE_STORAGE_PREFIX = 'f1s_offline_20260722_r12'
 const GLB_START_FALLBACK = new THREE.Vector3(-140, 0, -52.8)
 const GLB_START_HEADING = 0
 const GLB_THIRD_BACK_DISTANCE = 4.5
@@ -216,10 +221,6 @@ interface GlbGridPlacement {
 
 const DEFAULT_GLB_GRID_PLACEMENTS: GlbGridPlacement[] = [
   { id: 'player', x: -264.27, z: 520.03, headingDeg: 281.7 },
-  { id: 'redbull', x: -230.42, z: 511.9, headingDeg: 281.7 },
-  { id: 'ferrari', x: -257.32, z: 513.86, headingDeg: 284.4 },
-  { id: 'creator', x: -240.22, z: 509.83, headingDeg: 283.5 },
-  { id: 'mercedes', x: -247.97, z: 516.04, headingDeg: 282 },
 ]
 
 interface SavedGlbStartPose {
@@ -323,6 +324,14 @@ function bootWithHomeScreen(): void {
 
   window.addEventListener(BACK_TO_GARAGE_EVENT, showGaragePage)
   showHomePage()
+
+  if (DIAGNOSTIC_NO_MAP_BUILD) {
+    markGameReady()
+    window.addEventListener(SHOW_RACE_MENU_EVENT, () => {
+      showToast('诊断包页面与赛车加载成功；此版本未包含赛道地图', 4200)
+    })
+    return
+  }
 
   void warmRuntimeAssetCache()
 
@@ -853,7 +862,9 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   const hud = createHud()
   let cameraSwitcher: RaceCameraSwitcher | null = null
   let input: InputController | null = null
-  const transitionVideo = createTransitionVideo('video/beginning.mp4')
+  const transitionVideo = createTransitionVideo(
+    NO_TRANSITION_VIDEO_BUILD ? '' : 'video/beginning.mp4',
+  )
   const countdownOverlay = createGlbCountdownOverlay()
   const result = createResult()
   const personalityCard = createPersonalityCard()
@@ -1622,16 +1633,31 @@ function bootstrap(onReady?: BootReadyHandler): void {
     console.warn('[F1S] scene init failed:', e)
     const detail =
       e instanceof Error ? `${e.name}: ${e.message}` : String(e)
-    container.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                  width:100%;height:100%;color:#fff;font-size:14px;text-align:center;padding:24px;gap:12px;">
-        <div style="font-size:18px;font-weight:700;">无法初始化 3D 引擎</div>
-        <div style="color:#aaa;max-width:80%;word-break:break-word;">${detail}</div>
-        <div style="color:#888;font-size:12px;margin-top:12px;">
-          建议:用 <b>Chrome / Safari</b> 通过 <code>npm run dev</code> 或本地 http 打开,<br/>
-          某些浏览器禁止 file:// 加载 WebGL。
-        </div>
-      </div>`
+    const fallback = document.createElement('div')
+    fallback.style.cssText = [
+      'display:flex',
+      'flex-direction:column',
+      'align-items:center',
+      'justify-content:center',
+      'width:100%',
+      'height:100%',
+      'color:#fff',
+      'font-size:14px',
+      'text-align:center',
+      'padding:24px',
+      'gap:12px',
+    ].join(';')
+    const title = document.createElement('div')
+    title.style.cssText = 'font-size:18px;font-weight:700'
+    title.textContent = '无法初始化 3D 引擎'
+    const errorDetail = document.createElement('div')
+    errorDetail.style.cssText = 'color:#aaa;max-width:80%;word-break:break-word'
+    errorDetail.textContent = detail
+    const suggestion = document.createElement('div')
+    suggestion.style.cssText = 'color:#888;font-size:12px;margin-top:12px'
+    suggestion.textContent = '请使用支持 WebGL 的 Chrome 或 Safari 打开。'
+    fallback.append(title, errorDetail, suggestion)
+    container.replaceChildren(fallback)
     onReady?.()
     return
   }
@@ -1747,7 +1773,9 @@ function bootstrap(onReady?: BootReadyHandler): void {
   const sm = new StateMachine(ctx)
   const menu = createMenu()
   const hud = createHud()
-  const transitionVideo = createTransitionVideo('video/beginning.mp4')
+  const transitionVideo = createTransitionVideo(
+    NO_TRANSITION_VIDEO_BUILD ? '' : 'video/beginning.mp4',
+  )
   hud.show() // visible from boot (kept on through MENU/RACE; only RESULT hides it)
   hud.update({ speedKmh: 0, lapMs: 0, mode: 'keyboard' })
   const result = createResult()
@@ -2404,6 +2432,10 @@ function bootstrap(onReady?: BootReadyHandler): void {
 const bootEntry = (): void => {
   const params = new URLSearchParams(window.location.search)
   if (params.has('creatorCarMapTest')) selectPlayerCar('creator')
+  if (params.has('garagePreview')) {
+    showGarageSelection(() => { /* Local showroom preview has no navigation. */ })
+    return
+  }
   if (params.has('specialLiveryCapture')) {
     selectPlayerCar(
       params.get('specialLiveryCapture') === 'partners'
@@ -2413,31 +2445,31 @@ const bootEntry = (): void => {
     showGarageSelection(() => { /* Capture mode has no navigation. */ })
     return
   }
-  if (!COMPACT_30_BUILD && params.has('amgWheelTest')) {
+  if (DEVELOPMENT_TOOLS_BUILD && params.has('amgWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest()
     })
     return
   }
-  if (!COMPACT_30_BUILD && params.has('redbullWheelTest')) {
+  if (DEVELOPMENT_TOOLS_BUILD && params.has('redbullWheelTest')) {
     void import('./ui/mercedesWheelTest').then(({ installMercedesWheelTest }) => {
       installMercedesWheelTest('redbull')
     })
     return
   }
-  if (!COMPACT_30_BUILD && params.has('ferrariF175WheelTest')) {
+  if (DEVELOPMENT_TOOLS_BUILD && params.has('ferrariF175WheelTest')) {
     void import('./ui/ferrariF175WheelTest').then(({ installFerrariF175WheelTest }) => {
       installFerrariF175WheelTest()
     })
     return
   }
-  if (!COMPACT_30_BUILD && params.has('fomWheelTest')) {
+  if (DEVELOPMENT_TOOLS_BUILD && params.has('fomWheelTest')) {
     void import('./ui/fomWheelTest').then(({ installFomWheelTest }) => {
       installFomWheelTest()
     })
     return
   }
-  if (!COMPACT_30_BUILD && params.has('creatorCarPreview')) {
+  if (DEVELOPMENT_TOOLS_BUILD && params.has('creatorCarPreview')) {
     void import('./ui/creatorCarPreview').then(({ installCreatorCarPreview }) => {
       installCreatorCarPreview()
     })

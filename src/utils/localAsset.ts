@@ -46,7 +46,7 @@ function decodeAssetImage(url: string, key: string): Promise<ArrayBuffer> {
         const bytes = new Uint8Array(length)
         for (let index = 0; index < length; index++) bytes[index] = byteAt(index + 4)
         const auxiliaryOffset = length + 4
-        if (key === 'shanghai' && auxiliaryOffset + 4 <= canvas.width * canvas.height * 3) {
+        if (auxiliaryOffset + 4 <= canvas.width * canvas.height * 3) {
           const auxiliaryLength = (
             (byteAt(auxiliaryOffset) << 24) |
             (byteAt(auxiliaryOffset + 1) << 16) |
@@ -105,10 +105,13 @@ async function loadPackagedAsset(key: string): Promise<ArrayBuffer> {
 }
 
 export async function loadLocalAsset(url: string): Promise<ArrayBuffer> {
+  if (url.startsWith('data:')) return decodeDataUrl(url)
+  if (url.startsWith('f1ti-asset:')) {
+    return loadPackagedAsset(url.slice('f1ti-asset:'.length))
+  }
+
   if (OFFLINE_PACKAGE) {
-    return url.startsWith('f1ti-asset:')
-      ? loadPackagedAsset(url.slice('f1ti-asset:'.length))
-      : decodeDataUrl(url)
+    return decodeDataUrl(url)
   }
 
   const response = await fetch(url)

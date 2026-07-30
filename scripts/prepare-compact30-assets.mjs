@@ -57,20 +57,18 @@ cpSync(
 )
 
 copyGlbUnchanged(
-  'src/assets/已压缩车模型/2022_ferrari_f1-75 (1)-optimized 2.glb',
-  'ferrari-player.glb',
-)
-copyGlbUnchanged(
-  'src/assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb',
-  'mercedes-player.glb',
-)
-copyGlbUnchanged('src/assets/models/RB19_REDBULL.opt.glb', 'redbull-player.glb')
-copyGlbUnchanged(
   'src/assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb',
   'fom-player.glb',
 )
-copyGlbUnchanged('src/assets/models/Ferrari_26.opt.glb', 'ferrari-opponent.glb')
-copyGlbUnchanged('src/assets/models/Mercedes_W13.glb', 'mercedes-opponent.glb')
+for (const removedCarAsset of [
+  'ferrari-player.glb',
+  'mercedes-player.glb',
+  'redbull-player.glb',
+  'ferrari-opponent.glb',
+  'mercedes-opponent.glb',
+]) {
+  rmSync(join(output, removedCarAsset), { force: true })
+}
 
 ffmpeg(
   join(root, 'src/assets/background/Cloudymorning2k.hdr'),

@@ -168,7 +168,7 @@ export function createLobby(): LobbyController {
       document.body.appendChild(host)
 
       const renderRoster = (peers: PeerState[], myId: number, isHost: boolean): void => {
-        rosterEl.innerHTML = ''
+        rosterEl.replaceChildren()
         // Make sure we always show ourselves first if we're not in the
         // peer list (server doesn't echo our hello back to us).
         const seen = new Set(peers.map((p) => p.clientId))

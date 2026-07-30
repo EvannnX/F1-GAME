@@ -6,7 +6,6 @@ import type { TeamId } from '../utils/storage'
 import { showToast } from '../utils/error'
 import {
   playerCarById,
-  wheelStrategyForPlayerCar,
   type PlayerCarId,
 } from '../data/playerCars'
 import dracoDecoderJs from 'three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw'
@@ -117,6 +116,10 @@ interface RedBullWheelComponents {
 
 let dracoLoader: DRACOLoader | null = null
 
+type EmbeddedDracoScope = typeof globalThis & {
+  __F1TI_DRACO_DECODER__?: string
+}
+
 function makeMaterialInteriorVisible(material: THREE.Material): void {
   if (material.side !== THREE.DoubleSide) {
     material.side = THREE.DoubleSide
@@ -161,7 +164,10 @@ function getDracoLoader(): DRACOLoader {
     ;(dracoLoader as unknown as {
       _loadLibrary: (url: string, responseType: string) => Promise<string | ArrayBuffer>
     })._loadLibrary = async (url: string) => {
-      if (url.endsWith('draco_decoder.js')) return dracoDecoderJs
+      if (url.endsWith('draco_decoder.js')) {
+        return (globalThis as EmbeddedDracoScope).__F1TI_DRACO_DECODER__
+          ?? dracoDecoderJs
+      }
       throw new Error(`Unsupported Draco decoder asset: ${url}`)
     }
   }
@@ -2242,15 +2248,8 @@ export function createFom2026WheelRigs(root: THREE.Object3D): PlayerWheelRig[] {
 }
 
 function createPlayerWheelRigs(carId: PlayerCarId, model: THREE.Object3D): PlayerWheelRig[] {
-  const strategy = wheelStrategyForPlayerCar(carId)
-  if (strategy === 'redbull-github-v1') return createRedBullWheelRigs(model)
-  if (strategy === 'ferrari-f1-75-named-v1') return createFerrariF175WheelRigs(model)
-  if (strategy === 'mercedes-w15-compressed-v1') return createMercedesW15WheelRigs(model)
-  if (strategy === 'fom-2026-material-v1') return createFom2026WheelRigs(model)
-
-  // Each model owns its wheel strategy. Uncalibrated cars intentionally keep
-  // static wheels until their own mesh mapping and pivots have been verified.
-  return []
+  void carId
+  return createFom2026WheelRigs(model)
 }
 
 export function updatePlayerWheelRigs(
@@ -2499,7 +2498,7 @@ export function createCar(options: CarOptions = {}): CarBundle {
     }
   }
 
-  void setCarModel(options.carId ?? 'redbull')
+  void setCarModel(options.carId ?? 'audi')
 
   const setLivery = (team: TeamId): void => {
     const c = TEAM_COLORS[team]

@@ -33,10 +33,21 @@ import {
   clearCustomLivery,
   prepareCustomLogo,
 } from '../render/customLogo'
+import { replaceStaticMarkup } from '../utils/staticMarkup'
 import { createPageBackButton } from './backButton'
 
 export interface GarageController {
   destroy: () => void
+}
+
+interface GarageOption {
+  key: string
+  definition: PlayerCarDefinition
+  name: string
+  model: string
+  code: string
+  accent: string
+  themeColor?: string
 }
 
 const STYLE_ID = 'f1s-garage-style'
@@ -311,9 +322,185 @@ function installStyles(): void {
       pointer-events: none;
       transition: opacity .28s ease;
     }
+    .f1s-garage {
+      background:
+        linear-gradient(174deg, transparent 0 20%, rgba(255, 170, 176, .18) 21%, transparent 31%),
+        linear-gradient(187deg, transparent 0 42%, rgba(255, 207, 209, .13) 43%, transparent 52%),
+        radial-gradient(ellipse at 43% 57%, rgba(255, 147, 154, .62) 0, rgba(166, 28, 66, .42) 29%, transparent 58%),
+        linear-gradient(158deg, #230710 0%, #6f102d 24%, #c94f68 45%, #7d1235 62%, #17050d 82%, #3f0b1d 100%);
+      color: #fff;
+    }
+    .f1s-garage::before,
+    .f1s-garage::after {
+      content: '';
+      position: absolute;
+      z-index: 0;
+      left: -8%;
+      width: 118%;
+      pointer-events: none;
+      border-radius: 50%;
+      transform: rotate(-5deg);
+    }
+    .f1s-garage::before {
+      top: 15%;
+      height: 34%;
+      border-top: 42px solid rgba(255, 218, 219, .13);
+      border-bottom: 76px solid rgba(54, 0, 22, .35);
+      box-shadow: 0 34px 90px rgba(255, 177, 181, .12);
+    }
+    .f1s-garage::after {
+      top: 45%;
+      height: 25%;
+      border-top: 28px solid rgba(255, 193, 196, .18);
+      border-bottom: 58px solid rgba(65, 0, 27, .46);
+    }
+    .f1s-garage__canvas {
+      z-index: 1;
+      right: -18%;
+      bottom: 106px;
+      left: 18%;
+      width: auto;
+      height: auto;
+      transform: translateY(-4vh);
+    }
+    .f1s-garage__topline { display: none; }
+    .f1s-garage__heading {
+      top: 34px;
+      left: 28px;
+      min-width: 0;
+      width: auto;
+      height: 40px;
+      padding: 0 17px;
+      border-radius: 3px;
+      background: #ef5361;
+      color: #fff;
+      clip-path: none;
+      font-size: 15px;
+      box-shadow: 0 5px 18px rgba(44, 0, 12, .28);
+    }
+    .f1s-garage__heading::before { display: none; }
+    .f1s-garage__identity {
+      top: 88px;
+      left: 28px;
+      width: min(700px, 57vw);
+      min-height: 82px;
+      padding: 0;
+      background: none;
+      clip-path: none;
+      box-shadow: none;
+    }
+    .f1s-garage__team {
+      color: rgba(255, 255, 255, .72);
+      font-size: 13px;
+    }
+    .f1s-garage__name {
+      margin-top: 7px;
+      max-width: 660px;
+      font-size: clamp(30px, 3.35vw, 48px);
+      line-height: 1.08;
+      text-shadow: 0 3px 16px rgba(34, 0, 10, .36);
+    }
+    .f1s-garage__model {
+      margin-top: 8px;
+      color: rgba(255, 255, 255, .82);
+      font-size: 14px;
+    }
+    .f1s-garage__rail {
+      position: absolute;
+      z-index: 8;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      display: flex;
+      height: 106px;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 10px;
+      padding: 9px 24px 12px;
+      overflow-x: auto;
+      background: linear-gradient(180deg, transparent, rgba(15, 4, 9, .76) 24%);
+      scrollbar-width: none;
+    }
+    .f1s-garage__rail::-webkit-scrollbar { display: none; }
+    .f1s-garage__car-option {
+      flex: 0 0 180px;
+      height: 78px;
+      padding: 7px;
+      border: 1px solid rgba(255, 255, 255, .25);
+      border-radius: 7px 7px 2px 2px;
+      background: linear-gradient(160deg, rgba(55, 42, 48, .88), rgba(21, 13, 17, .92));
+      color: #fff;
+      cursor: pointer;
+    }
+    .f1s-garage__car-option:hover,
+    .f1s-garage__car-option:focus-visible {
+      border-color: #fff;
+      outline: none;
+    }
+    .f1s-garage__car-option.is-active {
+      height: 88px;
+      border: 2px solid #fff;
+      background: linear-gradient(155deg, rgba(98, 79, 88, .98), rgba(42, 29, 35, .98));
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, .2), 0 -9px 24px rgba(0, 0, 0, .28);
+      transform: translateY(-3px);
+    }
+    .f1s-garage__car-code {
+      display: grid;
+      height: 36px;
+      place-items: center;
+      color: var(--car-accent);
+      font-size: 18px;
+      font-weight: 950;
+    }
+    .f1s-garage__car-label {
+      display: block;
+      overflow: hidden;
+      color: rgba(255, 255, 255, .82);
+      font-size: 10px;
+      font-weight: 780;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .f1s-garage__arrow { display: none; }
+    .f1s-garage__liveries,
+    .f1s-garage__diy {
+      left: 28px;
+      bottom: 122px;
+    }
+    .f1s-garage__livery {
+      border-color: rgba(255, 255, 255, .26);
+      background: rgba(29, 18, 23, .78);
+      color: #fff;
+    }
+    .f1s-garage__livery.is-active {
+      border-color: #fff;
+      background: rgba(84, 30, 48, .94);
+      box-shadow: inset 0 -3px #ef5361;
+    }
+    .f1s-garage__diy {
+      border-color: rgba(255, 255, 255, .28);
+      background: linear-gradient(135deg, rgba(50, 27, 37, .78), rgba(24, 13, 18, .84));
+      box-shadow: inset 0 1px rgba(255, 255, 255, .12), 0 12px 28px rgba(27, 0, 10, .2);
+    }
+    .f1s-garage__logo-status { color: rgba(255, 255, 255, .72); }
+    .f1s-garage__footer {
+      right: 30px;
+      bottom: 122px;
+    }
+    .f1s-garage__count { color: rgba(255, 255, 255, .7); }
+    .f1s-garage__continue {
+      min-width: 240px;
+      min-height: 56px;
+      border-color: rgba(255, 255, 255, .88);
+      background: linear-gradient(180deg, #e21a3a, #b70728);
+      font-size: 17px;
+      box-shadow: inset 0 1px rgba(255, 255, 255, .28), 0 10px 25px rgba(45, 0, 13, .32);
+    }
     .f1s-garage--capture .f1s-garage__topline,
     .f1s-garage--capture .f1s-garage__heading,
     .f1s-garage--capture .f1s-garage__identity,
+    .f1s-garage--capture .f1s-garage__rail,
     .f1s-garage--capture .f1s-garage__arrow,
     .f1s-garage--capture .f1s-garage__liveries,
     .f1s-garage--capture .f1s-garage__diy,
@@ -354,6 +541,22 @@ function installStyles(): void {
       .f1s-garage__livery { height: 32px; padding: 0 7px; font-size: 10px; }
     }
     @media (max-width: 900px) {
+      .f1s-garage__canvas {
+        right: -10%;
+        bottom: 100px;
+        left: 10%;
+        transform: translateY(-2vh);
+        -webkit-mask-image: none;
+        mask-image: none;
+      }
+      .f1s-garage__identity { width: calc(100vw - 56px); }
+      .f1s-garage__rail {
+        justify-content: flex-start;
+        padding-right: 18px;
+        padding-left: 18px;
+      }
+      .f1s-garage__footer { right: 14px; bottom: 118px; }
+      .f1s-garage__continue { min-width: 190px; }
       .f1s-garage__liveries {
         right: 14px;
         bottom: max(92px, calc(env(safe-area-inset-bottom) + 84px));
@@ -365,6 +568,122 @@ function installStyles(): void {
       }
       .f1s-garage__liveries::-webkit-scrollbar { display: none; }
       .f1s-garage__livery { flex: 0 0 112px; }
+    }
+    @media (orientation: landscape) and (max-width: 950px),
+      (orientation: landscape) and (max-height: 500px) {
+      .f1s-garage__heading { display: none; }
+      .f1s-garage__identity {
+        z-index: 10;
+        top: max(54px, calc(env(safe-area-inset-top) + 10px));
+        left: max(16px, calc(env(safe-area-inset-left) + 10px));
+        width: 39vw;
+        min-height: 0;
+        padding: 0;
+      }
+      .f1s-garage__team { display: none; }
+      .f1s-garage__name {
+        margin-top: 0;
+        font-size: clamp(20px, 6.2vh, 30px);
+        line-height: 1.02;
+      }
+      .f1s-garage__model {
+        margin-top: 5px;
+        font-size: clamp(9px, 2.8vh, 12px);
+        line-height: 1.2;
+      }
+      .f1s-garage__canvas {
+        top: 0;
+        right: max(4px, env(safe-area-inset-right));
+        bottom: 72px;
+        left: 28%;
+        width: auto;
+        height: auto;
+        transform: none;
+      }
+      .f1s-garage__rail {
+        z-index: 14;
+        height: 72px;
+        justify-content: center;
+        gap: 6px;
+        padding: 5px max(10px, env(safe-area-inset-right))
+          max(5px, env(safe-area-inset-bottom))
+          max(10px, env(safe-area-inset-left));
+        overflow-x: auto;
+        background: linear-gradient(180deg, rgba(17, 3, 9, .18), rgba(17, 3, 9, .94) 28%);
+      }
+      .f1s-garage__car-option,
+      .f1s-garage__car-option.is-active {
+        flex: 0 0 min(22vw, 154px);
+        height: 58px;
+        min-height: 52px;
+        padding: 4px 6px;
+        transform: none;
+      }
+      .f1s-garage__car-code {
+        height: 28px;
+        font-size: 15px;
+      }
+      .f1s-garage__car-label { font-size: 9px; }
+      .f1s-garage__diy {
+        z-index: 15;
+        right: auto;
+        bottom: max(79px, calc(env(safe-area-inset-bottom) + 76px));
+        left: max(10px, calc(env(safe-area-inset-left) + 8px));
+        max-width: 49vw;
+        gap: 5px;
+        padding: 5px;
+      }
+      .f1s-garage__upload,
+      .f1s-garage__clear-logo {
+        min-height: 42px;
+        padding: 0 11px;
+        font-size: 11px;
+        touch-action: manipulation;
+      }
+      .f1s-garage__logo-preview {
+        width: 36px;
+        height: 36px;
+      }
+      .f1s-garage__logo-status {
+        display: none;
+      }
+      .f1s-garage__footer {
+        z-index: 15;
+        right: max(10px, calc(env(safe-area-inset-right) + 8px));
+        bottom: max(79px, calc(env(safe-area-inset-bottom) + 76px));
+        gap: 7px;
+      }
+      .f1s-garage__count { font-size: 11px; }
+      .f1s-garage__continue {
+        min-width: min(31vw, 190px);
+        min-height: 44px;
+        padding: 0 38px 0 18px;
+        font-size: 14px;
+        touch-action: manipulation;
+      }
+      .f1s-garage__continue::after {
+        right: 15px;
+        font-size: 27px;
+      }
+      .f1s-garage__liveries,
+      .f1s-garage__colors {
+        z-index: 15;
+        right: auto;
+        bottom: max(79px, calc(env(safe-area-inset-bottom) + 76px));
+        left: max(10px, calc(env(safe-area-inset-left) + 8px));
+        display: flex;
+        width: min(57vw, 510px);
+        gap: 5px;
+        overflow-x: auto;
+      }
+      .f1s-garage__liveries[hidden] { display: none; }
+      .f1s-garage__livery {
+        flex: 0 0 104px;
+        height: 38px;
+        padding: 0 7px;
+        font-size: 9px;
+        touch-action: manipulation;
+      }
     }
     @media (prefers-reduced-motion: reduce) {
       .f1s-garage__arrow,
@@ -384,13 +703,7 @@ function fitForGarage(model: THREE.Object3D, definition: PlayerCarDefinition): v
   bbox = new THREE.Box3().setFromObject(model)
   size = bbox.getSize(new THREE.Vector3())
   if (size.x > size.z * 1.1) model.rotation.y = -Math.PI / 2
-  // The compressed W15 is authored with the opposite garage-facing
-  // direction from its on-track orientation. Keep this correction local to
-  // the showroom so the calibrated race model remains unchanged.
-  const reverseForGarage = definition.id === 'mercedes'
-    ? !definition.reverse
-    : definition.reverse
-  if (reverseForGarage) model.rotation.y += Math.PI
+  if (definition.reverse) model.rotation.y += Math.PI
 
   bbox = new THREE.Box3().setFromObject(model)
   const center = bbox.getCenter(new THREE.Vector3())
@@ -404,7 +717,7 @@ function fitForGarage(model: THREE.Object3D, definition: PlayerCarDefinition): v
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
     for (const material of materials) {
       if (material instanceof THREE.MeshStandardMaterial) {
-        material.envMapIntensity = 0.9
+        material.envMapIntensity = 1
         material.needsUpdate = true
       }
     }
@@ -432,21 +745,64 @@ export function showGarageSelection(
   const capturePitchDeg = THREE.MathUtils.clamp(Number(params.get('capturePitch') ?? 8), 3, 18)
   const mobileGpu = window.matchMedia('(pointer: coarse)').matches
 
-  let selectedIndex = Math.max(0, PLAYER_CARS.findIndex((car) => car.id === readSelectedPlayerCar()))
+  const customDefinition = playerCarById('audi')
+  const creatorDefinition = playerCarById('creator')
+  const specialDefinition = playerCarById('creator-special')
+  const partnerDefinition = playerCarById('creator-partner')
+  const garageOptions: readonly GarageOption[] = [
+    {
+      key: 'custom',
+      definition: customDefinition,
+      name: '照片DIY赛车',
+      model: '上传图片生成专属赛车',
+      code: '照片 DIY',
+      accent: '#f2f2f2',
+    },
+    {
+      key: 'solid',
+      definition: creatorDefinition,
+      name: '纯色DIY赛车',
+      model: '选择纯色生成专属赛车',
+      code: '纯色 DIY',
+      accent: '#f1f2f4',
+      themeColor: '#d9d9d6',
+    },
+    {
+      key: 'creator-special',
+      definition: specialDefinition,
+      name: '抖音AI创变者特涂',
+      model: 'FOM 2026 特涂',
+      code: 'AI',
+      accent: '#ff6f91',
+    },
+    {
+      key: 'creator-partner',
+      definition: partnerDefinition,
+      name: '合作伙伴特涂',
+      model: 'FOM 2026 合作伙伴特涂',
+      code: 'PRO',
+      accent: '#c991ff',
+    },
+  ]
+  const selectedCarId = readSelectedPlayerCar()
+  let selectedIndex = Math.max(
+    0,
+    garageOptions.findIndex((option) => option.definition.id === selectedCarId),
+  )
   const host = document.createElement('section')
   host.className = 'f1s-garage'
   host.classList.toggle('f1s-garage--capture', captureMode)
   host.setAttribute('aria-label', '赛车车库')
-  host.innerHTML = `
+  replaceStaticMarkup(host, `
     <div class="f1s-garage__topline"></div>
     <div class="f1s-garage__heading">赛车选择</div>
     <div class="f1s-garage__identity" aria-live="polite">
       <div>
-        <div class="f1s-garage__team"></div>
         <div class="f1s-garage__name"></div>
         <div class="f1s-garage__model"></div>
       </div>
     </div>
+    <nav class="f1s-garage__rail" aria-label="赛车选择"></nav>
     <button class="f1s-garage__arrow f1s-garage__arrow--prev" type="button" aria-label="上一辆赛车" title="上一辆赛车"><span>‹</span></button>
     <button class="f1s-garage__arrow f1s-garage__arrow--next" type="button" aria-label="下一辆赛车" title="下一辆赛车"><span>›</span></button>
     <div class="f1s-garage__liveries f1s-garage__colors" aria-label="创变者纯色选择" hidden></div>
@@ -462,7 +818,7 @@ export function showGarageSelection(
       <div class="f1s-garage__count"></div>
       <button class="f1s-garage__continue" type="button">确认赛车</button>
     </div>
-  `
+  `)
   document.body.appendChild(host)
   document.body.classList.add('f1s-garage-active')
 
@@ -471,14 +827,19 @@ export function showGarageSelection(
   host.prepend(canvasHost)
 
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color('#d7d9de')
+  scene.background = captureMode ? new THREE.Color('#d7d9de') : null
   const camera = new THREE.PerspectiveCamera(34, 1, 0.1, 80)
   camera.position.set(6.5, 2.9, 8.2)
 
-  const renderer = new THREE.WebGLRenderer({ antialias: !mobileGpu, powerPreference: 'high-performance' })
+  const renderer = new THREE.WebGLRenderer({
+    alpha: !captureMode,
+    antialias: !mobileGpu,
+    powerPreference: 'high-performance',
+  })
+  if (!captureMode) renderer.setClearColor(0x000000, 0)
   renderer.outputColorSpace = THREE.SRGBColorSpace
   renderer.toneMapping = THREE.AgXToneMapping
-  renderer.toneMappingExposure = 1.02
+  renderer.toneMappingExposure = 0.96
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   canvasHost.appendChild(renderer.domElement)
@@ -487,7 +848,7 @@ export function showGarageSelection(
   const roomEnvironment = new RoomEnvironment()
   const environmentTarget = pmrem.fromScene(roomEnvironment, 0.04)
   scene.environment = environmentTarget.texture
-  scene.environmentIntensity = mobileGpu ? 0.62 : 0.72
+  scene.environmentIntensity = mobileGpu ? 0.7 : 0.84
   roomEnvironment.dispose()
   pmrem.dispose()
 
@@ -496,6 +857,9 @@ export function showGarageSelection(
   controls.enableDamping = true
   controls.dampingFactor = 0.065
   controls.enablePan = false
+  controls.enableRotate = true
+  controls.enableZoom = true
+  controls.zoomToCursor = true
   controls.minDistance = 6.8
   controls.maxDistance = 14
   controls.minPolarAngle = Math.PI * 0.2
@@ -503,11 +867,13 @@ export function showGarageSelection(
   controls.autoRotate = false
 
   const floorMaterial = new THREE.MeshPhysicalMaterial({
-    color: '#eef0f3',
+    color: captureMode ? '#eef0f3' : '#5d2638',
     roughness: 0.36,
     metalness: 0.08,
     clearcoat: 0.42,
     clearcoatRoughness: 0.32,
+    transparent: !captureMode,
+    opacity: captureMode ? 1 : 0,
   })
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(34, 26), floorMaterial)
   floor.rotation.x = -Math.PI / 2
@@ -516,16 +882,18 @@ export function showGarageSelection(
   scene.add(floor)
 
   const platformMaterial = new THREE.MeshStandardMaterial({
-    color: '#f8f9fa',
+    color: captureMode ? '#f8f9fa' : '#8f4053',
     roughness: 0.38,
     metalness: 0.1,
+    transparent: !captureMode,
+    opacity: captureMode ? 1 : 0,
   })
   const platform = new THREE.Mesh(new THREE.CylinderGeometry(5.3, 5.5, 0.08, 96), platformMaterial)
   platform.position.y = -0.02
   platform.receiveShadow = true
   scene.add(platform)
 
-  const key = new THREE.DirectionalLight('#fff4e8', 1.7)
+  const key = new THREE.DirectionalLight('#fff4e8', 2)
   key.position.set(-6, 10, 7)
   key.castShadow = true
   key.shadow.mapSize.set(mobileGpu ? 512 : 1024, mobileGpu ? 512 : 1024)
@@ -548,7 +916,7 @@ export function showGarageSelection(
   fillPanel.lookAt(0, 0.65, 0)
   scene.add(fillPanel)
 
-  const rimPanel = new THREE.RectAreaLight('#8fc8ff', 9, 5.5, 2.2)
+  const rimPanel = new THREE.RectAreaLight('#9ed4ff', 10.5, 5.5, 2.2)
   rimPanel.position.set(5.2, 4.5, -5.8)
   rimPanel.lookAt(0, 0.9, 0)
   scene.add(rimPanel)
@@ -567,7 +935,10 @@ export function showGarageSelection(
   ;(dracoLoader as unknown as {
     _loadLibrary: (url: string, responseType: string) => Promise<string | ArrayBuffer>
   })._loadLibrary = async (url: string) => {
-    if (url.endsWith('draco_decoder.js')) return dracoDecoderJs
+    if (url.endsWith('draco_decoder.js')) {
+      return (globalThis as typeof globalThis & { __F1TI_DRACO_DECODER__?: string })
+        .__F1TI_DRACO_DECODER__ ?? dracoDecoderJs
+    }
     throw new Error(`Unsupported Draco decoder asset: ${url}`)
   }
   loader.setDRACOLoader(dracoLoader)
@@ -590,7 +961,7 @@ export function showGarageSelection(
     const target = new THREE.Vector3(0, box.min.y + size.y * 0.46, 0)
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const fitDistance = sphere.radius / Math.max(0.1, Math.sin(halfVerticalFov)) * 1.12
-    const displayDistance = fitDistance * (captureMode ? 0.42 : 0.7)
+    const displayDistance = fitDistance * (captureMode ? 0.42 : 0.46)
     const viewDirection = captureMode
       ? new THREE.Vector3(
         Math.sin(THREE.MathUtils.degToRad(captureYawDeg)),
@@ -604,8 +975,8 @@ export function showGarageSelection(
     camera.near = Math.max(0.05, displayDistance * 0.02)
     camera.far = Math.max(80, fitDistance * 8)
     camera.updateProjectionMatrix()
-    controls.minDistance = captureMode ? displayDistance * 0.95 : fitDistance * 0.66
-    controls.maxDistance = captureMode ? displayDistance * 1.05 : fitDistance * 1.55
+    controls.minDistance = captureMode ? displayDistance * 0.95 : fitDistance * 0.2
+    controls.maxDistance = captureMode ? displayDistance * 1.05 : fitDistance * 1.8
     controls.update()
   }
 
@@ -667,9 +1038,9 @@ export function showGarageSelection(
     return promise
   }
 
-  const teamEl = host.querySelector<HTMLDivElement>('.f1s-garage__team')!
   const nameEl = host.querySelector<HTMLDivElement>('.f1s-garage__name')!
   const modelEl = host.querySelector<HTMLDivElement>('.f1s-garage__model')!
+  const railEl = host.querySelector<HTMLElement>('.f1s-garage__rail')!
   const countEl = host.querySelector<HTMLDivElement>('.f1s-garage__count')!
   const colorsEl = host.querySelector<HTMLDivElement>('.f1s-garage__colors')!
   const liveriesEl = host.querySelector<HTMLDivElement>(
@@ -748,7 +1119,7 @@ export function showGarageSelection(
     button.addEventListener('click', () => {
       selectedFomScheme = scheme.id
       selectFomLiveryScheme(scheme.id)
-      const selectedDefinition = PLAYER_CARS[selectedIndex]
+      const selectedDefinition = garageOptions[selectedIndex].definition
       if (selectedDefinition.livery === 'fom-special' || selectedDefinition.livery === 'fom-partner') {
         fomLiveries.get(selectedDefinition.id)?.setScheme(scheme.id)
       }
@@ -759,17 +1130,29 @@ export function showGarageSelection(
     liveriesEl.appendChild(button)
   }
   updateLiveryButtons()
+  const railOptionButtons = new Map<string, HTMLButtonElement>()
   let selectionVersion = 0
   const showSelection = (index: number): void => {
-    selectedIndex = (index + PLAYER_CARS.length) % PLAYER_CARS.length
-    const definition = PLAYER_CARS[selectedIndex]
+    selectedIndex = (index + garageOptions.length) % garageOptions.length
+    const option = garageOptions[selectedIndex]
+    const definition = option.definition
     const version = ++selectionVersion
-    host.dataset.selectedCar = definition.id
-    host.style.setProperty('--garage-accent', definition.accent)
-    teamEl.textContent = definition.team
-    nameEl.textContent = definition.name
-    modelEl.textContent = definition.model
-    countEl.textContent = `${selectedIndex + 1} / ${PLAYER_CARS.length}`
+    host.dataset.selectedCar = option.key
+    host.style.setProperty('--garage-accent', option.accent)
+    nameEl.textContent = option.name
+    modelEl.textContent = option.model
+    countEl.textContent = `${selectedIndex + 1} / ${garageOptions.length}`
+    for (const [key, button] of railOptionButtons) {
+      const active = key === option.key
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-pressed', String(active))
+      if (active) button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
+    }
+    if (option.themeColor) {
+      selectedFomColor = option.themeColor
+      selectFomThemeColor(option.themeColor)
+      updateColorButtons()
+    }
     colorsEl.hidden = definition.id !== 'creator'
     liveriesEl.hidden = definition.livery !== 'fom-special'
       && definition.livery !== 'fom-partner'
@@ -813,6 +1196,24 @@ export function showGarageSelection(
     }).catch((error) => {
       console.warn('[F1S] garage car load failed:', definition.id, error)
     })
+  }
+
+  for (const [index, option] of garageOptions.entries()) {
+    const carButton = document.createElement('button')
+    carButton.className = 'f1s-garage__car-option'
+    carButton.type = 'button'
+    carButton.setAttribute('aria-label', `选择${option.name}`)
+    carButton.style.setProperty('--car-accent', option.accent)
+    const code = document.createElement('span')
+    code.className = 'f1s-garage__car-code'
+    code.textContent = option.code
+    const label = document.createElement('span')
+    label.className = 'f1s-garage__car-label'
+    label.textContent = option.name
+    carButton.append(code, label)
+    carButton.addEventListener('click', () => showSelection(index))
+    railEl.appendChild(carButton)
+    railOptionButtons.set(option.key, carButton)
   }
 
   const previous = (): void => showSelection(selectedIndex - 1)
@@ -868,7 +1269,7 @@ export function showGarageSelection(
     frame = window.requestAnimationFrame(render)
     if (mobileGpu && now - lastRenderAt < 1000 / 30) return
     lastRenderAt = now
-    fomLiveries.get(PLAYER_CARS[selectedIndex].id)?.update(now)
+    fomLiveries.get(garageOptions[selectedIndex].definition.id)?.update(now)
     controls.update()
     renderer.render(scene, camera)
   }
@@ -890,7 +1291,7 @@ export function showGarageSelection(
     requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
   }
   const preloadRemaining = (): void => {
-    const selectedDefinition = PLAYER_CARS[selectedIndex]
+    const selectedDefinition = garageOptions[selectedIndex].definition
     const scheduledUrls = new Set([selectedDefinition.url])
     for (const definition of PLAYER_CARS) {
       if (definition.id === selectedDefinition.id || scheduledUrls.has(definition.url)) continue
@@ -933,7 +1334,7 @@ export function showGarageSelection(
   }
 
   host.querySelector<HTMLButtonElement>('.f1s-garage__continue')!.addEventListener('click', () => {
-    const selected = playerCarById(PLAYER_CARS[selectedIndex].id)
+    const selected = playerCarById(garageOptions[selectedIndex].definition.id)
     selectPlayerCar(selected.id)
     host.classList.add('f1s-garage--leaving')
     window.setTimeout(() => {
