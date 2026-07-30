@@ -36,8 +36,9 @@ const DIFF_LABELS: Record<Difficulty, { label: string; tag: string }> = {
 
 const INPUT_LABELS: Record<InputMode, { label: string; tag: string }> = {
   keyboard: { label: '键 盘', tag: 'WASD/方向键' },
-  touch: { label: '触 屏', tag: '左右半屏' },
-  gyro: { label: '体 感', tag: '倾斜手机' },
+  touch: { label: '按 键', tag: '转向键＋踏板' },
+  joystick: { label: '摇 杆', tag: '自由转向＋踏板' },
+  gyro: { label: '陀螺仪', tag: '倾斜转向＋踏板' },
 }
 
 const COMMENTARY_LABELS: Record<CommentaryMode, { label: string; tag: string }> = {
@@ -392,7 +393,7 @@ export function createMenu(): MenuController {
 
     const inputRow = makeRow(
       '操 作 方 式',
-      ['keyboard', 'touch', 'gyro'],
+      ['keyboard', 'touch', 'joystick', 'gyro'],
       INPUT_LABELS as Record<string, { label: string; tag: string }>,
       chosenInput,
       (k) => { chosenInput = k as InputMode },
