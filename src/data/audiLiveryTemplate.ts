@@ -44,8 +44,8 @@ export const AUDI_LIVERY_TEMPLATE: AudiLiveryTemplate = {
     'fom_car_dummy_decal',
     'fom_car_detail',
   ],
-  textureWidth: 1024,
-  textureHeight: 512,
+  textureWidth: 512,
+  textureHeight: 256,
   projectors: [
     {
       name: 'left',

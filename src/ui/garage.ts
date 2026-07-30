@@ -15,9 +15,11 @@ import {
 } from '../data/playerCars'
 import { loadLocalAsset } from '../utils/localAsset'
 import { storage } from '../utils/storage'
+import { replaceWithStaticMarkup } from '../utils/staticMarkup'
 import {
   applyFomThemeColor,
   applyFomSpecialLivery,
+  defaultFomSpecialScheme,
   FOM_LIVERY_SCHEMES,
   FOM_THEME_COLORS,
   preloadFomSpecialLivery,
@@ -31,9 +33,22 @@ import {
 import {
   applyCustomLivery,
   clearCustomLivery,
-  prepareCustomLogo,
 } from '../render/customLogo'
 import { createPageBackButton } from './backButton'
+import galleryPinkBandUrl from '../assets/diy-gallery-user/pink-band.webp?url'
+import galleryBlueBandUrl from '../assets/diy-gallery-user/blue-band.webp?url'
+import galleryWhiteBandUrl from '../assets/diy-gallery-user/white-band.webp?url'
+import galleryAveMujicaUrl from '../assets/diy-gallery-user/ave-mujica.jpg?url'
+import galleryMintGirlUrl from '../assets/diy-gallery-user/mint-girl.jpeg?url'
+
+const HOST_SAFE_PACKAGE = import.meta.env.VITE_F1TI_HOST_SAFE === '1'
+const DIY_GALLERY = [
+  { name: '粉色乐队', url: galleryPinkBandUrl },
+  { name: '蓝色乐队', url: galleryBlueBandUrl },
+  { name: '白色乐队', url: galleryWhiteBandUrl },
+  { name: 'Ave Mujica', url: galleryAveMujicaUrl },
+  { name: '青绿色角色', url: galleryMintGirlUrl },
+] as const
 
 export interface GarageController {
   destroy: () => void
@@ -222,7 +237,7 @@ function installStyles(): void {
     .f1s-garage__diy {
       position: absolute;
       z-index: 4;
-      left: clamp(22px, 5vw, 76px);
+      left: clamp(180px, 16vw, 240px);
       bottom: max(26px, calc(env(safe-area-inset-bottom) + 18px));
       display: flex;
       align-items: center;
@@ -235,7 +250,6 @@ function installStyles(): void {
       backdrop-filter: blur(8px);
     }
     .f1s-garage__diy[hidden] { display: none; }
-    .f1s-garage__upload,
     .f1s-garage__clear-logo {
       min-height: 42px;
       padding: 0 17px;
@@ -247,6 +261,26 @@ function installStyles(): void {
       cursor: pointer;
     }
     .f1s-garage__clear-logo { background: #4e525b; }
+    .f1s-garage__gallery {
+      display: flex;
+      max-width: min(480px, 48vw);
+      gap: 7px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .f1s-garage__gallery::-webkit-scrollbar { display: none; }
+    .f1s-garage__gallery-item {
+      flex: 0 0 48px;
+      width: 48px;
+      height: 48px;
+      overflow: hidden;
+      padding: 0;
+      border: 2px solid transparent;
+      border-radius: 7px;
+      background: #d9dbe0;
+    }
+    .f1s-garage__gallery-item.is-active { border-color: #d41222; }
+    .f1s-garage__gallery-item img { width: 100%; height: 100%; object-fit: cover; }
     .f1s-garage__logo-status {
       max-width: 150px;
       color: #555963;
@@ -306,6 +340,51 @@ function installStyles(): void {
       outline: none;
       transform: translateY(-2px);
     }
+    .f1s-garage__mobile-dock {
+      display: none;
+    }
+    .f1s-garage__mobile-car {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 7px 9px;
+      border: 1px solid rgba(255, 255, 255, .2);
+      border-radius: 5px;
+      background: rgba(25, 18, 22, .9);
+      color: rgba(255, 255, 255, .72);
+      cursor: pointer;
+      scroll-snap-align: start;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .f1s-garage__mobile-car.is-active {
+      border: 2px solid #fff;
+      background: #81101e;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(34, 3, 8, .34);
+    }
+    .f1s-garage__mobile-car-title {
+      overflow: hidden;
+      max-width: 100%;
+      font-size: 14px;
+      font-weight: 950;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .f1s-garage__mobile-car-detail {
+      overflow: hidden;
+      max-width: 100%;
+      opacity: .72;
+      font-size: 9px;
+      font-weight: 750;
+      line-height: 1;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .f1s-garage--leaving {
       opacity: 0;
       pointer-events: none;
@@ -317,7 +396,8 @@ function installStyles(): void {
     .f1s-garage--capture .f1s-garage__arrow,
     .f1s-garage--capture .f1s-garage__liveries,
     .f1s-garage--capture .f1s-garage__diy,
-    .f1s-garage--capture .f1s-garage__footer {
+    .f1s-garage--capture .f1s-garage__footer,
+    .f1s-garage--capture .f1s-garage__mobile-dock {
       display: none;
     }
     @media (max-height: 620px) {
@@ -341,7 +421,6 @@ function installStyles(): void {
       .f1s-garage__arrow { width: 56px; height: 56px; font-size: 46px; }
       .f1s-garage__footer { right: 18px; bottom: 14px; }
       .f1s-garage__diy { left: 18px; bottom: 14px; padding: 7px; }
-      .f1s-garage__upload,
       .f1s-garage__clear-logo { min-height: 38px; padding: 0 12px; font-size: 12px; }
       .f1s-garage__logo-status { display: none; }
       .f1s-garage__continue { min-width: 240px; min-height: 56px; font-size: 18px; }
@@ -365,6 +444,125 @@ function installStyles(): void {
       }
       .f1s-garage__liveries::-webkit-scrollbar { display: none; }
       .f1s-garage__livery { flex: 0 0 112px; }
+    }
+    @media (max-width: 960px) and (max-height: 620px) and (orientation: landscape) {
+      .f1s-garage__heading {
+        top: max(12px, env(safe-area-inset-top));
+        left: max(70px, calc(env(safe-area-inset-left) + 62px));
+        width: min(270px, 42vw);
+        min-width: 0;
+        height: 44px;
+        padding: 0 32px 0 48px;
+        font-size: 16px;
+      }
+      .f1s-garage__heading::before {
+        left: 18px;
+        width: 14px;
+        height: 14px;
+        border-width: 4px;
+      }
+      .f1s-garage__identity {
+        top: max(66px, calc(env(safe-area-inset-top) + 60px));
+        left: max(12px, env(safe-area-inset-left));
+        width: min(390px, 50vw);
+        min-height: 62px;
+        padding: 9px 48px 9px 18px;
+      }
+      .f1s-garage__name {
+        font-size: clamp(17px, 3vw, 22px);
+        line-height: 1.04;
+      }
+      .f1s-garage__model {
+        overflow: hidden;
+        max-width: 36vw;
+        margin-top: 4px;
+        font-size: 10px;
+        line-height: 1.2;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .f1s-garage__arrow { display: none; }
+      .f1s-garage__mobile-dock {
+        position: absolute;
+        z-index: 6;
+        right: max(88px, calc(env(safe-area-inset-right) + 84px));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        left: max(104px, calc(env(safe-area-inset-left) + 96px));
+        display: flex;
+        height: 66px;
+        gap: 6px;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+      }
+      .f1s-garage__mobile-dock::-webkit-scrollbar { display: none; }
+      .f1s-garage__mobile-car {
+        flex: 0 0 clamp(106px, 20vw, 168px);
+        height: 66px;
+      }
+      .f1s-garage__liveries {
+        right: max(12px, env(safe-area-inset-right));
+        bottom: max(84px, calc(env(safe-area-inset-bottom) + 78px));
+        left: max(12px, env(safe-area-inset-left));
+        display: flex;
+        width: auto;
+        gap: 5px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .f1s-garage__livery {
+        flex: 0 0 104px;
+        height: 34px;
+      }
+      .f1s-garage__diy {
+        right: auto;
+        bottom: max(84px, calc(env(safe-area-inset-bottom) + 78px));
+        left: max(104px, calc(env(safe-area-inset-left) + 96px));
+        max-width: calc(100vw - max(116px, calc(env(safe-area-inset-left) + 108px)) - max(24px, env(safe-area-inset-right)));
+        gap: 5px;
+        padding: 4px;
+      }
+      .f1s-garage__clear-logo {
+        min-height: 36px;
+        padding: 0 12px;
+        font-size: 11px;
+      }
+      .f1s-garage__logo-preview {
+        width: 36px;
+        height: 36px;
+      }
+      .f1s-garage__gallery { max-width: min(430px, 62vw); }
+      .f1s-garage__gallery-item { flex-basis: 38px; width: 38px; height: 38px; }
+      .f1s-garage__logo-status { display: none; }
+      .f1s-garage__footer {
+        right: max(10px, env(safe-area-inset-right));
+        bottom: max(10px, env(safe-area-inset-bottom));
+        gap: 0;
+      }
+      .f1s-garage__count { display: none; }
+      .f1s-garage__continue {
+        width: 70px;
+        min-width: 70px;
+        min-height: 66px;
+        padding: 0 25px 0 9px;
+        font-size: 13px;
+        text-align: left;
+      }
+      .f1s-garage__continue::after {
+        right: 8px;
+        font-size: 30px;
+      }
+    }
+    @media (max-width: 620px) and (max-height: 420px) and (orientation: landscape) {
+      .f1s-garage__identity {
+        width: min(320px, 52vw);
+        min-height: 56px;
+      }
+      .f1s-garage__model { max-width: 39vw; }
+      .f1s-garage__mobile-car {
+        flex-basis: clamp(102px, 20vw, 124px);
+      }
     }
     @media (prefers-reduced-motion: reduce) {
       .f1s-garage__arrow,
@@ -437,7 +635,7 @@ export function showGarageSelection(
   host.className = 'f1s-garage'
   host.classList.toggle('f1s-garage--capture', captureMode)
   host.setAttribute('aria-label', '赛车车库')
-  host.innerHTML = `
+  replaceWithStaticMarkup(host, `
     <div class="f1s-garage__topline"></div>
     <div class="f1s-garage__heading">赛车选择</div>
     <div class="f1s-garage__identity" aria-live="polite">
@@ -452,17 +650,17 @@ export function showGarageSelection(
     <div class="f1s-garage__liveries f1s-garage__colors" aria-label="创变者纯色选择" hidden></div>
     <div class="f1s-garage__liveries" aria-label="特涂配色选择" hidden></div>
     <div class="f1s-garage__diy" hidden>
-      <input class="f1s-garage__logo-input" type="file" accept="image/png,image/jpeg,image/webp" hidden>
-      <button class="f1s-garage__upload" type="button">上传 DIY 图片</button>
+      <div class="f1s-garage__gallery" aria-label="DIY 图片图库"></div>
       <button class="f1s-garage__clear-logo" type="button">清除</button>
-      <img class="f1s-garage__logo-preview" alt="当前上传图片预览" hidden>
+      <img class="f1s-garage__logo-preview" alt="当前图库图片预览" hidden>
       <span class="f1s-garage__logo-status" aria-live="polite"></span>
     </div>
+    <div class="f1s-garage__mobile-dock" aria-label="赛车选择列表"></div>
     <div class="f1s-garage__footer">
       <div class="f1s-garage__count"></div>
       <button class="f1s-garage__continue" type="button">确认赛车</button>
     </div>
-  `
+  `)
   document.body.appendChild(host)
   document.body.classList.add('f1s-garage-active')
 
@@ -572,9 +770,11 @@ export function showGarageSelection(
   }
   loader.setDRACOLoader(dracoLoader)
   loader.setMeshoptDecoder(MeshoptDecoder)
-  void preloadFomSpecialLivery(renderer).catch((error) => {
-    console.warn('[F1S] FOM livery preload failed:', error)
-  })
+  if (!HOST_SAFE_PACKAGE) {
+    void preloadFomSpecialLivery(renderer).catch((error) => {
+      console.warn('[F1S] FOM livery preload failed:', error)
+    })
+  }
 
   const loaded = new Map<PlayerCarId, THREE.Group>()
   const loading = new Map<PlayerCarId, Promise<THREE.Group>>()
@@ -629,6 +829,12 @@ export function showGarageSelection(
         applyFomThemeColor(gltf.scene, readFomThemeColor())
       } else if (definition.id === 'audi') {
         applyFomThemeColor(gltf.scene, '#ffffff')
+      } else if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        const variant = definition.livery === 'fom-partner' ? 'partners' : 'core'
+        const scheme = FOM_LIVERY_SCHEMES.find((entry) =>
+          entry.id === defaultFomSpecialScheme(variant),
+        )
+        applyFomThemeColor(gltf.scene, scheme?.primary ?? '#0067ff')
       }
       if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
         fomLiveries.set(
@@ -676,17 +882,55 @@ export function showGarageSelection(
     '.f1s-garage__liveries:not(.f1s-garage__colors)',
   )!
   const diyEl = host.querySelector<HTMLDivElement>('.f1s-garage__diy')!
-  const logoInput = host.querySelector<HTMLInputElement>('.f1s-garage__logo-input')!
-  const uploadLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__upload')!
+  const galleryEl = host.querySelector<HTMLDivElement>('.f1s-garage__gallery')!
   const clearLogoButton = host.querySelector<HTMLButtonElement>('.f1s-garage__clear-logo')!
   const logoStatus = host.querySelector<HTMLSpanElement>('.f1s-garage__logo-status')!
   const logoPreview = host.querySelector<HTMLImageElement>('.f1s-garage__logo-preview')!
+  const mobileDockEl = host.querySelector<HTMLDivElement>('.f1s-garage__mobile-dock')!
+  const mobileTabCopy: Partial<Record<PlayerCarId, { title: string; detail: string }>> = {
+    audi: { title: '照片 DIY', detail: '照片 DIY 赛车' },
+    creator: { title: '纯色 DIY', detail: '纯色 DIY 赛车' },
+    'creator-special': { title: 'AI', detail: '抖音 AI 创变者特涂' },
+    'creator-partner': { title: 'PRO', detail: '合作伙伴特涂' },
+  }
+  const mobileCarButtons = PLAYER_CARS.map((definition) => {
+    const copy = mobileTabCopy[definition.id] ?? {
+      title: definition.name,
+      detail: definition.model,
+    }
+    const button = document.createElement('button')
+    button.className = 'f1s-garage__mobile-car'
+    button.type = 'button'
+    button.setAttribute('aria-label', `选择${definition.name}`)
+    const title = document.createElement('span')
+    title.className = 'f1s-garage__mobile-car-title'
+    title.textContent = copy.title
+    const detail = document.createElement('span')
+    detail.className = 'f1s-garage__mobile-car-detail'
+    detail.textContent = copy.detail
+    button.append(title, detail)
+    mobileDockEl.appendChild(button)
+    return button
+  })
   const storedLogo = storage.getCustomLogo()
   if (storedLogo) {
     logoPreview.src = storedLogo
     logoPreview.hidden = false
   }
-  logoStatus.textContent = storedLogo ? '已应用自定义图片' : 'PNG / JPG / WebP'
+  logoStatus.textContent = storedLogo ? '已应用图库图片' : '选择一张图片'
+  const galleryButtons = DIY_GALLERY.map((item) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'f1s-garage__gallery-item'
+    button.setAttribute('aria-label', `使用 ${item.name} 制作 DIY 赛车`)
+    const image = document.createElement('img')
+    image.src = item.url
+    image.alt = item.name
+    button.appendChild(image)
+    button.classList.toggle('is-active', storedLogo === item.url)
+    galleryEl.appendChild(button)
+    return { button, item }
+  })
   let selectedFomColor = readFomThemeColor()
   const colorButtons = new Map<string, HTMLButtonElement>()
   const updateColorButtons = (): void => {
@@ -770,6 +1014,20 @@ export function showGarageSelection(
     nameEl.textContent = definition.name
     modelEl.textContent = definition.model
     countEl.textContent = `${selectedIndex + 1} / ${PLAYER_CARS.length}`
+    for (const [index, button] of mobileCarButtons.entries()) {
+      const active = index === selectedIndex
+      button.classList.toggle('is-active', active)
+      button.setAttribute('aria-pressed', String(active))
+    }
+    const activeMobileButton = mobileCarButtons[selectedIndex]
+    if (window.matchMedia('(max-width: 960px) and (max-height: 620px) and (orientation: landscape)').matches) {
+      const visibleLeft = mobileDockEl.scrollLeft
+      const visibleRight = visibleLeft + mobileDockEl.clientWidth
+      const buttonLeft = activeMobileButton.offsetLeft
+      const buttonRight = buttonLeft + activeMobileButton.offsetWidth
+      if (buttonLeft < visibleLeft) mobileDockEl.scrollLeft = buttonLeft
+      else if (buttonRight > visibleRight) mobileDockEl.scrollLeft = buttonRight - mobileDockEl.clientWidth
+    }
     colorsEl.hidden = definition.id !== 'creator'
     liveriesEl.hidden = definition.livery !== 'fom-special'
       && definition.livery !== 'fom-partner'
@@ -788,7 +1046,10 @@ export function showGarageSelection(
         applyFomThemeColor(currentModel, selectedFomColor)
       }
       if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        const variant = definition.livery === 'fom-partner' ? 'partners' : 'core'
+        selectedFomScheme = defaultFomSpecialScheme(variant)
         fomLiveries.get(definition.id)?.setScheme(selectedFomScheme)
+        updateLiveryButtons()
       }
       if (definition.id === 'audi') {
         void applyCustomLivery(scene, currentModel).then((applied) => {
@@ -797,7 +1058,7 @@ export function showGarageSelection(
             ? '自定义车衣已贴合'
             : storage.getCustomLogo()
               ? '图片无法贴合当前底模'
-              : 'PNG / JPG / WebP'
+              : '选择图库图片'
         }).catch((error) => {
           console.warn('[F1S] garage custom livery failed:', error)
         })
@@ -819,37 +1080,42 @@ export function showGarageSelection(
   const next = (): void => showSelection(selectedIndex + 1)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--prev')!.addEventListener('click', previous)
   host.querySelector<HTMLButtonElement>('.f1s-garage__arrow--next')!.addEventListener('click', next)
+  for (const [index, button] of mobileCarButtons.entries()) {
+    button.addEventListener('click', () => showSelection(index))
+  }
 
-  uploadLogoButton.addEventListener('click', () => logoInput.click())
-  logoInput.addEventListener('change', () => {
-    const file = logoInput.files?.[0]
-    logoInput.value = ''
-    if (!file) return
-    logoStatus.textContent = '正在处理…'
-    void prepareCustomLogo(file).then(async (dataUrl) => {
-      storage.setCustomLogo(dataUrl)
-      logoPreview.src = dataUrl
+  for (const { button, item } of galleryButtons) {
+    button.addEventListener('click', () => {
+      logoStatus.textContent = '正在应用…'
+      storage.setCustomLogo(item.url)
+      logoPreview.src = item.url
       logoPreview.hidden = false
+      for (const entry of galleryButtons) {
+        entry.button.classList.toggle('is-active', entry.item.url === item.url)
+      }
       const audiIndex = PLAYER_CARS.findIndex((car) => car.id === 'audi')
       if (selectedIndex !== audiIndex) {
         logoStatus.textContent = '正在切换 Audi DIY…'
         showSelection(audiIndex)
         return
       }
-      const applied = currentModel
-        ? await applyCustomLivery(scene, currentModel, dataUrl)
-        : false
-      logoStatus.textContent = applied ? '自定义车衣已贴合' : '正在加载 Audi DIY…'
-      renderer.shadowMap.needsUpdate = true
-    }).catch((error) => {
-      logoStatus.textContent = error instanceof Error ? error.message : '上传失败'
-      console.warn('[F1S] custom logo upload failed:', error)
+      void (currentModel
+        ? applyCustomLivery(scene, currentModel, item.url)
+        : Promise.resolve(false)
+      ).then((applied) => {
+        logoStatus.textContent = applied ? '图库车衣已贴合' : '正在加载 Audi DIY…'
+        renderer.shadowMap.needsUpdate = true
+      }).catch((error) => {
+        logoStatus.textContent = error instanceof Error ? error.message : '图片应用失败'
+        console.warn('[F1S] gallery livery failed:', error)
+      })
     })
-  })
+  }
   clearLogoButton.addEventListener('click', () => {
     storage.setCustomLogo(null)
     logoPreview.removeAttribute('src')
     logoPreview.hidden = true
+    for (const { button } of galleryButtons) button.classList.remove('is-active')
     if (currentModel) clearCustomLivery(scene, currentModel)
     logoStatus.textContent = '已清除'
     renderer.shadowMap.needsUpdate = true
@@ -878,7 +1144,7 @@ export function showGarageSelection(
     camera.fov = 34
     camera.aspect = width / height
     camera.updateProjectionMatrix()
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobileGpu ? 1 : 1.35))
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, mobileGpu ? 1.3 : 1.5))
     renderer.setSize(width, height, false)
   }
   window.addEventListener('resize', resize)

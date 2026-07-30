@@ -55,12 +55,20 @@ export function createResult(): ResultController {
 
     const stats = document.createElement('div')
     stats.style.cssText = 'display: flex; gap: 28px; font-size: 14px; color: #aaa; flex-wrap: wrap; justify-content: center;'
-    stats.innerHTML = `
-      <div>顶速 <span style="color:#fff;font-size:20px;font-weight:700">${Math.round(data.topSpeedKmh)}</span> km/h</div>
-      <div>撞墙 <span style="color:#fff;font-size:20px;font-weight:700">${data.crashes}</span> 次</div>
-      <div>追尾 <span style="color:#fff;font-size:20px;font-weight:700">${data.opponentHits}</span> 次</div>
-      <div>历史最佳 <span style="color:#fff;font-size:20px;font-weight:700">${storage.getBestLap() ? formatLapTime(storage.getBestLap()!) : '—'}</span></div>
-    `
+    const appendStat = (label: string, value: string, suffix = ''): void => {
+      const item = document.createElement('div')
+      item.append(document.createTextNode(`${label} `))
+      const valueElement = document.createElement('span')
+      valueElement.style.cssText = 'color:#fff;font-size:20px;font-weight:700'
+      valueElement.textContent = value
+      item.append(valueElement, document.createTextNode(suffix))
+      stats.appendChild(item)
+    }
+    const bestLap = storage.getBestLap()
+    appendStat('顶速', String(Math.round(data.topSpeedKmh)), ' km/h')
+    appendStat('撞墙', String(data.crashes), ' 次')
+    appendStat('追尾', String(data.opponentHits), ' 次')
+    appendStat('历史最佳', bestLap ? formatLapTime(bestLap) : '—')
 
     const buttons = document.createElement('div')
     buttons.style.cssText = 'display: flex; gap: 16px; margin-top: 16px;'
@@ -75,7 +83,7 @@ export function createResult(): ResultController {
       data.onRestart()
     }, { once: true })
     const menu = document.createElement('button')
-    menu.textContent = '返 回 比 赛 设 置'
+    menu.textContent = '返 回 游 戏'
     menu.style.cssText = `
       min-width: 160px; min-height: 64px;
       background: transparent; color: #fff; border: 2px solid #fff; border-radius: 8px;

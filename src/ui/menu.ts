@@ -24,7 +24,7 @@ export interface MenuStartConfig {
 }
 
 export interface MenuController {
-  show: (onStart: (cfg: MenuStartConfig) => void, onBack?: () => void) => void
+  show: (onStart: (cfg: MenuStartConfig) => void | Promise<void>, onBack?: () => void) => void
   hide: () => void
 }
 
@@ -296,6 +296,42 @@ function installMenuStyles(): void {
       .f1s-race-menu__start { min-width: 240px; min-height: 56px; font-size: 18px; }
       .f1s-race-menu__best { font-size: 11px; }
     }
+    @media (max-width: 680px) and (max-height: 420px) and (orientation: landscape) {
+      .f1s-race-menu__heading {
+        left: 70px;
+        width: min(270px, 48vw);
+        min-width: 0;
+      }
+      .f1s-race-menu__brand {
+        right: max(18px, env(safe-area-inset-right));
+        font-size: 25px;
+      }
+      .f1s-race-menu__settings {
+        top: 66px;
+        bottom: 72px;
+        width: calc(100vw - 28px);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 5px 8px;
+      }
+      .f1s-race-menu__setting { gap: 2px; }
+      .f1s-race-menu__caption { font-size: 9px; }
+      .f1s-race-menu__option {
+        min-height: 36px;
+        padding: 4px 6px 4px 8px;
+      }
+      .f1s-race-menu__label { font-size: 12px; }
+      .f1s-race-menu__tag { display: none; }
+      .f1s-race-menu__footer {
+        right: 14px;
+        bottom: 8px;
+        left: 14px;
+      }
+      .f1s-race-menu__start {
+        min-width: 210px;
+        min-height: 52px;
+        font-size: 17px;
+      }
+    }
     @media (prefers-reduced-motion: reduce) {
       .f1s-race-menu__option,
       .f1s-race-menu__start { transition: none; }
@@ -322,7 +358,10 @@ export function createMenu(): MenuController {
 
     const brand = document.createElement('div')
     brand.className = 'f1s-race-menu__brand'
-    brand.innerHTML = 'F1<span>TI</span>'
+    brand.append(document.createTextNode('F1'))
+    const brandAccent = document.createElement('span')
+    brandAccent.textContent = 'TI'
+    brand.appendChild(brandAccent)
 
     const makeRow = (
       caption: string,
@@ -439,39 +478,36 @@ export function createMenu(): MenuController {
     btn.className = 'f1s-race-menu__start'
     btn.textContent = '开始比赛'
     btn.addEventListener('click', () => {
-      // CRITICAL for iOS: DeviceOrientationEvent.requestPermission() MUST
-      // be invoked synchronously inside the user-gesture click handler.
-      // Any `await` before the call moves us out of the gesture frame and
-      // iOS silently no-ops the prompt. We always ask (regardless of which
-      // input mode the user picked) so the prompt is out of the way; if
-      // they later switch to gyro mid-game, no extra prompt is needed.
-      try {
+      btn.disabled = true
+      const requestGyro = async (): Promise<void> => {
+        if (chosenInput !== 'gyro') return
+        try {
         const D = (window as unknown as {
           DeviceOrientationEvent?: { requestPermission?: () => Promise<'granted' | 'denied'> }
         }).DeviceOrientationEvent
         if (D && typeof D.requestPermission === 'function') {
-          void D.requestPermission().catch((e) => {
-            console.warn('[F1S][menu] iOS gyro permission ask failed:', e)
-          })
+            await D.requestPermission()
         }
         const M = (window as unknown as {
           DeviceMotionEvent?: { requestPermission?: () => Promise<'granted' | 'denied'> }
         }).DeviceMotionEvent
         if (M && typeof M.requestPermission === 'function') {
-          void M.requestPermission().catch((e) => {
-            console.warn('[F1S][menu] iOS motion permission ask failed:', e)
-          })
+            await M.requestPermission()
         }
-      } catch (e) {
-        console.warn('[F1S][menu] iOS permission setup failed:', e)
+        } catch (e) {
+          console.warn('[F1S][menu] gyro permission failed:', e)
+        }
       }
-      onStart({
+      void requestGyro().then(() => onStart({
         difficulty: chosenDiff,
         inputMode: chosenInput,
         performanceMode: chosenQuality === 'performance',
         cameraMode: chosenCamera,
         racingGuideEnabled: chosenRacingGuide === 'on',
         commentaryMode: chosenCommentary,
+      })).catch((e) => {
+        console.warn('[F1S][menu] race start failed:', e)
+        btn.disabled = false
       })
     }, { once: true })
 

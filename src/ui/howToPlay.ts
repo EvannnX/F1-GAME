@@ -1,4 +1,5 @@
 import { createPageBackButton } from './backButton'
+import { replaceWithStaticMarkup } from '../utils/staticMarkup'
 
 export interface HowToPlayController {
   destroy: () => void
@@ -222,7 +223,7 @@ export function showHowToPlay(
   const host = document.createElement('section')
   host.className = 'f1s-guide'
   host.setAttribute('aria-label', '玩法指南')
-  host.innerHTML = `
+  replaceWithStaticMarkup(host, `
     <div class="f1s-guide__topline"></div>
     <div class="f1s-guide__heading">玩法指南</div>
     <div class="f1s-guide__brand">F1<span>TI</span></div>
@@ -247,7 +248,7 @@ export function showHowToPlay(
       </div>
     </div>
     <div class="f1s-guide__footer"><button class="f1s-guide__continue" type="button">知道了，选择赛车</button></div>
-  `
+  `)
   document.body.appendChild(host)
   document.body.classList.add('f1s-guide-active')
 

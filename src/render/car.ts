@@ -14,6 +14,8 @@ import { loadLocalAsset } from '../utils/localAsset'
 import {
   applyFomSpecialLivery,
   applyFomThemeColor,
+  defaultFomSpecialScheme,
+  FOM_LIVERY_SCHEMES,
   readFomThemeColor,
   type FomSpecialLivery,
 } from './fomSpecialLivery'
@@ -232,14 +234,74 @@ function buildPlaceholder(): PlaceholderRefs {
     group.add(m)
     return m
   }
+  const addRod = (
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    radius: number,
+    material: THREE.Material,
+  ): void => {
+    const direction = to.clone().sub(from)
+    const length = direction.length()
+    const geometry = new THREE.CylinderGeometry(radius, radius, length, 8)
+    geos.push(geometry)
+    const rod = new THREE.Mesh(geometry, material)
+    rod.position.copy(from).add(to).multiplyScalar(0.5)
+    rod.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      direction.normalize(),
+    )
+    rod.castShadow = true
+    group.add(rod)
+  }
 
-  addMesh(new THREE.BoxGeometry(1.6, 0.35, 4.4), bodyMat, [0, 0.35, 0])
-  addMesh(new THREE.TorusGeometry(0.55, 0.05, 8, 24, Math.PI), accentMat, [0, 0.85, 0], [Math.PI / 2, 0, 0])
-  addMesh(new THREE.SphereGeometry(0.28, 12, 10), accentMat, [0, 0.85, 0.1])
-  addMesh(new THREE.ConeGeometry(0.4, 1.4, 8), bodyMat, [0, 0.4, 2.6], [Math.PI / 2, 0, 0])
-  addMesh(new THREE.BoxGeometry(2.0, 0.06, 0.4), bodyMat, [0, 0.18, 2.4])
-  addMesh(new THREE.BoxGeometry(1.6, 0.6, 0.08), bodyMat, [0, 0.95, -2.0])
-  addMesh(new THREE.BoxGeometry(0.05, 0.5, 0.4), accentMat, [0, 0.6, -1.85])
+  // Detailed no-asset fallback. This remains visible only if the host rejects
+  // the packaged GLB, so it must still read clearly as a modern Formula car.
+  addMesh(new THREE.BoxGeometry(1.45, 0.3, 3.55), bodyMat, [0, 0.38, -0.12])
+  addMesh(new THREE.CapsuleGeometry(0.46, 1.55, 8, 14), bodyMat, [0, 0.58, 0.34], [Math.PI / 2, 0, 0])
+  addMesh(new THREE.ConeGeometry(0.3, 2.15, 12), bodyMat, [0, 0.33, 2.15], [Math.PI / 2, 0, 0])
+  addMesh(new THREE.BoxGeometry(0.42, 0.18, 1.52), bodyMat, [0, 0.27, 2.08])
+  addMesh(new THREE.BoxGeometry(0.82, 0.42, 1.22), bodyMat, [-0.66, 0.48, -0.25], [0, 0.08, 0])
+  addMesh(new THREE.BoxGeometry(0.82, 0.42, 1.22), bodyMat, [0.66, 0.48, -0.25], [0, -0.08, 0])
+  addMesh(new THREE.BoxGeometry(0.62, 0.3, 1.35), accentMat, [-0.72, 0.32, -0.48], [0, 0.12, 0])
+  addMesh(new THREE.BoxGeometry(0.62, 0.3, 1.35), accentMat, [0.72, 0.32, -0.48], [0, -0.12, 0])
+  addMesh(new THREE.TorusGeometry(0.5, 0.045, 8, 28, Math.PI), accentMat, [0, 0.93, 0.18], [Math.PI / 2, 0, 0])
+  addMesh(new THREE.BoxGeometry(0.07, 0.62, 0.1), accentMat, [0, 0.72, -0.22], [0.18, 0, 0])
+  addMesh(new THREE.SphereGeometry(0.27, 16, 12), accentMat, [0, 0.82, 0.12])
+  addMesh(new THREE.BoxGeometry(2.18, 0.055, 0.42), bodyMat, [0, 0.17, 2.42])
+  addMesh(new THREE.BoxGeometry(1.72, 0.05, 0.27), accentMat, [0, 0.25, 2.17])
+  addMesh(new THREE.BoxGeometry(0.08, 0.22, 0.44), accentMat, [-0.82, 0.26, 2.29])
+  addMesh(new THREE.BoxGeometry(0.08, 0.22, 0.44), accentMat, [0.82, 0.26, 2.29])
+  addMesh(new THREE.BoxGeometry(1.75, 0.1, 0.34), bodyMat, [0, 1.03, -1.92])
+  addMesh(new THREE.BoxGeometry(1.58, 0.08, 0.3), accentMat, [0, 0.82, -1.87])
+  addMesh(new THREE.BoxGeometry(0.07, 0.56, 0.28), accentMat, [-0.68, 0.78, -1.9])
+  addMesh(new THREE.BoxGeometry(0.07, 0.56, 0.28), accentMat, [0.68, 0.78, -1.9])
+  addMesh(new THREE.BoxGeometry(1.18, 0.12, 0.72), accentMat, [0, 0.18, -1.72], [-0.12, 0, 0])
+  for (const side of [-1, 1]) {
+    addRod(
+      new THREE.Vector3(side * 0.48, 0.36, 1.18),
+      new THREE.Vector3(side * 0.94, 0.47, 1.58),
+      0.025,
+      accentMat,
+    )
+    addRod(
+      new THREE.Vector3(side * 0.5, 0.3, 1.05),
+      new THREE.Vector3(side * 0.94, 0.36, 1.58),
+      0.022,
+      accentMat,
+    )
+    addRod(
+      new THREE.Vector3(side * 0.55, 0.34, -1.08),
+      new THREE.Vector3(side * 0.94, 0.45, -1.58),
+      0.025,
+      accentMat,
+    )
+    addRod(
+      new THREE.Vector3(side * 0.52, 0.26, -1.0),
+      new THREE.Vector3(side * 0.94, 0.34, -1.58),
+      0.022,
+      accentMat,
+    )
+  }
 
   const wheels: THREE.Mesh[] = []
   const wheelGeo = new THREE.CylinderGeometry(0.45, 0.45, 0.4, 16)
@@ -2419,6 +2481,12 @@ export function createCar(options: CarOptions = {}): CarBundle {
         applyFomThemeColor(model, readFomThemeColor())
       } else if (definition.id === 'audi') {
         applyFomThemeColor(model, '#ffffff')
+      } else if (definition.livery === 'fom-special' || definition.livery === 'fom-partner') {
+        const variant = definition.livery === 'fom-partner' ? 'partners' : 'core'
+        const scheme = FOM_LIVERY_SCHEMES.find((entry) =>
+          entry.id === defaultFomSpecialScheme(variant),
+        )
+        applyFomThemeColor(model, scheme?.primary ?? '#0067ff')
       }
       const nextFomLivery = definition.livery === 'fom-special'
         || definition.livery === 'fom-partner'

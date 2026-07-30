@@ -9,10 +9,12 @@ const compact30 = process.env.VITE_F1TI_COMPACT30 === '1'
 const embeddedTrackTextures = process.env.VITE_F1TI_USE_EMBEDDED_TRACK_TEXTURES === '1'
 const compressedTrackTextures = process.env.VITE_F1TI_COMPRESSED_TRACK_TEXTURES === '1'
 const liteSingleCar = process.env.VITE_F1TI_LITE_SINGLE_CAR === '1'
+const hostSafe = process.env.VITE_F1TI_HOST_SAFE === '1'
 
 function offlineAssetAliases(): Plugin {
   const generated = resolve(__dirname, '.offline8m-assets')
   const compactGenerated = resolve(__dirname, '.compact30-assets')
+  const hostSafeGenerated = resolve(__dirname, '.host-safe-assets')
   const embeddedAssets = new Map<string, string>([
     ['src/assets/models/RB19_REDBULL.opt.glb', 'redbull'],
     ['src/assets/models/Ferrari_26.opt.glb', 'ferrari'],
@@ -50,12 +52,23 @@ function offlineAssetAliases(): Plugin {
     ['F1-卡通图/LouisHamilton.png', 'portrait-hamilton.png'],
     ['F1-卡通图/MaxVerstappen.png', 'portrait-verstappen.png'],
   ].map(([source, target]) => [resolve(__dirname, source), resolve(compactGenerated, target)]))
+  const hostSafeEmbeddedAssets = new Map<string, string>([
+    ['src/shanghai-international-circuit-2018-layout/source/shanghai_meshopt.glb', 'shanghai'],
+    ['src/assets/AutoSave_Shangai_International_Circuit_GP_Track_no_google_earth.glb', 'shanghai'],
+    ['src/assets/已压缩车模型/2022_ferrari_f1-75 (1)-optimized 2.glb', 'fom'],
+    ['src/assets/已压缩车模型/amg_f1_w15_2024__www.vecarz.com-optimized 2.glb', 'fom'],
+    ['src/assets/models/RB19_REDBULL.opt.glb', 'fom'],
+    ['src/assets/FOM赛车涂装贴花可复用包-v54/f1_2026_fom-nyu-purple-color-only.glb', 'fom'],
+    ['src/assets/models/Ferrari_26.opt.glb', 'fom'],
+    ['src/assets/models/Mercedes_W13.glb', 'fom'],
+    ['src/assets/models/McLaren_MCL35M.opt.glb', 'fom'],
+  ].map(([source, key]) => [resolve(__dirname, source), key]))
 
   return {
     name: 'f1ti-offline-8m-assets',
     enforce: 'pre',
     resolveId(source, importer) {
-      if (compact30) {
+      if (compact30 || hostSafe) {
         if (liteSingleCar && source === './render/opponentCars') {
           return '\0f1ti-lite-opponent-cars-stub'
         }
@@ -76,10 +89,22 @@ function offlineAssetAliases(): Plugin {
       if (offline8m && source.includes('three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw')) {
         return `${resolve(generated, 'draco-decoder-stub.js')}?raw`
       }
-      if ((!offline8m && !compact30) || !importer || !source.includes('?url')) return null
+      if (hostSafe && source.includes('three/examples/jsm/libs/draco/gltf/draco_decoder.js?raw')) {
+        return `${resolve(hostSafeGenerated, 'draco-decoder.js')}?raw`
+      }
+      if ((!offline8m && !compact30 && !hostSafe) || !importer || !source.includes('?url')) return null
       const requestPath = source.slice(0, source.indexOf('?'))
       const importerPath = importer.slice(0, importer.indexOf('?') === -1 ? undefined : importer.indexOf('?'))
       const absoluteSource = resolve(dirname(importerPath), requestPath)
+      if (hostSafe) {
+        if (absoluteSource === resolve(__dirname, 'src/assets/background/Cloudymorning2k.hdr')) {
+          return '\0f1ti-host-safe-procedural-sky'
+        }
+        const embeddedKey = hostSafeEmbeddedAssets.get(absoluteSource)
+        if (embeddedKey) return `\0f1ti-embedded-asset:${embeddedKey}`
+        const compactReplacement = compactReplacements.get(absoluteSource)
+        return compactReplacement ? `${compactReplacement}?url` : null
+      }
       if (compact30) {
         const compactReplacement = compactReplacements.get(absoluteSource)
         return compactReplacement ? `${compactReplacement}?url` : null
@@ -103,8 +128,12 @@ function offlineAssetAliases(): Plugin {
         const exportName = id.slice(id.indexOf(':') + 1)
         return `export const ${exportName} = () => {}`
       }
+      if (id === '\0f1ti-host-safe-procedural-sky') {
+        return "export default ''"
+      }
       if (id.startsWith('\0f1ti-embedded-asset:')) {
-        return `export default ${JSON.stringify(`f1ti-asset:${id.slice(id.indexOf(':') + 1)}`)}`
+        const embeddedKey = id.slice(id.indexOf(':') + 1)
+        return `export default ${JSON.stringify(`f1ti-asset:${embeddedKey}`)}`
       }
       return null
     },
@@ -116,7 +145,7 @@ function offlineSandboxCompatibility(): Plugin {
     name: 'f1ti-offline-sandbox-compatibility',
     enforce: 'pre',
     transform(code, id) {
-      if (!offline8m) return null
+      if (!offline8m && !hostSafe) return null
       const normalizedId = id.replaceAll('\\', '/')
       if (normalizedId.endsWith('/three/build/three.module.js')) {
         const disabledNetwork = code
@@ -140,6 +169,13 @@ function offlineSandboxCompatibility(): Plugin {
         return { code: code.replaceAll('navigator.clipboard', 'undefined'), map: null }
       }
       return null
+    },
+    renderChunk(code) {
+      if (!hostSafe) return null
+      const sanitized = code
+        .replaceAll('http://www.w3.org/2000/svg', 'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg')
+        .replaceAll('http://www.w3.org/1999/xlink', 'http%3A%2F%2Fwww.w3.org%2F1999%2Fxlink')
+      return sanitized === code ? null : { code: sanitized, map: null }
     },
   }
 }
@@ -170,7 +206,7 @@ export default defineConfig({
     __F1TI_COMPRESSED_TRACK_TEXTURES__: JSON.stringify(compressedTrackTextures),
     __F1TI_LITE_SINGLE_CAR__: JSON.stringify(liteSingleCar),
   },
-  publicDir: offline8m || compact30 ? false : 'public',
+  publicDir: offline8m || compact30 || hostSafe ? false : 'public',
   plugins: [
     threeWebGLStateFactoryCalls(),
     offlineAssetAliases(),
@@ -181,7 +217,7 @@ export default defineConfig({
     target: ['ios13.4', 'chrome119'],
     minify: 'terser',
     cssCodeSplit: false,
-    assetsInlineLimit: compact30 ? 0 : 100_000_000,
+    assetsInlineLimit: hostSafe || compact30 ? 0 : 100_000_000,
     modulePreload: { polyfill: false },
     rollupOptions: {
       input: resolve(__dirname, 'index.html'),

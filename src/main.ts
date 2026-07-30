@@ -984,8 +984,8 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     audioLoadPromise = createAudioRig()
       .then((rig) => {
         audio = rig
-        rig.setBgmVolume(0.55)
-        rig.start()
+        rig.setBgmVolume(0.8)
+        rig.prepare()
         return rig
       })
       .catch((error) => {
@@ -999,15 +999,16 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
   const startGlbAudio = (): void => {
     unlockAudio()
     if (audio) {
-      // Repeated start() calls are intentional: sources are idempotent and
-      // AudioContext.resume() may only succeed on a later mobile gesture.
       audio.start()
       return
     }
+    void ensureGlbAudio().then((rig) => rig?.start())
+  }
+  const prepareGlbAudio = (): void => {
+    unlockAudio()
     void ensureGlbAudio()
   }
-  window.addEventListener('pointerdown', startGlbAudio)
-  window.addEventListener('keydown', startGlbAudio)
+  window.addEventListener(BACK_TO_GARAGE_EVENT, () => audio?.stop())
 
   window.addEventListener('keydown', (ev) => {
     if (ev.key === 'p' || ev.key === 'P') {
@@ -1024,11 +1025,16 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       bundle.render()
       return
     }
-    const rawInput = input?.getInput() ?? { steer: 0, throttle: 0, brake: 0, drs: false }
+    const rawInput = input?.getInput() ?? { steer: 0, throttle: 0, brake: 0, drs: false, drift: false }
     if (countdownActive && countdown) {
       countdown.update(dt)
     }
-    const manualThrottle = rawInput.manualThrottle ?? (rawInput.throttle > 0.7 || rawInput.drs)
+    // An active accelerator/DRS signal always wins over the auto-cruise
+    // preference. This also protects controllers that explicitly report
+    // manualThrottle=false while emitting a full-throttle value.
+    const manualThrottle = rawInput.manualThrottle === true
+      || rawInput.throttle > 0.7
+      || rawInput.drs
     const driveInput = {
       ...rawInput,
       throttle: manualThrottle ? rawInput.throttle : 0,
@@ -1036,7 +1042,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     }
     const gameInput = started && !gridPlacementGuiActive && !carVisualTuningGuiActive && !cameraTuningGuiActive && !firstPersonGuiActive && !objectDeletionGuiActive
       ? driveInput
-      : { steer: 0, throttle: 0, brake: 1, drs: false, manualThrottle: true }
+      : { steer: 0, throttle: 0, brake: 1, drs: false, drift: false, manualThrottle: true }
     if (started) drive.update(dt, gameInput)
     if (started && !glbFinishing) {
       updateGlbRaceProgress(dt)
@@ -1226,6 +1232,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
     const startGlbCountdown = (): void => {
       if (!drive) return
       clearGlbCountdown()
+      startGlbAudio()
       hideStatus()
       hud.show()
       cameraSwitcher?.show()
@@ -1270,6 +1277,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       glbFinishing = true
       started = false
       countdownActive = false
+      audio?.stop()
       hud.hide()
       cameraSwitcher?.hide()
       input?.setVisible(false)
@@ -1304,7 +1312,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
         const personalityAction = await personalityCard.show(stats, telemetry)
         if (personalityAction === 'menu') {
           resetGlbRaceGrid()
-          showGlbStartMenu()
+          window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
           return
         }
         if (glbResultVisible) return
@@ -1327,7 +1335,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
             result.hide()
             glbResultVisible = false
             resetGlbRaceGrid()
-            showGlbStartMenu()
+            window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
           },
         })
       })()
@@ -1363,7 +1371,7 @@ function bootstrapGlbVersion(onReady?: BootReadyHandler): void {
       if (crossedGate) finishGlbRace()
     }
     glbMenuStartHandler = (cfg): void => {
-        startGlbAudio()
+        prepareGlbAudio()
         void (async () => {
           const transitionPlayback = transitionVideo.play()
           setRaceCameraView(cfg.cameraMode === 'first' ? 'cockpit' : 'chase', false)
@@ -1622,16 +1630,31 @@ function bootstrap(onReady?: BootReadyHandler): void {
     console.warn('[F1S] scene init failed:', e)
     const detail =
       e instanceof Error ? `${e.name}: ${e.message}` : String(e)
-    container.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                  width:100%;height:100%;color:#fff;font-size:14px;text-align:center;padding:24px;gap:12px;">
-        <div style="font-size:18px;font-weight:700;">无法初始化 3D 引擎</div>
-        <div style="color:#aaa;max-width:80%;word-break:break-word;">${detail}</div>
-        <div style="color:#888;font-size:12px;margin-top:12px;">
-          建议:用 <b>Chrome / Safari</b> 通过 <code>npm run dev</code> 或本地 http 打开,<br/>
-          某些浏览器禁止 file:// 加载 WebGL。
-        </div>
-      </div>`
+    const errorPanel = document.createElement('div')
+    errorPanel.style.cssText = [
+      'display:flex',
+      'flex-direction:column',
+      'align-items:center',
+      'justify-content:center',
+      'width:100%',
+      'height:100%',
+      'color:#fff',
+      'font-size:14px',
+      'text-align:center',
+      'padding:24px',
+      'gap:12px',
+    ].join(';')
+    const errorTitle = document.createElement('div')
+    errorTitle.style.cssText = 'font-size:18px;font-weight:700'
+    errorTitle.textContent = '无法初始化 3D 引擎'
+    const errorDetail = document.createElement('div')
+    errorDetail.style.cssText = 'color:#aaa;max-width:80%;word-break:break-word'
+    errorDetail.textContent = detail
+    const errorHint = document.createElement('div')
+    errorHint.style.cssText = 'color:#888;font-size:12px;margin-top:12px'
+    errorHint.textContent = '建议使用 Chrome / Safari 通过本地 HTTP 打开，部分浏览器会禁止本地文件加载 WebGL。'
+    errorPanel.append(errorTitle, errorDetail, errorHint)
+    container.replaceChildren(errorPanel)
     onReady?.()
     return
   }
@@ -1961,31 +1984,29 @@ function bootstrap(onReady?: BootReadyHandler): void {
         if (commentaryMode === 'coach') world.coach.unlock()
         SFX.uiClick()
         unlockAudio()
-        await transitionVideo.play()
-        // Boot the engine + BGM rig from inside the click handler so iOS
-        // unlocks AudioContext on the same gesture.
-        try {
-          if (!world.audio) {
-            world.audio = await createAudioRig()
-            world.audio.start()
-          }
-        } catch (e) {
-          console.warn('[F1S] audio rig init failed:', e)
-        }
+        const audioPreparation = world.audio
+          ? Promise.resolve(world.audio)
+          : createAudioRig().catch((e) => {
+              console.warn('[F1S] audio rig init failed:', e)
+              return null
+            })
+        void audioPreparation.then((rig) => rig?.prepare())
+        const transitionPlayback = transitionVideo.play()
+        world.audio = await audioPreparation
         try {
           world.input = await initInput(inputMode)
           ctx.inputMode = world.input.mode
           if (world.input.mode === 'keyboard') {
-            showToast('键盘控制:↑/W 油门,↓/S 刹车,←→/A D 转向,Shift = DRS')
+            showToast('键盘:W 油门,S 刹车,A/D 转向,空格漂移,Shift DRS')
           } else if (world.input.mode === 'touch') {
-            showToast('按键模式:左侧方向键转向，右侧油门和刹车')
+            showToast('按键模式:方向键转向，右侧油门、刹车和漂移')
           } else if (world.input.mode === 'joystick') {
-            showToast('摇杆模式:左侧摇杆转向，右侧油门和刹车')
+            showToast('摇杆模式:左侧摇杆转向，右侧油门、刹车和漂移')
           } else if (world.input.mode === 'gyro') {
             if (world.input.gyroSource === 'mouse') {
-              showToast('陀螺仪模拟:移动鼠标转向，屏幕踏板控制油门和刹车')
+              showToast('陀螺仪模拟:移动鼠标转向，屏幕按钮控制油门、刹车和漂移')
             } else {
-              showToast('陀螺仪模式:倾斜手机转向，屏幕踏板控制油门和刹车')
+              showToast('陀螺仪模式:倾斜手机转向，屏幕按钮控制油门、刹车和漂移')
             }
           }
           if (inputMode === 'gyro' && world.input.mode !== 'gyro') {
@@ -1999,6 +2020,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
         // (Those are P1 prompts to land in the next pass.)
         ctx.playerData.team = ctx.playerData.team ?? storage.getTeam() ?? 'ferrari'
         car.setLivery(ctx.playerData.team)
+        await transitionPlayback
         await sm.transition(GameState.SCAN)
       })
     },
@@ -2025,6 +2047,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
 
   sm.register(GameState.COUNTDOWN, {
     enter: async () => {
+      world.audio?.start()
       placeCarAtStart()
       await spawnOpponents()
       world.input?.setVisible(true)
@@ -2334,8 +2357,8 @@ function bootstrap(onReady?: BootReadyHandler): void {
       hud.hide()
       minimap.hide()
       world.input?.setVisible(false)
-      // Reveal the MBTI-style racer-personality card first, then fall
-      // through to the regular result panel.
+      // Play the finish animation, reveal the MBTI-style racer-personality
+      // card, then fall through to the regular result panel.
       await transitionVideo.play()
       const personalityAction = await personalityCard.show(buildPlayerStats(), {
         bestLapMs: ctx.raceData.bestLap ?? 0,
@@ -2348,7 +2371,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
       if (personalityAction === 'menu') {
         ctx.raceData.bestLap = null
         teardownOpponents()
-        void sm.transition(GameState.MENU)
+        window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
         return
       }
       const lap = ctx.raceData.bestLap ?? 0
@@ -2375,7 +2398,7 @@ function bootstrap(onReady?: BootReadyHandler): void {
           result.hide()
           ctx.raceData.bestLap = null
           teardownOpponents()
-          void sm.transition(GameState.MENU)
+          window.dispatchEvent(new Event(BACK_TO_GARAGE_EVENT))
         },
       })
     },

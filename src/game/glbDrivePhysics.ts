@@ -20,6 +20,9 @@ const AUTO_CRUISE_SPEED = 120 / 3.6
 const AUTO_CRUISE_ACCEL = 24
 const AUTO_CRUISE_DECEL = 18
 const TURN_RATE = 2.9
+const DRIFT_TURN_BOOST = 1.85
+const DRIFT_MIN_SPEED = 12
+const DRIFT_DRAG = 0.75
 const RIDE_HEIGHT = 0.09
 const SLOPE_GRAVITY_FACTOR = 0.42
 const CAR_COLLISION_RADIUS = 0.82
@@ -36,8 +39,6 @@ const NORMAL_SPEED_RESPONSE = 0.04
 const MAX_VISUAL_PENETRATION = 0.02
 const MAX_VISUAL_CLEARANCE = 0.05
 const MAX_NORMAL_LAG_RAD = THREE.MathUtils.degToRad(3)
-const WALL_SCRAPE_MAX_SPEED = 60 / 3.6
-const WALL_SCRAPE_DRAG = 1.8
 
 export interface GlbDriveState {
   pos: THREE.Vector3
@@ -212,8 +213,11 @@ export function createGlbDrivePhysics(
     state.speed = clamp(state.speed, 0, MAX_SPEED)
     if (state.speed > state.topSpeed) state.topSpeed = state.speed
 
+    const drifting = input.drift && state.speed >= DRIFT_MIN_SPEED && Math.abs(input.steer) > 0.12
     const turnFactor = 1 - (state.speed / MAX_SPEED) * 0.52
-    state.heading -= input.steer * TURN_RATE * turnFactor * dt
+    const driftBoost = drifting ? DRIFT_TURN_BOOST : 1
+    state.heading -= input.steer * TURN_RATE * turnFactor * driftBoost * dt
+    if (drifting) state.speed *= Math.exp(-DRIFT_DRAG * dt)
 
     const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading))
     forward.addScaledVector(state.normal, -forward.dot(state.normal))
@@ -227,6 +231,11 @@ export function createGlbDrivePhysics(
 
     state.pos.x += forward.x * state.speed * dt
     state.pos.z += forward.z * state.speed * dt
+    if (drifting) {
+      const side = new THREE.Vector3(-forward.z, 0, forward.x)
+      const slide = input.steer * state.speed * 0.24 * dt
+      state.pos.addScaledVector(side, slide)
+    }
 
     let hit = sampleChassisGround(forward)
     if (obstacles && was.distanceToSquared(state.pos) > 1e-10) {
@@ -241,10 +250,6 @@ export function createGlbDrivePhysics(
       )
       if (wallMove.corrected) hit = sampleChassisGround(forward)
       if (wallMove.impacted) state.speed *= wallMove.speedRetention
-      if (wallMove.scraping) {
-        state.speed = Math.min(state.speed, WALL_SCRAPE_MAX_SPEED)
-        state.speed *= Math.exp(-WALL_SCRAPE_DRAG * dt)
-      }
     }
 
     if (hit) {

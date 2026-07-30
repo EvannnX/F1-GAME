@@ -116,12 +116,18 @@ export function createPhysics(track: TrackBundle): PhysicsBundle {
     // camera behind at -Z, +X to the screen-right), turning right means
     // heading should DECREASE so car forward rotates from +Z toward +X
     // visually (matches the player's mental model of "right = right").
+    const drifting = input.drift && state.speed > 12 && Math.abs(input.steer) > 0.12
     const turnFactor = 1 - (state.speed / MAX_SPEED) * 0.5
-    state.heading -= input.steer * TURN_RATE * turnFactor * dt
+    state.heading -= input.steer * TURN_RATE * turnFactor * (drifting ? 1.75 : 1) * dt
+    if (drifting) state.speed *= Math.exp(-0.7 * dt)
 
     // Translate
     state.pos.x += Math.sin(state.heading) * state.speed * dt
     state.pos.z += Math.cos(state.heading) * state.speed * dt
+    if (drifting) {
+      state.pos.x -= Math.cos(state.heading) * input.steer * state.speed * 0.22 * dt
+      state.pos.z += Math.sin(state.heading) * input.steer * state.speed * 0.22 * dt
+    }
 
     // Smart Steering: pull toward track centerline
     const proj = tr.projectToTrack(state.pos)

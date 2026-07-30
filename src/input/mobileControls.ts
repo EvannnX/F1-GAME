@@ -4,6 +4,7 @@ export interface MobileControls {
   getSteer: () => number
   getThrottle: () => number
   getBrake: () => number
+  getDrift: () => boolean
   setVisible: (visible: boolean) => void
   destroy: () => void
 }
@@ -71,6 +72,19 @@ function installStyles(): void {
     }
     .f1s-mobile-controls__brake { left: max(20px, env(safe-area-inset-left)); }
     .f1s-mobile-controls__throttle { right: max(20px, env(safe-area-inset-right)); }
+    .f1s-mobile-controls__drift {
+      right: max(124px, calc(env(safe-area-inset-right) + 120px));
+      bottom: max(20px, env(safe-area-inset-bottom));
+      width: clamp(66px, 8vw, 92px);
+      height: clamp(66px, 12vh, 92px);
+      border: 2px solid rgba(255,255,255,.42);
+      border-radius: 50%;
+      background: rgba(180,16,32,.76);
+      color: #fff;
+      font: 900 12px/1 Inter, sans-serif;
+      box-shadow: 0 8px 24px rgba(0,0,0,.34);
+    }
+    .f1s-mobile-controls__drift.is-active { transform: scale(.92); background: #ff2038; }
     .f1s-mobile-controls__steering {
       position: absolute;
       left: max(22px, env(safe-area-inset-left));
@@ -129,6 +143,10 @@ function installStyles(): void {
       right: max(124px, calc(env(safe-area-inset-right) + 120px));
       height: clamp(88px, 15vh, 126px);
     }
+    .f1s-mobile-controls--touch .f1s-mobile-controls__drift,
+    .f1s-mobile-controls--joystick .f1s-mobile-controls__drift {
+      right: max(220px, calc(env(safe-area-inset-right) + 216px));
+    }
     .f1s-mobile-controls--joystick .f1s-mobile-controls__brake {
       left: auto;
       right: max(124px, calc(env(safe-area-inset-right) + 120px));
@@ -154,6 +172,7 @@ export function createMobileControls(mode: MobileControlMode): MobileControls {
   let steer = 0
   let throttle = 0
   let brake = 0
+  let drift = false
   const cleanups: Array<() => void> = []
   const bindHold = (button: HTMLButtonElement, onValue: (value: number) => void): void => {
     const pointers = new Set<number>()
@@ -202,7 +221,10 @@ export function createMobileControls(mode: MobileControlMode): MobileControls {
   )
   throttlePedal.dataset.label = '油门'
   bindHold(throttlePedal, (value) => { throttle = value })
-  root.append(brakePedal, throttlePedal)
+  const driftButton = createButton('f1s-mobile-controls__drift', '漂移')
+  driftButton.textContent = '漂移'
+  bindHold(driftButton, (value) => { drift = value > 0 })
+  root.append(brakePedal, throttlePedal, driftButton)
   if (mode === 'touch') {
     const steering = document.createElement('div')
     steering.className = 'f1s-mobile-controls__steering'
@@ -286,6 +308,7 @@ export function createMobileControls(mode: MobileControlMode): MobileControls {
     getSteer: () => steer,
     getThrottle: () => throttle,
     getBrake: () => brake,
+    getDrift: () => drift,
     setVisible: (visible) => {
       root.classList.toggle('is-visible', visible)
       document.body.classList.toggle('f1s-mobile-controls-visible', visible)

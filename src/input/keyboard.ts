@@ -7,15 +7,17 @@ export interface KeyboardController {
   isBrakeHeld: () => boolean
   /** true if Shift is held (DRS boost) */
   isBoostHeld: () => boolean
+  isDriftHeld: () => boolean
   isAnyHeld: () => boolean
   destroy: () => void
 }
 
 const STEER_KEYS_LEFT = new Set(['ArrowLeft', 'a', 'A', 'q', 'Q'])
 const STEER_KEYS_RIGHT = new Set(['ArrowRight', 'd', 'D', 'e', 'E'])
-const THROTTLE_KEYS = new Set(['ArrowUp', 'w', 'W', ' '])
+const THROTTLE_KEYS = new Set(['ArrowUp', 'w', 'W'])
 const BRAKE_KEYS = new Set(['ArrowDown', 's', 'S'])
 const BOOST_KEYS = new Set(['Shift'])
+const DRIFT_KEYS = new Set([' '])
 
 // --- Steering tuning: keyboard input is binary (key down / up) so the
 // raw signal is jerky compared to analog gyro / mouse stick. We tame it
@@ -39,6 +41,7 @@ export function createKeyboard(target: EventTarget = window): KeyboardController
       THROTTLE_KEYS.has(k) ||
       BRAKE_KEYS.has(k) ||
       BOOST_KEYS.has(k)
+      || DRIFT_KEYS.has(k)
     ) {
       held.add(k)
       ev.preventDefault()
@@ -82,6 +85,7 @@ export function createKeyboard(target: EventTarget = window): KeyboardController
     isThrottleHeld: () => anyIn(THROTTLE_KEYS),
     isBrakeHeld: () => anyIn(BRAKE_KEYS),
     isBoostHeld: () => anyIn(BOOST_KEYS),
+    isDriftHeld: () => anyIn(DRIFT_KEYS),
     isAnyHeld: () => held.size > 0,
     destroy: () => {
       target.removeEventListener('keydown', onDown)

@@ -4,10 +4,8 @@ import { clamp } from '../utils/math'
 
 const WALL_RELEASE_DOT = 0.08
 const WALL_CONTACT_EPSILON = 1e-5
-const WALL_CONTACT_PROBE_EXTRA = 0.45
-const MIN_IMPACT_SPEED_RETENTION = 0.45
-const GLANCING_SLIDE_RETENTION = 0.72
-const HEAD_ON_SLIDE_RETENTION = 0.24
+const WALL_CONTACT_PROBE_EXTRA = 0.08
+const MIN_IMPACT_SPEED_RETENTION = 0.78
 
 export interface WallContactState {
   locked: boolean
@@ -51,9 +49,12 @@ export function resolveWallMovement(
   }
   const probeFrom = from.clone().add(probeOffset)
   const probeTarget = target.clone().add(probeOffset)
-  const startObstacle = obstacles.sampleObstacleNear(probeFrom, contact.locked
-    ? { ...options, radius: radius + WALL_CONTACT_PROBE_EXTRA }
-    : options)
+  const startObstacle = contact.locked
+    ? obstacles.sampleObstacleNear(probeFrom, {
+        ...options,
+        radius: radius + WALL_CONTACT_PROBE_EXTRA,
+      })
+    : null
 
   if (contact.locked) {
     if (!startObstacle) {
@@ -68,20 +69,27 @@ export function resolveWallMovement(
 
   const move = target.clone().sub(from)
   const intendedDistance = move.length()
-  let corrected = contact.locked && removeInwardMovement(move, contact.normal)
+  let scraping = false
+  let corrected = false
+  if (contact.locked) {
+    scraping = removeInwardMovement(move, contact.normal)
+    corrected = scraping
+  }
   target.copy(from).add(move)
   probeTarget.copy(probeFrom).add(move)
 
   let impacted = false
   if (move.lengthSq() > WALL_CONTACT_EPSILON) {
     const obstacle = obstacles.sampleObstacleBetween(probeFrom, probeTarget, options)
-    const movingAlongOrAway = startObstacle
-      ? move.dot(startObstacle.normal) >= -WALL_CONTACT_EPSILON
+    const movingIntoObstacle = obstacle
+      ? move.dot(obstacle.normal) < -WALL_CONTACT_EPSILON
       : false
-    if (obstacle && !movingAlongOrAway) {
-      contact.normal.copy(startObstacle?.normal ?? obstacle.normal).normalize()
+    if (obstacle && movingIntoObstacle) {
+      contact.normal.copy(obstacle.normal).normalize()
       contact.locked = true
-      corrected = removeInwardMovement(move, contact.normal) || corrected
+      const removedInwardMovement = removeInwardMovement(move, contact.normal)
+      scraping = removedInwardMovement || scraping
+      corrected = removedInwardMovement || corrected
       target.copy(from).add(move)
       impacted = true
     }
@@ -90,20 +98,11 @@ export function resolveWallMovement(
   const retainedMovement = intendedDistance > WALL_CONTACT_EPSILON
     ? clamp(move.length() / intendedDistance, 0, 1)
     : 0
-  if (contact.locked) {
-    const pressure = clamp(-headingDirection.dot(contact.normal), 0, 1)
-    const slideRetention = GLANCING_SLIDE_RETENTION
-      + (HEAD_ON_SLIDE_RETENTION - GLANCING_SLIDE_RETENTION) * pressure
-    move.multiplyScalar(slideRetention)
-    target.copy(from).add(move)
-    probeTarget.copy(probeFrom).add(move)
-    corrected = true
-  }
   return {
     corrected,
     impacted,
     move,
-    scraping: contact.locked,
+    scraping,
     speedRetention: impacted
       ? MIN_IMPACT_SPEED_RETENTION + (1 - MIN_IMPACT_SPEED_RETENTION) * retainedMovement
       : 1,

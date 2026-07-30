@@ -1,8 +1,11 @@
 const MAP_W = 270
 const MAP_H = 205
 const PADDING = 16
-const TRAIL_MAX = 520
-const TRAIL_STEP_SQ = 4 * 4
+// Shanghai is about 5.45 km long. Keep enough samples for the complete lap
+// instead of shifting out the start after roughly 2 km. Five-metre spacing
+// stays visually continuous on the 270 px map while keeping canvas work low.
+const TRAIL_MAX = 1400
+const TRAIL_STEP_SQ = 5 * 5
 
 export interface TelemetryMapPoint {
   x: number
@@ -73,6 +76,10 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
   staticLayer.width = MAP_W
   staticLayer.height = MAP_H
   const staticCtx = staticLayer.getContext('2d')
+  const trailLayer = document.createElement('canvas')
+  trailLayer.width = MAP_W
+  trailLayer.height = MAP_H
+  const trailCtx = trailLayer.getContext('2d')
   const trail: TelemetryMapPoint[] = []
 
   let minX = Infinity
@@ -284,27 +291,26 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
 
     const last = trail[trail.length - 1]
     if (!last || (player.x - last.x) ** 2 + (player.z - last.z) ** 2 > TRAIL_STEP_SQ) {
-      trail.push({ x: player.x, z: player.z })
+      const next = { x: player.x, z: player.z }
+      trail.push(next)
       if (trail.length > TRAIL_MAX) trail.shift()
-    }
-
-    if (trail.length > 1) {
-      ctx.save()
-      ctx.shadowColor = 'rgba(74,255,102,0.9)'
-      ctx.shadowBlur = 7
-      ctx.strokeStyle = 'rgba(69,238,91,0.82)'
-      ctx.lineWidth = 3.2
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.beginPath()
-      for (let i = 0; i < trail.length; i++) {
-        const [px, py] = project(trail[i].x, trail[i].z)
-        if (i === 0) ctx.moveTo(px, py)
-        else ctx.lineTo(px, py)
+      if (last && trailCtx) {
+        const [fromX, fromY] = project(last.x, last.z)
+        const [toX, toY] = project(next.x, next.z)
+        trailCtx.save()
+        trailCtx.shadowColor = 'rgba(74,255,102,0.9)'
+        trailCtx.shadowBlur = 7
+        trailCtx.strokeStyle = 'rgba(69,238,91,0.82)'
+        trailCtx.lineWidth = 3.2
+        trailCtx.lineCap = 'round'
+        trailCtx.beginPath()
+        trailCtx.moveTo(fromX, fromY)
+        trailCtx.lineTo(toX, toY)
+        trailCtx.stroke()
+        trailCtx.restore()
       }
-      ctx.stroke()
-      ctx.restore()
     }
+    ctx.drawImage(trailLayer, 0, 0)
 
     for (const opp of opponents) {
       drawDot(opp.x, opp.z, opp.color, 4.2, 'rgba(255,255,255,0.9)')
@@ -364,6 +370,7 @@ export function createTelemetryMap(source: TelemetryMapPoint[] | TelemetryMapSou
 
   const resetTrail = (): void => {
     trail.length = 0
+    trailCtx?.clearRect(0, 0, MAP_W, MAP_H)
   }
 
   const update = (data: {

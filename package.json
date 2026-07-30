@@ -19,15 +19,20 @@
     "build:compact30": "node scripts/prepare-compact30-assets.mjs && VITE_F1TI_COMPACT30=1 vite build --outDir dist-compact30 && node scripts/copy-compact30-runtime.mjs",
     "build:embedded-texture-test": "node scripts/prepare-compact30-assets.mjs && VITE_F1TI_COMPACT30=1 VITE_F1TI_USE_EMBEDDED_TRACK_TEXTURES=1 vite build --outDir dist-embedded-texture-test && F1TI_COMPACT_OUT_DIR=dist-embedded-texture-test F1TI_SKIP_TRACK_OVERRIDES=1 node scripts/copy-compact30-runtime.mjs",
     "build:compressed-texture-test": "node scripts/prepare-compact30-assets.mjs && VITE_F1TI_COMPACT30=1 VITE_F1TI_COMPRESSED_TRACK_TEXTURES=1 vite build --outDir dist-compressed-texture-test && F1TI_COMPACT_OUT_DIR=dist-compressed-texture-test F1TI_COMPRESSED_TRACK_TEXTURES=1 node scripts/copy-compact30-runtime.mjs",
-    "build:lite-fom-test": "node scripts/prepare-compact30-assets.mjs && VITE_F1TI_COMPACT30=1 VITE_F1TI_COMPRESSED_TRACK_TEXTURES=1 VITE_F1TI_LITE_SINGLE_CAR=1 vite build --outDir dist-lite-fom-test && F1TI_COMPACT_OUT_DIR=dist-lite-fom-test F1TI_COMPRESSED_TRACK_TEXTURES=1 node scripts/copy-compact30-runtime.mjs"
+    "build:lite-fom-test": "node scripts/prepare-compact30-assets.mjs && VITE_F1TI_COMPACT30=1 VITE_F1TI_COMPRESSED_TRACK_TEXTURES=1 VITE_F1TI_LITE_SINGLE_CAR=1 vite build --outDir dist-lite-fom-test && F1TI_COMPACT_OUT_DIR=dist-lite-fom-test F1TI_COMPRESSED_TRACK_TEXTURES=1 node scripts/copy-compact30-runtime.mjs",
+    "build:host-safe": "node scripts/prepare-compact30-assets.mjs && node scripts/prepare-host-safe-assets.mjs && node scripts/prepare-host-safe-car.mjs && VITE_F1TI_COMPACT30=1 VITE_F1TI_COMPRESSED_TRACK_TEXTURES=1 VITE_F1TI_LITE_SINGLE_CAR=1 VITE_F1TI_HOST_SAFE=1 vite build --outDir dist-host-safe && F1TI_COMPACT_OUT_DIR=dist-host-safe F1TI_COMPRESSED_TRACK_TEXTURES=1 node scripts/copy-compact30-runtime.mjs",
+    "package:lite-fom-upload": "npm run build:host-safe && node scripts/package-host-safe.mjs && node scripts/host-safe-validator.mjs f1ti-lite-fom-mobile.zip"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.4.2",
+    "@gltf-transform/extensions": "^4.4.2",
+    "@types/three": "^0.170.0",
+    "@types/ws": "^8.5.13",
+    "draco3dgltf": "^1.5.7",
+    "terser": "^5.36.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vite-plugin-singlefile": "^2.0.3",
-    "terser": "^5.36.0",
-    "@types/three": "^0.170.0",
-    "@types/ws": "^8.5.13",
     "ws": "^8.18.0"
   },
   "dependencies": {

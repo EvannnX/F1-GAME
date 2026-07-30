@@ -9,7 +9,7 @@ export function isAutoSaveMapTestEnabled(): boolean {
 }
 
 export function installAutoSaveMapTest(container: HTMLElement): void {
-  container.innerHTML = ''
+  container.replaceChildren()
   container.style.position = 'relative'
 
   const status = document.createElement('div')

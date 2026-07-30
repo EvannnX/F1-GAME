@@ -1,6 +1,8 @@
 const OFFLINE_PACKAGE = import.meta.env.VITE_F1TI_OFFLINE_8M === '1'
+const HOST_SAFE_PACKAGE = import.meta.env.VITE_F1TI_HOST_SAFE === '1'
 
 type OfflineAssetScope = typeof globalThis & {
+  __F1TI_ASSET_BASE64__?: Partial<Record<string, string | string[]>>
   __F1TI_ASSET_IMAGE_URLS__?: Record<string, string>
   __F1TI_ASSET_LOADS__?: Partial<Record<string, Promise<ArrayBuffer>>>
   __F1TI_ASSET_DECODE_QUEUE__?: Promise<void>
@@ -83,6 +85,14 @@ async function loadPackagedAsset(key: string): Promise<ArrayBuffer> {
   const existing = loads[key]
   if (existing) return existing
 
+  const embedded = scope.__F1TI_ASSET_BASE64__?.[key]
+  if (embedded) {
+    const payload = Array.isArray(embedded) ? embedded.join('') : embedded
+    const bytes = decodeDataUrl(`data:application/octet-stream;base64,${payload}`)
+    loads[key] = Promise.resolve(bytes)
+    return bytes
+  }
+
   const url = scope.__F1TI_ASSET_IMAGE_URLS__?.[key]
   if (!url) throw new Error(`Offline asset manifest is missing: ${key}`)
   let resolveAsset!: (value: ArrayBuffer) => void
@@ -105,7 +115,7 @@ async function loadPackagedAsset(key: string): Promise<ArrayBuffer> {
 }
 
 export async function loadLocalAsset(url: string): Promise<ArrayBuffer> {
-  if (OFFLINE_PACKAGE) {
+  if (OFFLINE_PACKAGE || HOST_SAFE_PACKAGE) {
     return url.startsWith('f1ti-asset:')
       ? loadPackagedAsset(url.slice('f1ti-asset:'.length))
       : decodeDataUrl(url)

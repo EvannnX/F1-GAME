@@ -14,6 +14,7 @@ export interface GameInput {
   throttle: number // 0..1 (auto-cruise baseline + DRS)
   brake: number // 0..1
   drs: boolean
+  drift: boolean
   manualThrottle?: boolean
 }
 
@@ -166,7 +167,11 @@ export async function initInput(preferred?: InputMode): Promise<InputController>
     const kbBrake = keyboard.isBrakeHeld()
     const kbBoost = keyboard.isBoostHeld()
     const drs = kbBoost
-    const manualThrottle = mode !== 'keyboard'
+    const drift = keyboard.isDriftHeld() || (mobile?.getDrift() ?? false)
+    // Keyboard idles on auto-cruise, but W/↑ and Shift must immediately
+    // switch to manual throttle. Keeping this false while a key is held
+    // makes the GLB game discard the real throttle and cap at 120 km/h.
+    const manualThrottle = mode !== 'keyboard' || kbThrottle || kbBoost
     let throttle = manualThrottle ? 0 : DEFAULT_THROTTLE
     let brake = 0
 
@@ -183,7 +188,7 @@ export async function initInput(preferred?: InputMode): Promise<InputController>
       throttle = DEFAULT_THROTTLE + DRS_BOOST
     }
 
-    return { steer, throttle, brake, drs, manualThrottle }
+    return { steer, throttle, brake, drs, drift, manualThrottle }
   }
 
   return {

@@ -1,18 +1,37 @@
 import * as THREE from 'three'
 import bakedDecals from '../generated/fom/decal-geometries.json'
 import rearLogoUrl from '../generated/fom/rear-logo-white.png?url'
-import sideLogoUrl from '../assets/FOM赛车涂装贴花可复用包-v54/download-1.svg?url'
+import sideLogoUrl from '../assets/FOM赛车涂装贴花可复用包-v54/download-1-raster.png?url'
 import deltaXUrl from '../assets/FOM赛车涂装贴花可复用包-v54/DeltaX.png?url'
-import creatorSymbolUrl from '../assets/FOM赛车涂装贴花可复用包-v54/assets/douyin-creator-symbol.svg?url'
+import creatorSymbolUrl from '../assets/FOM赛车涂装贴花可复用包-v54/assets/douyin-creator-symbol-raster.png?url'
 import zjuapUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/ZJUAP.jpg?url'
-import douyinUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/download-2.svg?url'
-import sponsorTwoUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/download-3.svg?url'
-import jointUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/joint-organizer.30e85169.svg?url'
+import douyinUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/download-2-raster.png?url'
+import sponsorTwoUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/download-3-raster.png?url'
+import jointUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/joint-organizer-raster.png?url'
 import blueUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/download.png?url'
 import traeUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/trae.ec67ce78.png?url'
 import jinqiuUrl from '../assets/FOM赛车涂装贴花可复用包-v54/抖音官方赞助商logo/jinqiu.2db5dbb8.png?url'
 
 const THEME_MATERIALS = new Set(['livery_audi_01', 'fom_car_dummy_decal', 'boya'])
+const HOST_SAFE_PACKAGE = import.meta.env.VITE_F1TI_HOST_SAFE === '1'
+const DARK_FOM_MATERIAL_MARKERS = [
+  'black',
+  'carbon',
+  'detail',
+  'steering',
+  'cockpit',
+  'pedal',
+  'plastic',
+  'sidewall',
+  'tread',
+  'wheel_hub',
+  'hub_nut',
+  'discs',
+  'generics',
+  'cinture',
+  'sw_audi',
+  'mirror',
+]
 const REAR_LIGHT_PERIOD_MS = 500
 const REAR_LIGHT_RED = new THREE.Color('#ff1808')
 const LIVERY_STORAGE_KEY = 'f1ti_fom_livery_scheme_v54'
@@ -61,8 +80,27 @@ export function applyFomThemeColor(root: THREE.Object3D, hex: string): void {
     if (!mesh.isMesh) return
     for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
       if (!(material instanceof THREE.MeshStandardMaterial)) continue
-      if (!THEME_MATERIALS.has(material.name)) continue
-      material.color.set(hex)
+      const normalizedName = material.name.toLowerCase()
+      if (HOST_SAFE_PACKAGE && !material.map) {
+        if (DARK_FOM_MATERIAL_MARKERS.some((marker) => normalizedName.includes(marker))) {
+          material.color.set('#111317')
+          material.metalness = normalizedName.includes('carbon') ? 0.15 : 0.35
+          material.roughness = normalizedName.includes('tread') ? 0.92 : 0.48
+        } else if (normalizedName.includes('chrome')) {
+          material.color.set('#8e949b')
+          material.metalness = 0.9
+          material.roughness = 0.24
+        } else if (normalizedName === 'rear_light') {
+          material.color.set('#9b0000')
+          material.emissive.set('#430000')
+          material.emissiveIntensity = 0.7
+        } else if (!THEME_MATERIALS.has(material.name)) {
+          material.color.set('#25282d')
+          material.metalness = 0.25
+          material.roughness = 0.5
+        }
+      }
+      if (THEME_MATERIALS.has(material.name)) material.color.set(hex)
       material.needsUpdate = true
     }
   })
@@ -201,6 +239,12 @@ const CORE_DECAL_NAMES = new Set([
 
 export type FomSpecialLiveryVariant = 'core' | 'partners'
 
+export function defaultFomSpecialScheme(
+  variant: FomSpecialLiveryVariant,
+): FomLiverySchemeId {
+  return variant === 'partners' ? 'silverSpine' : 'blueArrow'
+}
+
 interface RearLightEntry {
   material: THREE.MeshStandardMaterial
   color: THREE.Color
@@ -337,32 +381,12 @@ function installLiveryPartitionShader(
 }
 
 async function loadTexture(url: string, renderer?: THREE.WebGLRenderer): Promise<THREE.Texture> {
-  let texture = await new THREE.TextureLoader().loadAsync(url)
-  const isSvg = url.includes('image/svg+xml') || /\.svg(?:$|\?)/i.test(url)
-  if (isSvg) {
-    const image = texture.image as CanvasImageSource & {
-      naturalWidth?: number
-      naturalHeight?: number
-      width?: number
-      height?: number
-    }
-    const sourceWidth = image.naturalWidth ?? image.width ?? 1
-    const sourceHeight = image.naturalHeight ?? image.height ?? 1
-    const aspect = sourceWidth / Math.max(1, sourceHeight)
-    const canvas = document.createElement('canvas')
-    canvas.width = aspect >= 2 ? 1024 : 512
-    canvas.height = Math.max(1, Math.round(canvas.width / aspect))
-    const context = canvas.getContext('2d')
-    if (context) {
-      context.imageSmoothingEnabled = true
-      context.imageSmoothingQuality = 'high'
-      context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      texture.dispose()
-      texture = new THREE.CanvasTexture(canvas)
-    }
-  }
+  const texture = await new THREE.TextureLoader().loadAsync(url)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.anisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1
+  const maxAnisotropy = renderer?.capabilities.getMaxAnisotropy() ?? 1
+  texture.anisotropy = HOST_SAFE_PACKAGE
+    ? Math.min(4, maxAnisotropy)
+    : maxAnisotropy
   texture.wrapS = THREE.ClampToEdgeWrapping
   texture.wrapT = THREE.ClampToEdgeWrapping
   texture.generateMipmaps = true
@@ -373,6 +397,19 @@ async function loadTexture(url: string, renderer?: THREE.WebGLRenderer): Promise
 }
 
 let textureSourcesPromise: Promise<Map<string, THREE.Texture>> | null = null
+const textureSourcePromises = new Map<string, Promise<THREE.Texture>>()
+
+function loadTextureSource(
+  url: string,
+  renderer?: THREE.WebGLRenderer,
+): Promise<THREE.Texture> {
+  let promise = textureSourcePromises.get(url)
+  if (!promise) {
+    promise = loadTexture(url, renderer)
+    textureSourcePromises.set(url, promise)
+  }
+  return promise
+}
 
 export function preloadFomSpecialLivery(
   renderer?: THREE.WebGLRenderer,
@@ -380,7 +417,7 @@ export function preloadFomSpecialLivery(
   if (!textureSourcesPromise) {
     textureSourcesPromise = Promise.all(
       [...new Set(DECALS.map((preset) => preset.url))].map(async (url) => {
-        return [url, await loadTexture(url, renderer)] as const
+        return [url, await loadTextureSource(url, renderer)] as const
       }),
     ).then((entries) => new Map(entries))
   }
@@ -453,21 +490,27 @@ export async function applyFomSpecialLivery(
       material.needsUpdate = true
     }
   }
-  setScheme(readFomLiveryScheme())
+  setScheme(HOST_SAFE_PACKAGE ? defaultFomSpecialScheme(variant) : readFomLiveryScheme())
 
   const decals: THREE.Mesh[] = []
   const textures = new Set<THREE.Texture>()
+  const decalPresets = variant === 'partners'
+    ? DECALS
+    : DECALS.filter((preset) => CORE_DECAL_NAMES.has(preset.name))
+  const sourceEntries = HOST_SAFE_PACKAGE
+    ? await Promise.all(
+      [...new Set(decalPresets.map((preset) => preset.url))].map(async (url) =>
+        [url, await loadTextureSource(url, renderer)] as const,
+      ),
+    )
+    : [...(await preloadFomSpecialLivery(renderer)).entries()]
   const textureByUrl = new Map<string, THREE.Texture>()
-  const textureSources = await preloadFomSpecialLivery(renderer)
-  for (const [url, source] of textureSources) {
+  for (const [url, source] of sourceEntries) {
     const texture = source.clone()
     texture.needsUpdate = true
     textureByUrl.set(url, texture)
     textures.add(texture)
   }
-  const decalPresets = variant === 'partners'
-    ? DECALS
-    : DECALS.filter((preset) => CORE_DECAL_NAMES.has(preset.name))
   for (const preset of decalPresets) {
     const texture = textureByUrl.get(preset.url)
     if (!texture) continue

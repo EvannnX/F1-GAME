@@ -38,7 +38,7 @@ const FULL_PLAYER_CARS: readonly PlayerCarDefinition[] = [
     id: 'audi',
     name: '定制你的方程式赛车',
     team: 'F1 2026 Custom Works',
-    model: '点击左下角按钮上传你的图片后进行生成',
+    model: '从左下角游戏图库选择图片生成专属车衣',
     url: fomCreatorUrl,
     reverse: false,
     teamId: 'merc',

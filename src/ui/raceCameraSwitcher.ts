@@ -1,3 +1,5 @@
+import { replaceWithStaticMarkup } from '../utils/staticMarkup'
+
 export type RaceCameraView = 'chase' | 'chaseFar' | 'rearWing' | 'sidepod' | 'cockpit'
 
 export interface RaceCameraSwitcher {
@@ -138,11 +140,11 @@ export function createRaceCameraSwitcher(options: RaceCameraSwitcherOptions): Ra
   const button = document.createElement('button')
   button.className = 'f1s-camera-switcher__button'
   button.type = 'button'
-  button.innerHTML = `
+  replaceWithStaticMarkup(button, `
     <svg viewBox="0 0 36 30" aria-hidden="true">
       <path fill="currentColor" d="M4 5h7l2.4-3h8.2L24 5h3.5A4.5 4.5 0 0 1 32 9.5v14A4.5 4.5 0 0 1 27.5 28h-23A4.5 4.5 0 0 1 0 23.5v-14A4.5 4.5 0 0 1 4.5 5H4Zm12 5.2a6.8 6.8 0 1 0 0 13.6 6.8 6.8 0 0 0 0-13.6Zm0 3.1a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4ZM27 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/>
     </svg>
-  `
+  `)
   const index = document.createElement('span')
   index.className = 'f1s-camera-switcher__index'
   button.appendChild(index)

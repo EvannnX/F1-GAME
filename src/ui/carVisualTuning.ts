@@ -192,7 +192,7 @@ export function installCarVisualTuningGui(options: CarVisualTuningGuiOptions): (
   }
 
   const refreshTargetButtons = (): void => {
-    targetRow.innerHTML = ''
+    targetRow.replaceChildren()
     const items: Array<[TuningTarget, string]> = [
       ['all', '全部'],
       ['player', '玩家'],

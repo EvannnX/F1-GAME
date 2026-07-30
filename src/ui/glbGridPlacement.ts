@@ -438,7 +438,7 @@ export function installGlbGridPlacementGui(options: GlbGridPlacementGuiOptions):
   }
 
   const refreshCarButtons = (): void => {
-    carButtons.innerHTML = ''
+    carButtons.replaceChildren()
     for (const placement of placements) {
       const button = document.createElement('button')
       const active = placement.id === activeId

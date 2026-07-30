@@ -25,13 +25,15 @@ function installStyles(): void {
     }
     .f1s-home__background {
       position: absolute;
-      inset: 0;
+      top: 50%;
+      left: 50%;
       z-index: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
+      width: 94%;
+      height: 94%;
+      object-fit: contain;
       object-position: center;
       background: #050608;
+      transform: translate(-50%, -50%);
       pointer-events: none;
       -webkit-user-select: none;
       user-select: none;
@@ -156,15 +158,24 @@ export function showHomeScreen(onStart: StartHandler): HomeScreenController {
 
   let destroyed = false
   let launching = false
+  let replayCount = 0
+  // The source GIF contains eight 100 ms frames and no infinite-loop
+  // extension. Reload it just after each 800 ms cycle so it replays
+  // automatically without a user-facing control.
+  const replayTimer = window.setInterval(() => {
+    if (destroyed || launching) return
+    replayCount++
+    background.src = `${homeBackgroundImageUrl}#auto-replay-${replayCount}`
+  }, 820)
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   const destroy = (): void => {
     if (destroyed) return
     destroyed = true
+    window.clearInterval(replayTimer)
     background.removeAttribute('src')
     document.body.classList.remove('f1s-home-active')
     host.remove()
   }
-
   startButton.addEventListener('click', () => {
     if (launching) return
     launching = true

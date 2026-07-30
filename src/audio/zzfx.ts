@@ -4,7 +4,7 @@
 let zzfxCtx: AudioContext | null = null
 const zzfxV = 0.3
 
-function ctx(): AudioContext | null {
+export function getSharedAudioContext(): AudioContext | null {
   if (zzfxCtx) return zzfxCtx
   try {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
@@ -17,7 +17,7 @@ function ctx(): AudioContext | null {
 }
 
 export function unlockAudio(): void {
-  const c = ctx()
+  const c = getSharedAudioContext()
   if (c && c.state === 'suspended') {
     void c.resume().catch(() => {})
   }
@@ -99,7 +99,7 @@ function buildSamples(
 
 export function zzfx(...params: number[]): void {
   try {
-    const c = ctx()
+    const c = getSharedAudioContext()
     if (!c) return
     const samples = buildSamples(...params)
     const buf = c.createBuffer(1, samples.length, 44100)

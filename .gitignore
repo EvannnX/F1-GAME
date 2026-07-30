@@ -10,6 +10,15 @@ dist-offline8m/
 .offline8m-assets/
 .offline8m-package/
 f1ti-offline-8mb.zip
+dist-compact30/
+dist-embedded-texture-test/
+dist-compressed-texture-test/
+dist-lite-fom-test/
+.compact30-assets/
+.host-safe-assets/
+dist-host-safe/
+f1ti-lite-fom-mobile.zip
+f1ti-lite-fom-mobile/
 F1TI动漫图/
 public/assets/上海赛车场.glb
 src/assets/上海赛车场.glb

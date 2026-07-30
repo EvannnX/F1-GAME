@@ -15,7 +15,6 @@ const root = process.cwd()
 const output = join(root, '.compact30-assets')
 const runtime = join(output, 'runtime')
 mkdirSync(output, { recursive: true })
-rmSync(runtime, { recursive: true, force: true })
 mkdirSync(runtime, { recursive: true })
 
 function run(command, args) {
@@ -98,11 +97,7 @@ for (const [sourceName, outputName] of [
   ['LouisHamilton.png', 'portrait-hamilton.png'],
   ['MaxVerstappen.png', 'portrait-verstappen.png'],
 ]) {
-  ffmpeg(
-    join(root, 'F1-卡通图', sourceName),
-    join(output, outputName),
-    ['-vf', "scale='min(640,iw)':-2:flags=lanczos", '-frames:v', '1', '-compression_level', '9'],
-  )
+  cpSync(join(root, 'F1-卡通图', sourceName), join(output, outputName))
 }
 
 for (const sourceName of [
@@ -119,22 +114,32 @@ for (const sourceName of [
 }
 
 const sharpModulePath = findSharpModule()
-if (!sharpModulePath) throw new Error('A cached sharp installation is required')
-const sharp = (await import(pathToFileURL(sharpModulePath).href)).default
 mkdirSync(join(runtime, 'track-textures'), { recursive: true })
-for (const [sourceName, outputName] of [
+const compactTrackTextures = [
   ['asphalt-new.png', 'asphalt.webp'],
   ['Meshesgrassxgrass0171_diff_18.png', 'grass.webp'],
   ['PAT_asf_out_123.png', 'paddock.webp'],
-]) {
-  await sharp(join(root, 'src/shanghai-international-circuit-2018-layout/textures', sourceName))
-    .webp({
-      quality: 88,
-      alphaQuality: 100,
-      smartSubsample: true,
-      effort: 6,
-    })
-    .toFile(join(runtime, 'track-textures', outputName))
+]
+if (sharpModulePath) {
+  const sharp = (await import(pathToFileURL(sharpModulePath).href)).default
+  for (const [sourceName, outputName] of compactTrackTextures) {
+    await sharp(join(root, 'src/shanghai-international-circuit-2018-layout/textures', sourceName))
+      .webp({
+        quality: 88,
+        alphaQuality: 100,
+        smartSubsample: true,
+        effort: 6,
+      })
+      .toFile(join(runtime, 'track-textures', outputName))
+  }
+} else {
+  for (const [, outputName] of compactTrackTextures) {
+    const destination = join(runtime, 'track-textures', outputName)
+    if (!existsSync(destination)) {
+      throw new Error(`A cached sharp installation or existing ${outputName} is required`)
+    }
+  }
+  console.warn('Sharp unavailable; reused existing compact track textures.')
 }
 
 mkdirSync(join(runtime, 'video'), { recursive: true })

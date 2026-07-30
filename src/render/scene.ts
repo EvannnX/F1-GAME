@@ -38,8 +38,11 @@ const isMobileGpu = (): boolean => {
 }
 
 const pixelRatioCap = (performanceMode: boolean, mobileGpu: boolean): number => {
-  if (COMPACT_30_BUILD && mobileGpu) return performanceMode ? 1.15 : 1.35
-  if (mobileGpu) return performanceMode ? 1 : 1.25
+  // Modern phone WebViews can comfortably render this scene around 1.5×.
+  // The previous 1.15× cap made both the car and track visibly soft because
+  // the canvas was enlarged by CSS after rendering at a much lower size.
+  if (COMPACT_30_BUILD && mobileGpu) return performanceMode ? 1.32 : 1.55
+  if (mobileGpu) return performanceMode ? 1.25 : 1.48
   return performanceMode ? 1.25 : 1.5
 }
 
@@ -380,7 +383,14 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
       },
     )
   }
-  loadHdrSkybox()
+  if (HOST_SAFE_PACKAGE) {
+    // The upload host rejects loader-backed binary requests even when their
+    // target is a file inside the ZIP. Keep the procedural environment that
+    // was created above; it is visually stable and requires no request API.
+    resolveEnvironmentReady()
+  } else {
+    loadHdrSkybox()
+  }
 
   const applyWeather = (preset: WeatherPreset): void => {
     currentWeather = preset
@@ -472,14 +482,16 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
     }
     fpsSampleFrames++
     const sampleDuration = now - fpsSampleStartedAt
-    if (sampleDuration < 1800) return
+    if (sampleDuration < 1200) return
     const fps = fpsSampleFrames * 1000 / sampleDuration
-    const minimumResolutionScale = COMPACT_30_BUILD ? 0.84 : 0.72
+    // Preserve legibility of car decals and road markings under load. The
+    // scene may still step down, but never to the visibly blurry old floor.
+    const minimumResolutionScale = COMPACT_30_BUILD ? 0.8 : 0.76
     let nextScale = resolutionScale
-    if (fps < 43 && resolutionScale > minimumResolutionScale) {
-      nextScale = Math.max(minimumResolutionScale, resolutionScale - 0.12)
-    } else if (fps > 57 && resolutionScale < 1 && now - lastResolutionChangeAt > 6000) {
-      nextScale = Math.min(1, resolutionScale + 0.06)
+    if (fps < 48 && resolutionScale > minimumResolutionScale) {
+      nextScale = Math.max(minimumResolutionScale, resolutionScale - 0.1)
+    } else if (fps > 58 && resolutionScale < 1 && now - lastResolutionChangeAt > 5000) {
+      nextScale = Math.min(1, resolutionScale + 0.05)
     }
     fpsSampleStartedAt = now
     fpsSampleFrames = 0
@@ -551,3 +563,4 @@ export function createScene(container: HTMLElement, options: SceneOptions = {}):
   return { scene, camera, renderer, sun, setPerformanceMode, prewarm, applyWeather, updateShadowFollow, resize, render, dispose }
 }
 const COMPACT_30_BUILD = import.meta.env.VITE_F1TI_COMPACT30 === '1'
+const HOST_SAFE_PACKAGE = import.meta.env.VITE_F1TI_HOST_SAFE === '1'

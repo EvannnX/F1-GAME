@@ -1401,7 +1401,7 @@ export function createLowPolyShanghaiObstacleSampler(
   const maxPointsPerMesh = 30000
   const maxPointsPerCell = 512
   const maxSegmentsPerCell = 320
-  const obstaclePadding = 0.2
+  const obstaclePadding = 0.03
   const densePointSpacing = 0.55
   const densePointHeightStep = 1.25
   const grid = new Map<string, ObstaclePoint[]>()
@@ -1644,7 +1644,10 @@ export function createLowPolyShanghaiObstacleSampler(
   ): LowPolyShanghaiObstacleHit | null => {
     const distance = from.distanceTo(to)
     const radius = options.radius ?? 1.1
-    const steps = Math.max(1, Math.ceil(distance / Math.max(0.12, radius * 0.3)))
+    const steps = Math.min(
+      4,
+      Math.max(1, Math.ceil(distance / Math.max(0.45, radius * 0.72))),
+    )
     for (let step = 1; step <= steps; step++) {
       tmp.lerpVectors(from, to, step / steps)
       const hit = sampleObstacleNear(tmp, options)

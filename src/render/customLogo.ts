@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { DecalGeometry } from 'three/addons/geometries/DecalGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { AUDI_LIVERY_TEMPLATE } from '../data/audiLiveryTemplate'
 import { storage } from '../utils/storage'
 import {
@@ -11,7 +12,7 @@ import {
 
 const DECAL_GROUP_NAME = 'f1s-itasha-decals'
 const MAX_LOGO_SOURCE_BYTES = 8 * 1024 * 1024
-const MAX_LOGO_EDGE = 512
+const MAX_LOGO_EDGE = 256
 
 function loadImage(dataUrl: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -153,6 +154,7 @@ export function clearCustomLivery(
   }
   setBodyTheme(carModel)
   setFactoryDecalsVisible(carModel, true)
+  delete carModel.userData.f1sCustomLiveryDataUrl
 }
 
 export async function applyCustomLivery(
@@ -160,6 +162,13 @@ export async function applyCustomLivery(
   carModel: THREE.Object3D,
   dataUrl = storage.getCustomLogo(),
 ): Promise<boolean> {
+  if (
+    dataUrl
+    && carModel.userData.f1sCustomLiveryDataUrl === dataUrl
+    && container.children.some((child) => child.name === DECAL_GROUP_NAME)
+  ) {
+    return true
+  }
   clearCustomLivery(container, carModel)
   if (!dataUrl) return false
 
@@ -216,13 +225,18 @@ export async function applyCustomLivery(
       material.dispose()
       continue
     }
-    for (const geometry of geometries) {
-      const decal = new THREE.Mesh(geometry, material)
-      decal.name = `f1s-${placement.name}`
-      decal.renderOrder = 30
-      group.add(decal)
-      decalCount++
+    const merged = mergeGeometries(geometries, false)
+    for (const geometry of geometries) geometry.dispose()
+    if (!merged) {
+      material.map?.dispose()
+      material.dispose()
+      continue
     }
+    const decal = new THREE.Mesh(merged, material)
+    decal.name = `f1s-${placement.name}`
+    decal.renderOrder = 30
+    group.add(decal)
+    decalCount++
   }
 
   for (const placement of AUDI_LIVERY_TEMPLATE.topProjectors) {
@@ -258,17 +272,23 @@ export async function applyCustomLivery(
       material.dispose()
       continue
     }
-    for (const geometry of geometries) {
-      const decal = new THREE.Mesh(geometry, material)
-      decal.name = `f1s-${placement.name}`
-      decal.renderOrder = 29
-      group.add(decal)
-      decalCount++
+    const merged = mergeGeometries(geometries, false)
+    for (const geometry of geometries) geometry.dispose()
+    if (!merged) {
+      material.map?.dispose()
+      material.dispose()
+      continue
     }
+    const decal = new THREE.Mesh(merged, material)
+    decal.name = `f1s-${placement.name}`
+    decal.renderOrder = 29
+    group.add(decal)
+    decalCount++
   }
 
   if (decalCount === 0) return false
   setFactoryDecalsVisible(carModel, false)
   container.add(group)
+  carModel.userData.f1sCustomLiveryDataUrl = dataUrl
   return true
 }

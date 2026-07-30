@@ -217,7 +217,9 @@ export function createSideLiveryTexture(
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.anisotropy = 8
+  texture.anisotropy = 1
+  texture.generateMipmaps = false
+  texture.minFilter = THREE.LinearFilter
   return texture
 }
 
@@ -225,8 +227,8 @@ export function createAccentLiveryTexture(
   image: HTMLImageElement,
   name: 'nose' | 'engine' | 'tail',
 ): THREE.CanvasTexture {
-  const width = 1024
-  const height = 512
+  const width = 512
+  const height = 256
   const palette = extractLiveryPalette(image)
   const canvas = document.createElement('canvas')
   canvas.width = width
@@ -284,6 +286,8 @@ export function createAccentLiveryTexture(
 
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
-  texture.anisotropy = 8
+  texture.anisotropy = 1
+  texture.generateMipmaps = false
+  texture.minFilter = THREE.LinearFilter
   return texture
 }
