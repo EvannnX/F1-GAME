@@ -5,8 +5,8 @@ import {
   type GyroDebugSnapshot,
 } from './gyro'
 import { createMouseJoystick, type MouseJoystickController } from './mouseJoystick'
+import { createTouch, type TouchController } from './touch'
 import { createKeyboard, type KeyboardController } from './keyboard'
-import { createMobileControls, type MobileControls } from './mobileControls'
 import { clamp } from '../utils/math'
 
 export interface GameInput {
@@ -17,7 +17,7 @@ export interface GameInput {
   manualThrottle?: boolean
 }
 
-export type InputMode = 'gyro' | 'touch' | 'joystick' | 'keyboard'
+export type InputMode = 'gyro' | 'touch' | 'keyboard'
 
 export type GyroSource = 'sensor' | 'mouse'
 
@@ -40,7 +40,6 @@ export interface InputController {
   /** Static trace of the init decisions — for diagnostic overlay. */
   initTrace: () => InputInitTrace
   recenter: () => void
-  setVisible: (visible: boolean) => void
   destroy: () => void
 }
 
@@ -73,6 +72,7 @@ interface VirtualStick {
  * failure we fall back to the device-appropriate default.
  */
 export async function initInput(preferred?: InputMode): Promise<InputController> {
+  const touch: TouchController = createTouch()
   const keyboard: KeyboardController = createKeyboard()
 
   let gyro: GyroController | null = null
@@ -141,49 +141,58 @@ export async function initInput(preferred?: InputMode): Promise<InputController>
   // Honour an explicit non-gyro preference.
   if (preferred === 'keyboard') mode = 'keyboard'
   else if (preferred === 'touch') mode = 'touch'
-  else if (preferred === 'joystick') mode = 'joystick'
-
-  const mobile: MobileControls | null = mode === 'keyboard'
-    ? null
-    : createMobileControls(mode)
 
   const getInput = (): GameInput => {
-    // Steer: sensor/mouse tilt for gyro, then keyboard, then the selected
-    // on-screen button or joystick controller.
+    // Steer: priority is virtual stick > active keyboard > touch.
+    // In gyro mode, if the sensor isn't delivering yet (permission denied
+    // on iOS, host hasn't woken up the gyro hardware, etc.), fall through
+    // to touch so the player isn't stuck with a non-responsive game.
     let steer = 0
     const kbSteer = keyboard.getSteer()
     if (stick && mode === 'gyro') {
       steer = stick.getSteer()
       if (steer === 0 && kbSteer !== 0) steer = kbSteer
+      if (steer === 0) steer = touch.getSteer()
     } else if (kbSteer !== 0) {
       steer = kbSteer
     } else {
-      steer = mobile?.getSteer() ?? 0
+      steer = touch.getSteer()
     }
     steer = clamp(steer, -1, 1)
 
     const kbThrottle = keyboard.isThrottleHeld()
     const kbBrake = keyboard.isBrakeHeld()
     const kbBoost = keyboard.isBoostHeld()
-    const drs = kbBoost
-    const manualThrottle = mode !== 'keyboard'
-    let throttle = manualThrottle ? 0 : DEFAULT_THROTTLE
+    const touchDrs = touch.isRightHeld()
+    const touchBrake = touch.isLeftHeld() && !touchDrs
+
+    const drs = kbBoost || touchDrs
+    let throttle = DEFAULT_THROTTLE
     let brake = 0
 
-    // Keyboard remains a fallback in every mode. Mobile modes otherwise
-    // require an explicit accelerator press; releasing it means coasting.
+    // Keyboard always wins when held — handy fallback during gyro play.
     if (kbThrottle) {
       throttle = drs ? DEFAULT_THROTTLE + DRS_BOOST : 1.0
     } else if (kbBrake) {
       brake = 1.0
-    } else if (mobile) {
-      brake = mobile.getBrake()
-      throttle = brake > 0 ? 0 : mobile.getThrottle()
+    } else if (stick && mode === 'gyro') {
+      // Virtual stick pitch: forward = throttle up, back = brake.
+      const pitch = stick.getPitch()
+      if (pitch > 0) {
+        throttle = DEFAULT_THROTTLE + pitch * (1 - DEFAULT_THROTTLE)
+      } else if (pitch < 0) {
+        // Ease off the throttle AND apply brake — feels like lifting + braking.
+        throttle = DEFAULT_THROTTLE * (1 + pitch)
+        brake = Math.min(1, -pitch * 0.95)
+      }
+      if (drs) throttle = Math.min(1, throttle + DRS_BOOST * 0.5)
     } else if (drs) {
       throttle = DEFAULT_THROTTLE + DRS_BOOST
+    } else if (touchBrake) {
+      brake = 0.8
     }
 
-    return { steer, throttle, brake, drs, manualThrottle }
+    return { steer, throttle, brake, drs }
   }
 
   return {
@@ -200,11 +209,10 @@ export async function initInput(preferred?: InputMode): Promise<InputController>
       finalMode: mode,
     }),
     recenter: () => stick?.recenter(),
-    setVisible: (visible) => mobile?.setVisible(visible),
     destroy: () => {
       gyro?.destroy()
       mouseJoy?.destroy()
-      mobile?.destroy()
+      touch.destroy()
       keyboard.destroy()
     },
   }

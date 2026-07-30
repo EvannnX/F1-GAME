@@ -34,7 +34,7 @@ export interface RaceData {
   finalPosition: number
 }
 
-export type InputMode = 'gyro' | 'touch' | 'joystick' | 'keyboard' | 'unknown'
+export type InputMode = 'gyro' | 'touch' | 'keyboard' | 'unknown'
 
 export interface GameContext {
   state: GameState

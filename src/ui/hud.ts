@@ -26,7 +26,6 @@ export function createHud(): HudController {
       color: #fff; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
     `
     speedEl = document.createElement('div')
-    speedEl.className = 'f1s-hud__speed'
     speedEl.style.cssText = `
       position: absolute; right: max(24px, env(safe-area-inset-right));
       bottom: max(22px, env(safe-area-inset-bottom));

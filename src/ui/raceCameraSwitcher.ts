@@ -1,4 +1,4 @@
-export type RaceCameraView = 'chase' | 'chaseFar' | 'rearWing' | 'sidepod' | 'cockpit'
+export type RaceCameraView = 'chase' | 'chaseFar' | 'rearWing' | 'cockpit'
 
 export interface RaceCameraSwitcher {
   show: () => void
@@ -22,8 +22,7 @@ const VIEWS: Array<{
   { id: 'chase', label: '近距追尾', detail: '标准', key: '1' },
   { id: 'chaseFar', label: '远距追尾', detail: '全车', key: '2' },
   { id: 'rearWing', label: '尾翼视角', detail: '低机位', key: '3' },
-  { id: 'sidepod', label: '车侧视角', detail: '侧箱低机位', key: '4' },
-  { id: 'cockpit', label: '座舱视角', detail: '第一视角', key: '5' },
+  { id: 'cockpit', label: '座舱视角', detail: '第一视角', key: '4' },
 ]
 
 const STYLE_ID = 'f1s-race-camera-switcher-style'
@@ -161,7 +160,7 @@ export function createRaceCameraSwitcher(options: RaceCameraSwitcherOptions): Ra
     const view = VIEWS[viewIndex]
     index.textContent = `${viewIndex + 1}/${VIEWS.length}`
     label.textContent = `${view.label} · ${view.detail}`
-    button.title = `切换视角（V / 1–5）· 当前：${view.label}`
+    button.title = `切换视角（V / 1–4）· 当前：${view.label}`
     button.setAttribute('aria-label', `切换视角，当前${view.label}`)
   }
 
