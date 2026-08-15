@@ -225,6 +225,45 @@
     },
     "updatedAt": "2026-08-11T11:21:23.946Z"
   },
+  "marina-bay": {
+    "gridRevision": "marina-bay-grid-179",
+    "carScale": {
+      "x": 0.4,
+      "y": 0.4,
+      "z": 0.4
+    },
+    "carScales": {
+      "player": { "x": 0.4, "y": 0.4, "z": 0.4 },
+      "redbull": { "x": 0.4, "y": 0.4, "z": 0.4 },
+      "ferrari": { "x": 0.4, "y": 0.4, "z": 0.4 },
+      "creator": { "x": 0.4, "y": 0.4, "z": 0.4 },
+      "mercedes": { "x": 0.4, "y": 0.4, "z": 0.4 }
+    },
+    "start": {
+      "x": -348.58,
+      "z": 49.88,
+      "headingDeg": 7.3
+    },
+    "placements": [
+      { "id": "player", "x": -348.58, "z": 49.88, "headingDeg": 7.3 },
+      { "id": "redbull", "x": -345.95, "z": 45.77, "headingDeg": 7.3 },
+      { "id": "ferrari", "x": -349.5757913937547, "z": 41.943759698599926, "headingDeg": 7.3 },
+      { "id": "creator", "x": -347.0312281605573, "z": 37.703625445140645, "headingDeg": 7.3 },
+      { "id": "mercedes", "x": -350.68, "z": 33.66, "headingDeg": 7.3 }
+    ],
+    "grid": {
+      "rowSpacing": 8,
+      "laneSpacing": 2.1
+    },
+    "placement": {
+      "x": 0,
+      "z": 0,
+      "y": 0,
+      "yawDeg": 0,
+      "scale": 0.5
+    },
+    "updatedAt": "2026-08-14T05:35:55.566Z"
+  },
   "spa": {
     "carScale": {
       "x": 1,
@@ -420,7 +459,44 @@
       "scale": 1
     },
     "updatedAt": "2026-08-10T16:55:45.296Z"
+  },
+  "red-bull-ring": {
+    "carScale": {
+      "x": 0.7,
+      "y": 0.7,
+      "z": 0.7
+    },
+    "carScales": {
+      "player": { "x": 0.7, "y": 0.7, "z": 0.7 },
+      "redbull": { "x": 0.8, "y": 0.8, "z": 0.8 },
+      "ferrari": { "x": 0.8, "y": 0.8, "z": 0.8 },
+      "creator": { "x": 0.8, "y": 0.8, "z": 0.8 },
+      "mercedes": { "x": 0.8, "y": 0.8, "z": 0.8 }
+    },
+    "start": {
+      "x": 167.57,
+      "z": -0.18,
+      "headingDeg": 105
+    },
+    "placements": [
+      { "id": "player", "x": 167.57, "z": -0.18, "headingDeg": 105 },
+      { "id": "redbull", "x": 161.72, "z": 6.25, "headingDeg": 105 },
+      { "id": "ferrari", "x": 153.23, "z": 3.92, "headingDeg": 105 },
+      { "id": "creator", "x": 147.71, "z": 10.29, "headingDeg": 105 },
+      { "id": "mercedes", "x": 138.63, "z": 8.11, "headingDeg": 105 }
+    ],
+    "grid": {
+      "rowSpacing": 8,
+      "laneSpacing": 2.1
+    },
+    "placement": {
+      "x": -790.16,
+      "z": -112,
+      "y": -350,
+      "yawDeg": 0,
+      "scale": 1
+    },
+    "updatedAt": "2026-08-14T17:28:21.180Z"
   }
 });
 })();
-

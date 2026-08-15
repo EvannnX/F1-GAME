@@ -16,6 +16,106 @@
   var coordinatePick = true;
   var coordinateResult = null;
   var selectedCarId = 'player';
+  var ISSUE_PREFIX = 'f1ti_track_issue_markers_v1:';
+  var issueMode = 'off';
+  var issueMarkers = [];
+  var issueList = null;
+  var issueMarkerNodes = [];
+
+  function issueLabel(type) {
+    return type === 'clipping' ? '穿模' : '颠簸';
+  }
+
+  function issueKey() {
+    var trackId = api?.getState()?.trackId || globalThis.__F1TI_TRACK_CONFIG__?.id || 'unknown';
+    return ISSUE_PREFIX + trackId;
+  }
+
+  function loadIssueMarkers() {
+    try {
+      var data = JSON.parse(localStorage.getItem(issueKey()) || '[]');
+      issueMarkers = Array.isArray(data) ? data.filter(function (item) {
+        return item && ['clipping', 'bump'].includes(item.type) && [item.x, item.y, item.z].every(Number.isFinite);
+      }) : [];
+    } catch (_) {
+      issueMarkers = [];
+    }
+    globalThis.__F1TI_ISSUE_MARKERS__ = issueMarkers;
+  }
+
+  function saveIssueMarkers() {
+    localStorage.setItem(issueKey(), JSON.stringify(issueMarkers));
+    globalThis.__F1TI_ISSUE_MARKERS__ = issueMarkers;
+  }
+
+  function clearIssueMarkerNodes() {
+    issueMarkerNodes.forEach(function (node) { node.remove(); });
+    issueMarkerNodes = [];
+  }
+
+  function updateIssueMarkerPositions() {
+    if (!api?.projectWorldPoint) return;
+    issueMarkerNodes.forEach(function (node, index) {
+      var item = issueMarkers[index];
+      var point = item && api.projectWorldPoint(item);
+      node.style.display = point?.visible ? '' : 'none';
+      if (point) {
+        node.style.left = point.x + 'px';
+        node.style.top = point.y + 'px';
+      }
+    });
+  }
+
+  function renderIssueMarkers() {
+    clearIssueMarkerNodes();
+    issueMarkers.forEach(function (item, index) {
+      var node = el('div', 'f1ti-issue-marker is-' + item.type, (index + 1) + ' · ' + issueLabel(item.type));
+      document.body.appendChild(node);
+      issueMarkerNodes.push(node);
+    });
+    updateIssueMarkerPositions();
+  }
+
+  function renderIssueList() {
+    if (!issueList) return;
+    issueList.replaceChildren();
+    if (!issueMarkers.length) {
+      issueList.appendChild(el('p', 'f1ti-tuner__hint', '尚未标记问题。选择类型后，直接点击地图中的异常位置。'));
+      renderIssueMarkers();
+      return;
+    }
+    issueMarkers.forEach(function (item, index) {
+      var row = el('div', 'f1ti-tuner__issue-row');
+      var focus = el('button', 'f1ti-tuner__issue-focus', (index + 1) + '. ' + issueLabel(item.type) + '  X ' + item.x.toFixed(2) + ' · Y ' + item.y.toFixed(2) + ' · Z ' + item.z.toFixed(2));
+      focus.type = 'button';
+      focus.addEventListener('click', function () { api?.focusWorldPoint?.(item); });
+      var remove = el('button', 'f1ti-tuner__issue-remove', '删除');
+      remove.type = 'button';
+      remove.addEventListener('click', function () {
+        issueMarkers.splice(index, 1);
+        saveIssueMarkers();
+        renderIssueList();
+        toast('已删除该问题标记');
+      });
+      row.appendChild(focus);
+      row.appendChild(remove);
+      issueList.appendChild(row);
+    });
+    renderIssueMarkers();
+  }
+
+  function addIssueMarker(point) {
+    if (!point || issueMode === 'off') return;
+    issueMarkers.push({
+      id: Date.now().toString(36) + '-' + issueMarkers.length,
+      type: issueMode,
+      x: Number(point.x), y: Number(point.y), z: Number(point.z),
+      createdAt: new Date().toISOString()
+    });
+    saveIssueMarkers();
+    renderIssueList();
+    toast('已标记' + issueLabel(issueMode) + ' #' + issueMarkers.length);
+  }
 
   function flushMapDrag() {
     mapDragFrame = 0;
@@ -97,7 +197,7 @@
     var carScales = Object.assign({}, state?.carScales || {});
     carScales[selectedCarId] = selectedScale;
     return {
-      gridRevision: state?.trackId === 'suzuka' ? 'suzuka-grid-40' : undefined,
+      gridRevision: state?.trackId === 'suzuka' ? 'suzuka-grid-40' : state?.trackId === 'marina-bay' ? 'marina-bay-grid-179' : undefined,
       carScale: carScales.player || selectedScale,
       carScales: carScales,
       start: {
@@ -144,6 +244,9 @@
     panel = null;
     marker?.remove();
     marker = null;
+    issueMode = 'off';
+    issueList = null;
+    clearIssueMarkerNodes();
     if (launcher) launcher.style.display = '';
   }
 
@@ -158,6 +261,7 @@
     api.pause();
     if (launcher) launcher.style.display = 'none';
     var state = api.getState();
+    loadIssueMarkers();
     selectedCarId = state.selectedCarId || 'player';
     var saved = globalThis.__F1TI_TRACK_CONFIG__?.calibration || null;
     panel = el('aside', 'f1ti-tuner');
@@ -270,6 +374,65 @@
     trackSection.appendChild(el('p', 'f1ti-tuner__hint', '单击赛道路面读取坐标；拖动仍用于旋转视角。右键拖动平移，滚轮缩放。'));
     panel.appendChild(trackSection);
 
+    var issueSection = section('穿模 / 颠簸问题标记');
+    var issueModes = el('div', 'f1ti-tuner__issue-modes');
+    [
+      ['clipping', '标记穿模'],
+      ['bump', '标记颠簸'],
+      ['off', '停止标记']
+    ].forEach(function (entry) {
+      var button = el('button', 'f1ti-tuner__issue-mode' + (issueMode === entry[0] ? ' is-active' : ''), entry[1]);
+      button.type = 'button';
+      button.dataset.issueMode = entry[0];
+      button.addEventListener('click', function () {
+        issueMode = entry[0];
+        carDrag = false;
+        dragCar.textContent = '拖动赛车：关闭';
+        dragCar.classList.remove('is-active');
+        issueModes.querySelectorAll('.f1ti-tuner__issue-mode').forEach(function (item) {
+          item.classList.toggle('is-active', item.dataset.issueMode === issueMode);
+        });
+        toast(issueMode === 'off' ? '已停止问题标记' : '请在地图上依次点击多个' + issueLabel(issueMode) + '位置');
+      });
+      issueModes.appendChild(button);
+    });
+    issueSection.appendChild(issueModes);
+    issueSection.appendChild(el('p', 'f1ti-tuner__hint', '可连续点击多个位置；红色为穿模，黄色为颠簸。标记会按赛道自动保存，不会修改地图或车辆参数。'));
+    issueList = el('div', 'f1ti-tuner__issue-list');
+    issueSection.appendChild(issueList);
+    var issueActions = el('div', 'f1ti-tuner__issue-actions');
+    var exportIssues = el('button', 'f1ti-tuner__secondary', '导出全部标记 JSON');
+    exportIssues.type = 'button';
+    exportIssues.addEventListener('click', function () {
+      var payload = JSON.stringify({
+        trackId: state.trackId,
+        trackName: state.trackName,
+        markers: issueMarkers,
+        exportedAt: new Date().toISOString()
+      }, null, 2);
+      var blob = new Blob([payload], { type: 'application/json' });
+      var link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'f1ti-' + state.trackId + '-issue-markers.json';
+      link.click();
+      window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+      toast('已导出 ' + issueMarkers.length + ' 个问题标记');
+    });
+    issueActions.appendChild(exportIssues);
+    var clearIssues = el('button', 'f1ti-tuner__secondary f1ti-tuner__issue-clear', '清空标记');
+    clearIssues.type = 'button';
+    clearIssues.addEventListener('click', function () {
+      if (!issueMarkers.length || !window.confirm('确定清空当前赛道的全部问题标记吗？')) return;
+      issueMarkers = [];
+      saveIssueMarkers();
+      renderIssueList();
+      toast('已清空当前赛道的问题标记');
+    });
+    issueActions.appendChild(clearIssues);
+    issueSection.appendChild(issueActions);
+    panel.appendChild(issueSection);
+    renderIssueList();
+
     var live = el('div', 'f1ti-tuner__live');
     panel.appendChild(live);
     function updateLive() {
@@ -283,6 +446,7 @@
         marker.style.left = point.x + 'px';
         marker.style.top = point.y + 'px';
       }
+      updateIssueMarkerPositions();
     }
     marker = el('div', 'f1ti-tuner-marker', '起点 / 终点');
     document.body.appendChild(marker);
@@ -414,7 +578,7 @@
         event.preventDefault();
         return;
       }
-      if (api.getState().view !== 'free' && !(coordinatePick && event.button === 0)) return;
+      if (api.getState().view !== 'free' && !((coordinatePick || issueMode !== 'off') && event.button === 0)) return;
       drag = {
         x: event.clientX,
         y: event.clientY,
@@ -451,8 +615,9 @@
         mapDragFrame = 0;
         flushMapDrag();
       }
-      if (finishedDrag && finishedDrag.button === 0 && !finishedDrag.moved && coordinatePick && api.pickWorldPoint) {
+      if (finishedDrag && finishedDrag.button === 0 && !finishedDrag.moved && (coordinatePick || issueMode !== 'off') && api.pickWorldPoint) {
         var point = api.pickWorldPoint(event.clientX, event.clientY);
+        if (point && issueMode !== 'off') addIssueMarker(point);
         if (point && coordinateResult) {
           coordinateResult.textContent = '点击坐标  X ' + point.x.toFixed(2) + '  ·  Y ' + point.y.toFixed(2) + '  ·  Z ' + point.z.toFixed(2);
         } else if (coordinateResult) {

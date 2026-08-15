@@ -26007,6 +26007,48 @@ const spaCutoutMaterials = new Set([ "trees1_2022.001", "trees2_2022.001", "tree
 
 function txFixSpaVisualMaterials(e) {
     const trackId = globalThis.__F1TI_TRACK_CONFIG__?.id;
+    if ("red-bull-ring" === trackId) {
+        // Object_18 / material ..._13 is a translucent edge-detail strip.  The
+        // exported 26 clipping markers span its complete world-space length
+        // (roughly X 842..973 / Z 493..616). Most texels in the source PNG have
+        // alpha 0 and there is no terrain below any of its 14 components, so the
+        // sky is visible through the ground. Add the missing grass base under the
+        // complete strip; keep the original detail mesh, UVs and track geometry.
+        e.updateMatrixWorld(!0);
+        let t = null, a = null;
+        e.traverse(e => {
+            if (!(e instanceof si)) return;
+            const n = Array.isArray(e.material) ? e.material : [ e.material ];
+            t || (t = n.find(e => "Acuredbullring1051Mtl.003_39" === (e?.name ?? "")) ?? null),
+            a || (a = n.some(e => "Acuredbullring1051Mtl.003_13" === (e?.name ?? "")) ? e : null);
+        });
+        if (t && a) {
+            const n = a.geometry.getAttribute("position"), i = a.geometry.getIndex(), r = [];
+            if (n) {
+                const s = i?.count ?? n.count;
+                for (let c = 0; c + 2 < s; c += 3) {
+                    const s = i ? i.getX(c) : c, l = i ? i.getX(c + 1) : c + 1, d = i ? i.getX(c + 2) : c + 2;
+                    r.push(s, l, d);
+                }
+            }
+            if (r.length) {
+                const e = a.geometry.clone();
+                e.setIndex(r), e.computeBoundingBox(), e.computeBoundingSphere();
+                const n = t.clone();
+                n.name = "f1ti_redbull_grass_underlay_clipping_strip", n.transparent = !1, n.opacity = 1,
+                n.alphaTest = 0, n.depthTest = !0, n.depthWrite = !0, n.side = 2,
+                n.polygonOffset = !0, n.polygonOffsetFactor = 2, n.polygonOffsetUnits = 2,
+                n.needsUpdate = !0;
+                const i = new si(e, n);
+                i.name = "f1ti_redbull_terrain_underlay_clipping_strip", i.position.copy(a.position),
+                i.quaternion.copy(a.quaternion), i.scale.copy(a.scale), i.renderOrder = -1,
+                i.castShadow = !1, i.receiveShadow = !0, i.frustumCulled = !1,
+                i.userData.driveVisualChunk = !0, a.parent?.add(i),
+                console.info(`[F1S] Red Bull Ring local terrain underlay: ${r.length / 3} triangles`);
+            }
+        }
+        return;
+    }
     if ("barcelona" === trackId) {
         // The Barcelona asset stores trees, fences, distant terrain and grandstand
         // cards as very large BLEND planes. At distance their transparent texels
@@ -26671,11 +26713,23 @@ const spaObstacleMaterials = new Set([ "concrete-barrie-raw.001", "concrete-barr
 
 const suzukaObstacleMaterials = new Set([ "282_1", "282_5", "282_6", "282_7", "282_8", "282_38", "282_39", "282_40", "282_45", "282_77", "282_78", "282_79", "282_80" ]);
 
+// Verified road-side guardrail and concrete-wall atlases in the Marina Bay
+// GLB. Do not treat every non-road numbered material as solid: many of those
+// meshes are buildings, signs, transparent decoration or overhead scenery.
+const marinaBayObstacleMaterials = new Set([ "11001Mtl_71", "11001Mtl_72", "11001Mtl_73", "11001Mtl_79", "11001Mtl_80" ]);
+
+// Verified Red Bull Ring guardrail, concrete barrier and chain-link fence
+// atlases. Keep this list explicit: the numbered GLB also contains buildings,
+// grandstands and scenery that must never become invisible road blockers.
+const redBullRingObstacleMaterials = new Set([ "Acuredbullring1051Mtl.003_44", "Acuredbullring1051Mtl.003_45", "Acuredbullring1051Mtl.003_22", "Acuredbullring1051Mtl.003_33", "Acuredbullring1051Mtl.003_34", "Acuredbullring1051Mtl.003_63", "Acuredbullring1051Mtl.003_95" ]);
+
 function mA(e) {
     const t = [];
     return e.traverse(e => {
         if (!(e instanceof si) || e.userData.driveVisualChunk) return;
         const a = Array.isArray(e.material) ? e.material : [ e.material ];
+        if ("red-bull-ring" === globalThis.__F1TI_TRACK_CONFIG__?.id) return void (e.visible && a.some(e => redBullRingObstacleMaterials.has(e?.name ?? "")) && t.push(e));
+        if ("marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id) return void (e.visible && a.some(e => marinaBayObstacleMaterials.has(e?.name ?? "")) && t.push(e));
         if ("barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id) return void (a.some(e => !barcelonaRoadMaterial(e?.name ?? "")) && t.push(e));
         if ("suzuka" === globalThis.__F1TI_TRACK_CONFIG__?.id) return void (a.some(e => suzukaObstacleMaterials.has(e?.name ?? "")) && t.push(e));
         if ("spa" === globalThis.__F1TI_TRACK_CONFIG__?.id) {
@@ -26686,7 +26740,7 @@ function mA(e) {
 }
 
 function gA(e) {
-    const t = mA(e.group), suzukaTrack = "suzuka" === globalThis.__F1TI_TRACK_CONFIG__?.id, barcelonaTrack = "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id, a = .55, n = new Map, i = new Map, r = new Map;
+    const t = mA(e.group), suzukaTrack = "suzuka" === globalThis.__F1TI_TRACK_CONFIG__?.id, barcelonaTrack = "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id, marinaBayTrack = "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id, redBullRingTrack = "red-bull-ring" === globalThis.__F1TI_TRACK_CONFIG__?.id, a = .55, n = new Map, i = new Map, r = new Map;
     let o = 0;
     const s = new ra, c = new ra, l = new ra, d = new ra, f = new ra, u = new ra, h = new ra, b = new ra, p = (e, t) => `${Math.floor(e / 4)}:${Math.floor(t / 4)}`, m = (e, t = e.y, r = e.y) => {
         const o = p(e.x, e.z), s = n.get(o), c = [ Math.round(e.x / a), Math.round(e.z / a), Math.floor(.5 * (t + r) / 1.25) ].join(":"), l = i.get(c);
@@ -26722,6 +26776,14 @@ function gA(e) {
         const e = y.geometry.getAttribute("position");
         if (!e) continue;
         const t = y.geometry.getIndex(), a = Array.isArray(y.material) ? y.material : [ y.material ], n = suzukaTrack ? y.geometry.groups.length > 0 ? y.geometry.groups : [ {
+            start: 0,
+            count: t?.count ?? e.count,
+            materialIndex: 0
+        } ] : redBullRingTrack ? y.geometry.groups.length > 0 ? y.geometry.groups.filter(e => redBullRingObstacleMaterials.has(a[e.materialIndex ?? 0]?.name ?? "")) : [ {
+            start: 0,
+            count: t?.count ?? e.count,
+            materialIndex: 0
+        } ] : marinaBayTrack ? y.geometry.groups.length > 0 ? y.geometry.groups.filter(e => marinaBayObstacleMaterials.has(a[e.materialIndex ?? 0]?.name ?? "")) : [ {
             start: 0,
             count: t?.count ?? e.count,
             materialIndex: 0
@@ -26832,6 +26894,24 @@ function barcelonaRoadMaterial(e) {
     return barcelonaRoadMaterials.has(String(e ?? ""));
 }
 
+// Marina Bay node Object_19 / material slot 15 is the continuous main-course
+// asphalt. Adjacent slots include pit/service roads, so they stay excluded.
+// Every non-road collision candidate must additionally pass the obstacle
+// builder's near-vertical-triangle and vehicle-height tests.
+const marinaBayRoadMaterials = new Set([ "11001Mtl_14" ]);
+
+function marinaBayRoadMaterial(e) {
+    return marinaBayRoadMaterials.has(String(e ?? ""));
+}
+
+// Object_8 / material slot 8 is the single closed Red Bull Ring main-course
+// road ribbon. Other grey materials include paddock, service roads and runoff.
+const redBullRingRoadMaterials = new Set([ "Acuredbullring1051Mtl.003_3" ]);
+
+function redBullRingRoadMaterial(e) {
+    return redBullRingRoadMaterials.has(String(e ?? ""));
+}
+
 // Node Object_40 / mesh Object_36 / tentrail_32 is the continuous Yas Marina
 // asphalt surface. Object_17 / mesh Object_13 / tentrail_11 is not road.
 // tentrail_30 and tentrail_31 are adjacent detail/runoff meshes and must not
@@ -26859,7 +26939,7 @@ function yasMarinaUpperDeckZone(e, t) {
 }
 
 function FA(e) {
-    const t = new Uf, a = new ra, n = new ra(0, -1, 0), i = bA(e.group), r = pA(e.group), trackId = globalThis.__F1TI_TRACK_CONFIG__?.id, nonShanghaiTrack = "shanghai" !== trackId, spaTrack = "spa" === trackId, suzukaTrack = "suzuka" === trackId, bahrainTrack = "bahrain" === trackId, yasMarinaTrack = "yas-marina" === trackId, barcelonaTrack = "barcelona" === trackId, o = nonShanghaiTrack ? [ e.group ] : r.length ? r : i.length ? i : [ e.group ], s = new Map;
+    const t = new Uf, a = new ra, n = new ra(0, -1, 0), i = bA(e.group), r = pA(e.group), trackId = globalThis.__F1TI_TRACK_CONFIG__?.id, nonShanghaiTrack = "shanghai" !== trackId, spaTrack = "spa" === trackId, suzukaTrack = "suzuka" === trackId, bahrainTrack = "bahrain" === trackId, yasMarinaTrack = "yas-marina" === trackId, barcelonaTrack = "barcelona" === trackId, marinaBayTrack = "marina-bay" === trackId, redBullRingTrack = "red-bull-ring" === trackId, o = nonShanghaiTrack ? [ e.group ] : r.length ? r : i.length ? i : [ e.group ], s = new Map;
     let c = "", l = !1;
     o.forEach(e => {
         e.traverse(e => {
@@ -26895,7 +26975,7 @@ function FA(e) {
         sampleGroundAt: (i, r, heightHint) => {
             const f = d();
             f !== c && (s.clear(), c = f, l = !1);
-            const hasHeightHint = (suzukaTrack || bahrainTrack || yasMarinaTrack || barcelonaTrack) && Number.isFinite(heightHint), u = `${Math.round(20 * i)}:${Math.round(20 * r)}:${hasHeightHint ? Math.round(4 * heightHint) : "top"}`;
+            const hasHeightHint = (suzukaTrack || bahrainTrack || yasMarinaTrack || barcelonaTrack || marinaBayTrack || redBullRingTrack) && Number.isFinite(heightHint), u = `${Math.round(20 * i)}:${Math.round(20 * r)}:${hasHeightHint ? Math.round(4 * heightHint) : "top"}`;
             if (s.has(u)) {
                 const e = s.get(u);
                 return e ? {
@@ -26925,13 +27005,13 @@ function FA(e) {
                     i < a && (a = i, t = e[n]);
                 }
                 return t;
-            }, b = h.find(e => Mx.has(lA(e))) ?? null, spaRoad = spaTrack ? h.find(e => spaRoadMaterial(lA(e)) && uA(e) > .25) ?? null : null, suzukaRoadHits = suzukaTrack ? h.filter(e => (e.object.userData.f1tiSuzukaRoad || suzukaRoadMaterial(lA(e))) && uA(e) > .25) : [], suzukaRoad = chooseSuzukaLayer(suzukaRoadHits), suzukaGround = suzukaTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .25)) : null, bahrainRoadHits = bahrainTrack ? h.filter(e => bahrainRoadMaterial(lA(e)) && uA(e) > .55) : [], bahrainRoad = chooseSuzukaLayer(bahrainRoadHits), yasRoadHits = yasMarinaTrack ? h.filter(e => yasMarinaRoadHit(e) && uA(e) > .55) : [], yasRoad = chooseSuzukaLayer(yasRoadHits), yasGroundHits = yasMarinaTrack ? h.filter(e => uA(e) > .55).sort((e, t) => e.point.y - t.point.y) : [], yasGround = hasHeightHint ? chooseSuzukaLayer(yasGroundHits) : yasGroundHits[0] ?? null, barcelonaRoadHits = barcelonaTrack ? h.filter(e => barcelonaRoadMaterial(lA(e)) && uA(e) > .55) : [], barcelonaRoad = chooseSuzukaLayer(barcelonaRoadHits), barcelonaGround = barcelonaTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .55)) : null, p = spaTrack ? spaRoad ?? h.find(e => uA(e) > .25) ?? null : suzukaTrack ? suzukaRoad ?? suzukaGround : bahrainTrack ? bahrainRoad : yasMarinaTrack ? yasRoad ?? yasGround : barcelonaTrack ? barcelonaRoad ?? barcelonaGround : h.find(e => !Mx.has(lA(e)) && fA(e) && uA(e) > .25) ?? null ?? (b && uA(b) > .25 ? b : null) ?? h.find(e => uA(e) > .25) ?? null;
+            }, b = h.find(e => Mx.has(lA(e))) ?? null, spaRoad = spaTrack ? h.find(e => spaRoadMaterial(lA(e)) && uA(e) > .25) ?? null : null, suzukaRoadHits = suzukaTrack ? h.filter(e => (e.object.userData.f1tiSuzukaRoad || suzukaRoadMaterial(lA(e))) && uA(e) > .25) : [], suzukaRoad = chooseSuzukaLayer(suzukaRoadHits), suzukaGround = suzukaTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .25)) : null, bahrainRoadHits = bahrainTrack ? h.filter(e => bahrainRoadMaterial(lA(e)) && uA(e) > .55) : [], bahrainRoad = chooseSuzukaLayer(bahrainRoadHits), yasRoadHits = yasMarinaTrack ? h.filter(e => yasMarinaRoadHit(e) && uA(e) > .55) : [], yasRoad = chooseSuzukaLayer(yasRoadHits), yasGroundHits = yasMarinaTrack ? h.filter(e => uA(e) > .55).sort((e, t) => e.point.y - t.point.y) : [], yasGround = hasHeightHint ? chooseSuzukaLayer(yasGroundHits) : yasGroundHits[0] ?? null, barcelonaRoadHits = barcelonaTrack ? h.filter(e => barcelonaRoadMaterial(lA(e)) && uA(e) > .55) : [], barcelonaRoad = chooseSuzukaLayer(barcelonaRoadHits), barcelonaGround = barcelonaTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .55)) : null, marinaBayRoadHits = marinaBayTrack ? h.filter(e => marinaBayRoadMaterial(lA(e)) && uA(e) > .55) : [], marinaBayRoad = chooseSuzukaLayer(marinaBayRoadHits), marinaBayGround = marinaBayTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .55)) : null, redBullRingRoadHits = redBullRingTrack ? h.filter(e => redBullRingRoadMaterial(lA(e)) && uA(e) > .55) : [], redBullRingRoad = chooseSuzukaLayer(redBullRingRoadHits), redBullRingGround = redBullRingTrack ? chooseSuzukaLayer(h.filter(e => uA(e) > .55)) : null, p = spaTrack ? spaRoad ?? h.find(e => uA(e) > .25) ?? null : suzukaTrack ? suzukaRoad ?? suzukaGround : bahrainTrack ? bahrainRoad : yasMarinaTrack ? yasRoad ?? yasGround : barcelonaTrack ? barcelonaRoad ?? barcelonaGround : marinaBayTrack ? marinaBayRoad ?? marinaBayGround : redBullRingTrack ? redBullRingRoad ?? redBullRingGround : h.find(e => !Mx.has(lA(e)) && fA(e) && uA(e) > .25) ?? null ?? (b && uA(b) > .25 ? b : null) ?? h.find(e => uA(e) > .25) ?? null;
             if (!p) return s.set(u, null), null;
-            const m = lA(p), isSpaRoad = spaTrack && spaRoadMaterial(m), isSuzukaRoad = suzukaTrack && (p.object.userData.f1tiSuzukaRoad || suzukaRoadMaterial(m)), isBahrainRoad = bahrainTrack && bahrainRoadMaterial(m), isYasMarinaRoad = yasMarinaTrack && yasMarinaRoadHit(p), isBarcelonaRoad = barcelonaTrack && barcelonaRoadMaterial(m), g = {
+            const m = lA(p), isSpaRoad = spaTrack && spaRoadMaterial(m), isSuzukaRoad = suzukaTrack && (p.object.userData.f1tiSuzukaRoad || suzukaRoadMaterial(m)), isBahrainRoad = bahrainTrack && bahrainRoadMaterial(m), isYasMarinaRoad = yasMarinaTrack && yasMarinaRoadHit(p), isBarcelonaRoad = barcelonaTrack && barcelonaRoadMaterial(m), isMarinaBayRoad = marinaBayTrack && marinaBayRoadMaterial(m), isRedBullRingRoad = redBullRingTrack && redBullRingRoadMaterial(m), g = {
                 point: p.point.clone(),
                 normal: hA(p),
-                isRoad: spaTrack ? isSpaRoad : suzukaTrack ? isSuzukaRoad : bahrainTrack ? isBahrainRoad : yasMarinaTrack ? isYasMarinaRoad : barcelonaTrack ? isBarcelonaRoad : nonShanghaiTrack || dA(p) || null !== b,
-                isRunoff: spaTrack ? !isSpaRoad : suzukaTrack ? !isSuzukaRoad : bahrainTrack ? !isBahrainRoad : yasMarinaTrack ? !isYasMarinaRoad : barcelonaTrack ? !isBarcelonaRoad : null !== b || Mx.has(m)
+                isRoad: spaTrack ? isSpaRoad : suzukaTrack ? isSuzukaRoad : bahrainTrack ? isBahrainRoad : yasMarinaTrack ? isYasMarinaRoad : barcelonaTrack ? isBarcelonaRoad : marinaBayTrack ? isMarinaBayRoad : redBullRingTrack ? isRedBullRingRoad : nonShanghaiTrack || dA(p) || null !== b,
+                isRunoff: spaTrack ? !isSpaRoad : suzukaTrack ? !isSuzukaRoad : bahrainTrack ? !isBahrainRoad : yasMarinaTrack ? !isYasMarinaRoad : barcelonaTrack ? !isBarcelonaRoad : marinaBayTrack ? !isMarinaBayRoad : redBullRingTrack ? !isRedBullRingRoad : null !== b || Mx.has(m)
             };
             return s.size > 16e3 && s.clear(), s.set(u, g), {
                 point: g.point.clone(),
@@ -26945,7 +27025,7 @@ function FA(e) {
 
 async function _A(e, t = {}) {
     const a = t.cellSize ?? 8, n = performance.now(), i = t.timeBudgetMs ?? Number.POSITIVE_INFINITY, r = FA(e), o = (new ca).setFromObject(e.group), s = Math.floor((o.min.x - 24) / a) * a, c = Math.ceil((o.max.x + 24) / a) * a, l = Math.floor((o.min.z - 24) / a) * a, d = Math.ceil((o.max.z + 24) / a) * a, f = Math.max(2, Math.ceil((c - s) / a) + 1), u = Math.max(2, Math.ceil((d - l) / a) + 1), h = f * u;
-    if ([ "suzuka", "yas-marina", "barcelona" ].includes(globalThis.__F1TI_TRACK_CONFIG__?.id)) return t.onProgress?.(1, "multi-level ground ready"), 
+    if ([ "suzuka", "yas-marina", "barcelona", "marina-bay" ].includes(globalThis.__F1TI_TRACK_CONFIG__?.id)) return t.onProgress?.(1, "multi-level ground ready"), 
     r;
     if (h > 12e4 && Number.isFinite(i)) return t.onProgress?.(1, "ground acceleration ready"),
     r;
@@ -28914,8 +28994,8 @@ function Rw(e, t = {}) {
         ready: Promise.all(i).then(() => {}),
         update: (e, a) => {
             for (let i = 0; i < n.length && i < e.length; i++) {
-                const a = e[i].normal ?? new ra(0, 1, 0), isYasMarina = "yas-marina" === globalThis.__F1TI_TRACK_CONFIG__?.id, useTireContact = isYasMarina && ("RedBull" === e[i].profile.name || "Rookie" === e[i].profile.name), tireContact = Number(n[i].wheelContactY), r = useTireContact ? (Number.isFinite(tireContact) ? tireContact * n[i].group.scale.y : 0) : (t.groundSinkM ?? 0) + ("RedBull" === e[i].profile.name ? .1 : "Rookie" === e[i].profile.name ? .08 : 0);
-                if (xS(n[i].group, e[i].pos, e[i].heading, a), n[i].group.position.addScaledVector(a, -r), 
+                const a = e[i].normal ?? new ra(0, 1, 0), trackId = globalThis.__F1TI_TRACK_CONFIG__?.id, tireGroundTrack = [ "yas-marina", "marina-bay" ].includes(trackId), useTireContact = tireGroundTrack && ("RedBull" === e[i].profile.name || "Rookie" === e[i].profile.name), tireContact = Number(n[i].wheelContactY), scaledTireContact = Number.isFinite(tireContact) ? tireContact * n[i].group.scale.y : 0, r = "marina-bay" === trackId ? .03 : useTireContact ? scaledTireContact : (t.groundSinkM ?? 0) + ("RedBull" === e[i].profile.name ? .1 : "Rookie" === e[i].profile.name ? .08 : 0), contactShadow = n[i].group.getObjectByName("opponent-contact-shadow");
+                if (contactShadow && "marina-bay" === trackId && (contactShadow.position.y = .025), xS(n[i].group, e[i].pos, e[i].heading, a), n[i].group.position.addScaledVector(a, -r), 
                 n[i].group.visible = !n[i].placeholderActive, n[i].placeholderActive) {
                     const t = .35 * e[i].speed;
                     for (const e of n[i].wheels) e.rotation.x += .016 * t;
@@ -29347,12 +29427,73 @@ function qw(e, t, a, n, i, r, o) {
 
 const Xw = 120 / 3.6, Yw = Mt.degToRad(3), Jw = 60 / 3.6;
 
+// The Red Bull Ring has several overlapping road/detail triangles around the
+// uphill Turn 2 approach.  Raycasting those triangles independently is
+// visually correct, but tiny height differences between adjacent faces make
+// the four vehicle probes alternate between layers and feel very bumpy.  Once
+// the authored route has been projected onto Object_8, use a private, smoothed
+// copy of that surface profile for vehicle physics in this corridor.  X/Z,
+// guide geometry, grid positions, map placement and the rendered GLB remain
+// untouched.
+function txRedBullRingTurnTwoGround(e) {
+    const t = globalThis.__F1TI_TRACK_CONFIG__, a = t?.route;
+    if ("red-bull-ring" !== t?.id || !e || !Array.isArray(a) || a.length < 280) return e;
+    const n = 38, i = 282, r = a.map(e => Number(e[1]) - .055);
+    // Remove triangle-to-triangle noise while retaining the long uphill grade.
+    // The filter is deliberately limited to the Turn 1 exit / Turn 2 / Turn 3
+    // approach and is feathered at both ends.
+    for (let e = 0; e < 6; e++) {
+        const e = r.slice();
+        for (let t = n; t <= i; t++) r[t] = .0625 * e[t - 2] + .25 * e[t - 1] + .375 * e[t] + .25 * e[t + 1] + .0625 * e[t + 2];
+    }
+    const o = (e, t, n) => {
+        const i = a[e], o = a[t], s = o[0] - i[0], c = o[2] - i[2], l = Math.max(1e-6, s * s + c * c), d = Mt.clamp(((n.x - i[0]) * s + (n.z - i[2]) * c) / l, 0, 1), f = i[0] + s * d, u = i[2] + c * d;
+        return {
+            distanceSq: (n.x - f) ** 2 + (n.z - u) ** 2,
+            segment: e,
+            fraction: d,
+            centerX: f,
+            centerZ: u
+        };
+    };
+    return {
+        sampleGroundAt: (t, s, c) => {
+            const l = e.sampleGroundAt(t, s, c);
+            if (!l) return null;
+            const d = {
+                x: t,
+                z: s
+            };
+            let f = null;
+            for (let e = n - 2; e <= i + 2; e++) {
+                const t = o(e, e + 1, d);
+                (!f || t.distanceSq < f.distanceSq) && (f = t);
+            }
+            if (!f || f.distanceSq > 900) return l;
+            const u = f.segment, h = f.fraction, b = Math.sqrt(f.distanceSq), p = Mt.clamp(Math.min((u - n) / 18, (i - u) / 18), 0, 1), m = Mt.clamp((30 - b) / 10, 0, 1), g = p * p * (3 - 2 * p) * (m * m * (3 - 2 * m));
+            if (g <= 1e-4) return l;
+            const F = r[u] + (r[u + 1] - r[u]) * h, centerGround = e.sampleGroundAt(f.centerX, f.centerZ, F), crossfall = centerGround ? Mt.clamp(l.point.y - centerGround.point.y, -1.25, 1.25) : 0, safeSurfaceY = F + crossfall + .065, _ = a[Math.max(n, u - 2)], y = a[Math.min(i, u + 3)], v = y[0] - _[0], x = r[Math.min(i, u + 3)] - r[Math.max(n, u - 2)], A = y[2] - _[2], k = Math.max(1e-5, v * v + A * A), tangentLength = Math.max(1e-5, Math.hypot(v, A)), tangentX = v / tangentLength, tangentZ = A / tangentLength, sideX = -tangentZ, sideZ = tangentX, bankHalfWidth = 3.6, bankLeft = e.sampleGroundAt(f.centerX + sideX * bankHalfWidth, f.centerZ + sideZ * bankHalfWidth, F), bankRight = e.sampleGroundAt(f.centerX - sideX * bankHalfWidth, f.centerZ - sideZ * bankHalfWidth, F), longitudinalSlope = x / tangentLength, lateralSlope = bankLeft && bankRight ? Mt.clamp((bankLeft.point.y - bankRight.point.y) / (2 * bankHalfWidth), -.3, .3) : 0, tangent = new ra(tangentX, longitudinalSlope, tangentZ).normalize(), side = new ra(sideX, lateralSlope, sideZ).normalize(), w = side.cross(tangent).normalize();
+            w.y < 0 && w.negate();
+            // Preserve the bend's real crossfall instead of assigning the
+            // centreline height to the whole road width.  The previous flat
+            // cross-section kept the longitudinal ride smooth, but on the
+            // banked part of Turn 2 it could place the inside wheels below the
+            // rendered asphalt.  A 6.5 cm safety offset prevents z-clipping
+            // without making the car visibly float.
+            l.point.y += (safeSurfaceY - l.point.y) * g, l.normal.lerp(w, g).normalize();
+            return l;
+        }
+    };
+}
+
 function txYasDriveScale() {
-    return "yas-marina" === globalThis.__F1TI_TRACK_CONFIG__?.id ? .4 : 1;
+    const trackId = globalThis.__F1TI_TRACK_CONFIG__?.id;
+    return "yas-marina" === trackId || "marina-bay" === trackId ? .4 : "red-bull-ring" === trackId ? .7 : 1;
 }
 
 function Qw(e, t, a) {
     const driveScale = txYasDriveScale();
+    const redBullRingStableSurface = "red-bull-ring" === globalThis.__F1TI_TRACK_CONFIG__?.id;
     const n = {
         pos: t.pos.clone(),
         heading: t.heading,
@@ -29385,18 +29526,18 @@ function Qw(e, t, a) {
             r.copy(t).multiplyScalar(a);
             const o = e.sampleGroundAt(n.pos.x + r.x, n.pos.z + r.z, n.pos.y - .09);
             return !o || o.normal.y < .55 ? null : (i.push(o), o);
-        }, l = c(s, 4.2), d = c(s, -4.2), f = c(o, 1.8), u = c(o, -1.8), h = i.map(e => e.point.y).sort((e, t) => e - t), b = h[Math.floor(h.length / 2)], p = i.filter(e => Math.abs(e.point.y - b) <= .16);
+        }, l = c(s, 4.2), d = c(s, -4.2), f = c(o, 1.8), u = c(o, -1.8), h = i.map(e => e.point.y).sort((e, t) => e - t), b = h[Math.floor(h.length / 2)], p = i.filter(e => Math.abs(e.point.y - b) <= (redBullRingStableSurface ? 1.6 : .16));
         0 === p.length && p.push(a);
         const m = new ra(n.pos.x, 0, n.pos.z), g = new ra;
         for (const e of p) m.y += e.point.y, g.add(e.normal);
         m.y /= p.length, m.y = Math.max(m.y, Math.min(a.point.y, b + .14));
         const F = new Set(p), _ = s.clone(), y = o.clone().negate();
         let v = !1;
-        if (l && d && F.has(l) && F.has(d) && (_.y = (l.point.y - d.point.y) / 2.7, v = !0), 
-        f && u && F.has(f) && F.has(u) && (y.y = (u.point.y - f.point.y) / 1.36, v = !0), 
+        if (l && d && F.has(l) && F.has(d) && (_.y = (l.point.y - d.point.y) / (redBullRingStableSurface ? 8.4 : 2.7), v = !0), 
+        f && u && F.has(f) && F.has(u) && (y.y = (u.point.y - f.point.y) / (redBullRingStableSurface ? 3.6 : 1.36), v = !0), 
         v) {
             const e = _.cross(y).normalize();
-            e.y < 0 && e.negate(), g.normalize().lerp(e, .72).normalize();
+            e.y < 0 && e.negate(), g.normalize().lerp(e, redBullRingStableSurface ? 1 : .72).normalize();
         } else g.normalize();
         return {
             point: m,
@@ -29444,11 +29585,15 @@ function Qw(e, t, a) {
             // resolve an obstacle after the destination is outside the
             // recognised road surface.  A fast step across a real barrier is
             // still caught by sampleObstacleBetween below.
-            if (a && !m?.isRoad && o.distanceToSquared(n.pos) > 1e-10) {
-                const spaWallCollision = "spa" === globalThis.__F1TI_TRACK_CONFIG__?.id;
-                const t = qw(o, n.pos, b, a, .82, 1, s);
+            const activeTrackId = globalThis.__F1TI_TRACK_CONFIG__?.id, marinaBayWallCollision = "marina-bay" === activeTrackId, redBullRingWallCollision = "red-bull-ring" === activeTrackId, alwaysSweepFence = marinaBayWallCollision || redBullRingWallCollision;
+            if (a && (alwaysSweepFence || !m?.isRoad) && o.distanceToSquared(n.pos) > 1e-10) {
+                const spaWallCollision = "spa" === activeTrackId;
+                // Marina Bay cars and world motion are scaled to 0.4. Sweep a
+                // compact front footprint every frame so the nose cannot cross
+                // a wall while the car centre is still on the road.
+                const t = qw(o, n.pos, b, a, marinaBayWallCollision ? .34 : redBullRingWallCollision ? .58 : .82, marinaBayWallCollision ? .62 : redBullRingWallCollision ? .72 : 1, s);
                 t.corrected && (m = f(b)), t.impacted && (l = !0, n.speed *= spaWallCollision ? Math.max(.72, t.speedRetention) : t.speedRetention), 
-                spaWallCollision && t.corrected && Ww(s), t.scraping && !spaWallCollision && (n.speed = Math.min(n.speed, Jw), 
+                spaWallCollision && t.corrected && Ww(s), t.scraping && !spaWallCollision && (n.speed = Math.min(n.speed, marinaBayWallCollision ? 45 / 3.6 : redBullRingWallCollision ? 52 / 3.6 : Jw), 
                 n.speed *= Math.exp(-1.8 * e));
             }
             if (m) return d(m, e), i = n.pos.clone(), void (m.isRoad || (n.speed *= Math.exp(-.28 * e)));
@@ -29472,7 +29617,7 @@ let tM = null;
 function txProjectTrackRouteToGround(e) {
     const t = globalThis.__F1TI_TRACK_CONFIG__, a = t?.route;
     if (!t || "shanghai" === t.id || !Array.isArray(a) || a.length < 8) return;
-    const isYasMarina = "yas-marina" === t.id, isBarcelona = "barcelona" === t.id;
+    const isYasMarina = "yas-marina" === t.id, isBarcelona = "barcelona" === t.id, isMarinaBay = "marina-bay" === t.id, isRedBullRing = "red-bull-ring" === t.id;
     const yasUpperDeckMask = isYasMarina ? new Uint8Array(a.length) : null, yasValidRoadMask = isYasMarina ? new Uint8Array(a.length) : null;
     // Route dragging can call this function repeatedly in the same GUI scene,
     // while a formal race calls it once after boot. Previously, missed samples
@@ -29555,10 +29700,23 @@ function txProjectTrackRouteToGround(e) {
             point[0] = targetX, point[2] = targetZ;
         }
     }
-    let n = 0, previousY = isYasMarina ? 32.5 : a[0][1];
+    let n = 0, previousY = isYasMarina ? 32.5 : isMarinaBay ? 23.55 : isRedBullRing ? 50 : a[0][1];
     for (let i = 0; i < a.length; i++) {
         const t = a[i], yasUpperDeck = isYasMarina && yasMarinaUpperDeckZone(t[0], t[2]);
-        let r = e.sampleGroundAt(t[0], t[2], yasUpperDeck ? 1e6 : isYasMarina || isBarcelona ? previousY : t[1]);
+        let r = e.sampleGroundAt(t[0], t[2], yasUpperDeck ? 1e6 : isYasMarina || isBarcelona || isMarinaBay || isRedBullRing ? previousY : t[1]);
+        if (isMarinaBay && !r?.isRoad) {
+            // Four GLB material seams are narrower than one route sample. Look
+            // only across the local road normal and select the nearest valid
+            // asphalt hit; this closes the seam without entering pit branches.
+            const prior = a[(i - 1 + a.length) % a.length], next = a[(i + 1) % a.length], dx = next[0] - prior[0], dz = next[2] - prior[2], length = Math.max(.001, Math.hypot(dx, dz)), sideX = -dz / length, sideZ = dx / length;
+            outer: for (const offset of [ .35, -.35, .7, -.7, 1.05, -1.05, 1.4, -1.4, 1.75, -1.75, 2.1, -2.1 ]) {
+                const candidateX = t[0] + sideX * offset, candidateZ = t[2] + sideZ * offset, candidate = e.sampleGroundAt(candidateX, candidateZ, previousY);
+                if (candidate?.isRoad) {
+                    t[0] = candidateX, t[2] = candidateZ, r = candidate;
+                    break outer;
+                }
+            }
+        }
         // Barcelona X/Z has already been corrected as one continuous curve
         // above. Never run a second independent left/right search here: that
         // old fallback overrode the continuous result and produced alternating
@@ -29635,7 +29793,7 @@ function txProjectTrackRouteToGround(e) {
 }
 
 function aM(e) {
-    const config = globalThis.__F1TI_TRACK_CONFIG__, isConfirmedGuide = ("yas-marina" === config?.id || "barcelona" === config?.id && config?.manualGuideRoute) && Array.isArray(config?.guideRoute), confirmedGuideRoute = isConfirmedGuide ? config.guideRoute.map((e, t) => {
+    const config = globalThis.__F1TI_TRACK_CONFIG__, isConfirmedGuide = ("yas-marina" === config?.id || "marina-bay" === config?.id || "barcelona" === config?.id && config?.manualGuideRoute) && Array.isArray(config?.guideRoute), confirmedGuideRoute = isConfirmedGuide ? config.guideRoute.map((e, t) => {
         const a = PM[t] ?? e;
         return [ e[0], a[1], e[2], a[3], a[4], a[5], e[6], a[7], e[8], e[9] ];
     }) : null, guideScale = "yas-marina" === globalThis.__F1TI_TRACK_CONFIG__?.id ? .4 : 1, sourceGuideRoute = "shanghai" === globalThis.__F1TI_TRACK_CONFIG__?.id ? $w : confirmedGuideRoute ?? PM, guideRoute = "yas-marina" === globalThis.__F1TI_TRACK_CONFIG__?.id ? sourceGuideRoute.map(e => e.slice()) : "shanghai" !== globalThis.__F1TI_TRACK_CONFIG__?.id ? (() => {
@@ -29684,7 +29842,7 @@ function aM(e) {
     // overlaid a different direction at the start and polluted routePoints.
     const t = new Es;
     t.name = "racing-guide-line", e.add(t);
-    const a = new di(1.05 * guideScale, .018 * guideScale, 2.4 * guideScale), n = new Cn({
+    const marinaGuideWidthScale = "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id ? .5 : 1, a = new di(1.05 * guideScale * marinaGuideWidthScale, .018 * guideScale, 2.4 * guideScale), n = new Cn({
         color: 16777215,
         transparent: !0,
         opacity: .66,
@@ -30800,6 +30958,36 @@ function yS(e, t, a, trackGround = null) {
     }
 }
 
+let txPlayerOpponentImpactCooldown = 0;
+
+function txResolvePlayerOpponentCollision(playerState, opponents, deltaSeconds) {
+    if ("marina-bay" !== globalThis.__F1TI_TRACK_CONFIG__?.id || !playerState || !Array.isArray(opponents)) return !1;
+    txPlayerOpponentImpactCooldown = Math.max(0, txPlayerOpponentImpactCooldown - deltaSeconds);
+    const forwardX = Math.sin(playerState.heading), forwardZ = Math.cos(playerState.heading), rightX = -forwardZ, rightZ = forwardX;
+    // Combined extents for two touching 0.4-scale cars. A directional box
+    // avoids the invisible side contacts caused by an oversized round body.
+    const combinedHalfLength = 1.72, combinedHalfWidth = .76, maxVerticalGap = 1.05;
+    let newImpact = !1;
+    for (const opponent of opponents) {
+        if (!opponent?.pos || Math.abs(playerState.pos.y - opponent.pos.y) > maxVerticalGap) continue;
+        const relativeX = opponent.pos.x - playerState.pos.x, relativeZ = opponent.pos.z - playerState.pos.z, longitudinal = relativeX * forwardX + relativeZ * forwardZ, lateral = relativeX * rightX + relativeZ * rightZ, overlapLong = combinedHalfLength - Math.abs(longitudinal), overlapSide = combinedHalfWidth - Math.abs(lateral);
+        if (overlapLong <= 0 || overlapSide <= 0) continue;
+        const resolveLongitudinal = overlapLong / combinedHalfLength < overlapSide / combinedHalfWidth;
+        if (resolveLongitudinal) {
+            const direction = 0 === longitudinal ? -1 : -Math.sign(longitudinal);
+            playerState.pos.x += forwardX * direction * (overlapLong + .025), playerState.pos.z += forwardZ * direction * (overlapLong + .025);
+            const hitFrontCar = longitudinal > 0;
+            playerState.speed *= hitFrontCar ? .46 : .68, opponent.speed *= hitFrontCar ? .82 : .9;
+        } else {
+            const direction = 0 === lateral ? -1 : -Math.sign(lateral);
+            playerState.pos.x += rightX * direction * (overlapSide + .025), playerState.pos.z += rightZ * direction * (overlapSide + .025), 
+            playerState.heading += .055 * direction, playerState.speed *= .72, opponent.speed *= .9;
+        }
+        if (txPlayerOpponentImpactCooldown <= 0) newImpact = !0, txPlayerOpponentImpactCooldown = .32;
+    }
+    return newImpact;
+}
+
 function vS(e, t) {
     const a = cS(t, "player");
     if (a) return mS(a, e);
@@ -30848,12 +31036,12 @@ function xS(e, t, a, n) {
 }
 
 function AS(e, t, a, n, i, r, o = 0, s, c = .65, l = 0, d = 0) {
-    const yasMarinaCamera = "yas-marina" === globalThis.__F1TI_TRACK_CONFIG__?.id, yasCameraScale = yasMarinaCamera ? .4 / .7 : 1, scaledNear = c * Math.min(1, yasCameraScale);
+    const trackId = globalThis.__F1TI_TRACK_CONFIG__?.id, compactTrackCamera = "yas-marina" === trackId || "marina-bay" === trackId, compactCameraScale = compactTrackCamera ? .4 / .7 : 1, scaledNear = c * Math.min(1, compactCameraScale);
     e.near !== scaledNear && (e.near = scaledNear);
     const f = n.clone().normalize(), u = new ra(Math.sin(a), 0, Math.cos(a));
     u.addScaledVector(f, -u.dot(f)), u.lengthSq() < 1e-5 && u.set(Math.sin(a), 0, Math.cos(a)), 
     u.normalize();
-    const h = (new ra).crossVectors(f, u).normalize(), b = u.clone().negate(), p = "lion" === r, m = (i.backDistance + (p ? 1 : 0)) * yasCameraScale, g = (i.upDistance + (p ? 1.85 : 0)) * yasCameraScale, F = i.lookUp + (p ? 1.1 : 0), _ = (p ? Math.max(50, i.fov) : i.fov) + (p ? 11 * o : 0), y = t.clone().addScaledVector(b, m).addScaledVector(f, g).addScaledVector(h, l * yasCameraScale), v = t.clone().addScaledVector(f, .9), x = y.clone().sub(v), A = x.length(), k = !yasMarinaCamera && s && A > 1e-5 ? s.sampleObstacleBetween(v, y, {
+    const h = (new ra).crossVectors(f, u).normalize(), b = u.clone().negate(), p = "lion" === r, m = (i.backDistance + (p ? 1 : 0)) * compactCameraScale, g = (i.upDistance + (p ? 1.85 : 0)) * compactCameraScale, F = i.lookUp + (p ? 1.1 : 0), _ = (p ? Math.max(50, i.fov) : i.fov) + (p ? 11 * o : 0), y = t.clone().addScaledVector(b, m).addScaledVector(f, g).addScaledVector(h, l * compactCameraScale), v = t.clone().addScaledVector(f, .9), x = y.clone().sub(v), A = x.length(), k = !compactTrackCamera && s && A > 1e-5 ? s.sampleObstacleBetween(v, y, {
         radius: .32,
         side: u
     }) : null;
@@ -30968,6 +31156,13 @@ function wS(e) {
     const O = Vw();
     z.add(O.group), r.scene.add(z);
     let B = null, V = "third", H = "chase", W = 0;
+    const txPlacePlayerVisual = state => {
+        if (!state) return;
+        xS(P.group, state.pos, state.heading, state.normal);
+        if ("marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id) {
+            P.group.position.addScaledVector(state.normal, -.03);
+        }
+    };
     const Z = sS(), q = PA();
     let X = q;
     const Y = dk();
@@ -31064,13 +31259,14 @@ function wS(e) {
         B.setArcadeBoost(w() ? U : 0), de && (t ? Re(e) : B.update(e, s)), B.consumeObstacleImpact() && w() && (Dk(), 
         M() && j.play("hit")), de && !ge && ye(e);
         const l = N.update(e);
-        if (xS(P.group, B.state.pos, B.state.heading, B.state.normal), xS(z, B.state.pos, B.state.heading, B.state.normal), 
+        if (txPlacePlayerVisual(B.state), xS(z, B.state.pos, B.state.heading, B.state.normal), 
         Pe(), N.isAwaitingContinue()) return Me || (Me = !0), void (a - we >= 1e3 / 12 && (we = a, 
         r.render()));
         Me && !N.isActive() && (Me = !1, we = 0);
         const f = Math.min(1, B.state.speed / 82), u = l.active ? l.steer : t ? Ee : n.steer;
         if (P.update(e, f, u), O.update(e, f, u), S?.setEngine(s.throttle, f), xe?.group.visible && xe.update(B.state.speed, .001 * performance.now()), 
-        !de || fe || ge || yS(ie, re, e, trackGround), fe || se?.update(ie, B.state.pos), !(l.active || X || J || ae)) {
+        !de || fe || ge || yS(ie, re, e, trackGround), de && !fe && !ge && "marina-bay" !== globalThis.__F1TI_TRACK_CONFIG__?.id && txResolvePlayerOpponentCollision(B.state, ie, e) && (txPlacePlayerVisual(B.state), 
+        xS(z, B.state.pos, B.state.heading, B.state.normal), Dk(), M() && j.play("hit")), fe || se?.update(ie, B.state.pos), !(l.active || X || J || ae)) {
             const t = W > 0 ? r.camera.position.clone() : null, a = W > 0 ? r.camera.quaternion.clone() : null;
             if ("free" === tunerView) {
                 const e = Math.cos(tunerOrbit.pitch) * tunerOrbit.distance;
@@ -31226,9 +31422,10 @@ function wS(e) {
         console.log(`[F1S] track render optimization: ${o.chunkCount} chunks, ${o.hiddenOriginals} originals hidden`), 
         ve = useShanghaiVisualChunks ? oA(x.group) : null, p(`${S0()} GLB 主游戏\n正在准备地面采样...`);
         try {
+            const redBullRingStableSurface = "red-bull-ring" === globalThis.__F1TI_TRACK_CONFIG__?.id;
             _ = await _A(x, {
-            cellSize: 4,
-                timeBudgetMs: 2600,
+            cellSize: redBullRingStableSurface ? 6 : 4,
+                timeBudgetMs: redBullRingStableSurface ? 12e3 : 2600,
                 onProgress: e => p(`${S0()} GLB 主游戏\n地面采样 ${Math.round(100 * e)}%`)
             });
         } catch (Le) {
@@ -31240,7 +31437,7 @@ function wS(e) {
         const autoGrid = preserveYasSavedGrid || hasFixedTrackGrid ? null : txAutoGrid(x.group, globalThis.__F1TI_TRACK_CONFIG__);
         autoGrid && (Z.splice(0, Z.length, ...autoGrid), globalThis.__F1TI_TRACK_CONFIG__.grid = autoGrid);
         let v = vS(_, Z);
-        txProjectTrackRouteToGround(_), deferredYasRoadObjectCleanup?.(), Ae = gA(x), xe = aM(r.scene), B = Qw(_, v, Ae), tunerOrbit.target.copy(v.pos), ve?.update(v.pos, !0), xS(P.group, B.state.pos, B.state.heading, B.state.normal), 
+        txProjectTrackRouteToGround(_), _ = txRedBullRingTurnTwoGround(_), trackGround = _, deferredYasRoadObjectCleanup?.(), Ae = gA(x), xe = aM(r.scene), B = Qw(_, v, Ae), tunerOrbit.target.copy(v.pos), ve?.update(v.pos, !0), txPlacePlayerVisual(B.state), 
         xS(z, B.state.pos, B.state.heading, B.state.normal), Pe();
         const tunerCars = () => Z.map(e => ({
             id: e.id,
@@ -31292,7 +31489,7 @@ function wS(e) {
                 return t && (t.pos.copy(s.pos), t.heading = s.heading, t.speed = 0, t.lap = 0, t.t = 0, 
                 re = _S(ie), se?.update(ie)), !0;
             }
-            v = s, B.reset(v), de = !1, fe = !1, ge = !1, xS(P.group, B.state.pos, B.state.heading, B.state.normal), 
+            v = s, B.reset(v), de = !1, fe = !1, ge = !1, txPlacePlayerVisual(B.state), 
             xS(z, B.state.pos, B.state.heading, B.state.normal), Pe(), ve?.update(v.pos, !0), 
             r.updateShadowFollow(B.state.pos), AS(r.camera, B.state.pos, B.state.heading, B.state.normal, ne, A, 0, Ae);
             return !0;
@@ -31318,6 +31515,19 @@ function wS(e) {
                 y: .5 * (1 - t.y) * window.innerHeight,
                 visible: t.z > -1 && t.z < 1
             };
+        }, tunerProjectWorld = e => {
+            if (!e) return null;
+            const t = new ra(Number(e.x) || 0, Number(e.y) || 0, Number(e.z) || 0).project(r.camera);
+            return {
+                x: .5 * (t.x + 1) * window.innerWidth,
+                y: .5 * (1 - t.y) * window.innerHeight,
+                visible: t.z > -1 && t.z < 1
+            };
+        }, tunerFocusWorld = e => {
+            if (!e) return tunerState();
+            return tunerOrbit.target.set(Number(e.x) || 0, Number(e.y) || 0, Number(e.z) || 0),
+            tunerOrbit.distance = Math.max(22, Math.min(tunerOrbit.distance, 65)), tunerOrbit.pitch = .82,
+            tunerView = "free", tunerState();
         }, tunerPickWorld = (e, t) => {
             const a = r.renderer.domElement.getBoundingClientRect();
             if (!a.width || !a.height) return null;
@@ -31390,6 +31600,8 @@ function wS(e) {
             },
             projectStart: tunerProjectSelected,
             projectSelected: tunerProjectSelected,
+            projectWorldPoint: tunerProjectWorld,
+            focusWorldPoint: tunerFocusWorld,
             pickWorldPoint: tunerPickWorld,
             dragCarToScreen: tunerDragSelected,
             dragSelectedCarToScreen: tunerDragSelected,
@@ -31404,7 +31616,7 @@ function wS(e) {
             B && (N.cancel(), B.reset(v), De(v.pos), he = 0, be = !1, pe = 0, me = Ce(v.pos), 
             ge = !1, Fe = !1, I.reset(), j.resetRace(), L.resetRace(), U = 0, B.setArcadeBoost(0), 
             r.setArcadeBoost(0), k = Yg(), P.setArcadeMode(w()), C(w() ? "lion-race" : "default", .42), 
-            xS(P.group, B.state.pos, B.state.heading, B.state.normal), xS(z, B.state.pos, B.state.heading, B.state.normal), 
+            txPlacePlayerVisual(B.state), xS(z, B.state.pos, B.state.heading, B.state.normal), 
             Pe(), ie = FS(Z, _), re = _S(ie), oe = new Map(Z.filter(e => "player" !== e.id).map((e, t) => [ e.id, ie[t] ])), 
             se?.update(ie), ce?.resetTrail(), r.updateShadowFollow(B.state.pos), AS(r.camera, B.state.pos, B.state.heading, B.state.normal, ne, A, 0, Ae));
         }, E = () => {
@@ -31560,7 +31772,7 @@ function wS(e) {
             storageKey: BM,
             onPlacementChange: e => {
                 const t = mS(e, _);
-                if ("player" === e.id) return B?.reset(t), xS(P.group, t.pos, t.heading, t.normal), 
+                if ("player" === e.id) return B?.reset(t), txPlacePlayerVisual(t), 
                 xS(z, t.pos, t.heading, t.normal), Pe(), void r.updateShadowFollow(t.pos);
                 const a = oe.get(e.id);
                 a && (a.pos.copy(t.pos), a.heading = t.heading, a.speed = 0, a.lap = 0, a.t = 0, 
@@ -31594,15 +31806,19 @@ function wS(e) {
             renderer: r.renderer,
             trackId: globalThis.__F1TI_TRACK_CONFIG__?.id,
             trackName: globalThis.__F1TI_TRACK_CONFIG__?.name,
-            buildId: "current-data-snapshot-177",
-            focusLabel: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "定位问题弯道" : "定位贴墙路段",
+            buildId: "marina-bay-camera-speed-route-gui-181",
+            focusLabel: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "定位问题弯道" : "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "定位滨海湾发车区" : "定位贴墙路段",
             focusPoint: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? {
                 x: 442,
                 y: 31,
                 z: -713
+            } : "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id ? {
+                x: -348.58,
+                y: 23.55,
+                z: 49.88
             } : null,
-            storageKey: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_barcelona_route_xz_override_v1" : "f1ti_yas_route_xz_override_v1",
-            visualStorageKey: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_barcelona_visual_guide_v1" : "f1ti_yas_visual_guide_v1",
+            storageKey: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_barcelona_route_xz_override_v1" : "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_marina_bay_route_xz_override_v1" : "f1ti_yas_route_xz_override_v1",
+            visualStorageKey: "barcelona" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_barcelona_visual_guide_v1" : "marina-bay" === globalThis.__F1TI_TRACK_CONFIG__?.id ? "f1ti_marina_bay_visual_guide_v1" : "f1ti_yas_visual_guide_v1",
             getRoute: () => globalThis.__F1TI_TRACK_CONFIG__?.route ?? [],
             getVisualRoute: () => xe?.renderGuideRoute ?? [],
             onRouteChanged: () => {

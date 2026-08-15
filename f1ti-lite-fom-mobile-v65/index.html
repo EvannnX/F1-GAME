@@ -366,6 +366,33 @@
         content: ''; position: absolute; left: 50%; top: 100%; width: 2px; height: 15px;
         background: #ff4054; transform: translateX(-50%);
       }
+      .f1ti-issue-marker {
+        position: fixed; z-index: 13990; transform: translate(-50%, -50%);
+        min-width: 26px; height: 26px; padding: 0 7px; border: 2px solid #ff4054;
+        border-radius: 999px; background: rgba(119,10,27,.92); color: #fff;
+        pointer-events: none; font: 900 10px/22px Inter, -apple-system, sans-serif;
+        box-shadow: 0 4px 15px rgba(0,0,0,.48);
+      }
+      .f1ti-issue-marker.is-bump { border-color: #ffd34f; background: rgba(121,82,4,.94); }
+      .f1ti-tuner__issue-modes { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
+      .f1ti-tuner__issue-mode {
+        min-height: 38px; border: 1px solid #4a5362; border-radius: 6px;
+        background: #242b36; color: #d7dbe2; font-size: 11px; font-weight: 900; cursor: pointer;
+      }
+      .f1ti-tuner__issue-mode[data-issue-mode="clipping"].is-active { border-color: #ff4054; background: #861628; color: #fff; }
+      .f1ti-tuner__issue-mode[data-issue-mode="bump"].is-active { border-color: #ffd34f; background: #70500b; color: #fff2b8; }
+      .f1ti-tuner__issue-mode[data-issue-mode="off"].is-active { border-color: #8b96a6; background: #38404d; color: #fff; }
+      .f1ti-tuner__issue-list { display: grid; gap: 6px; max-height: 190px; margin-top: 9px; overflow: auto; }
+      .f1ti-tuner__issue-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; }
+      .f1ti-tuner__issue-focus,
+      .f1ti-tuner__issue-remove {
+        min-height: 34px; border: 1px solid #424b59; border-radius: 5px;
+        background: #151c27; color: #dfe5ee; cursor: pointer; font: 750 10px/1.25 ui-monospace, SFMono-Regular, monospace;
+      }
+      .f1ti-tuner__issue-focus { padding: 5px 8px; text-align: left; }
+      .f1ti-tuner__issue-remove { padding: 0 9px; border-color: #69313a; color: #ff8b99; }
+      .f1ti-tuner__issue-actions { display: grid; grid-template-columns: 1.5fr .8fr; gap: 7px; }
+      .f1ti-tuner__issue-clear { border-color: #69313a; color: #ff9aa6; }
       .f1ti-tuner__fields { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 8px; }
       .f1ti-tuner__fields--two { grid-template-columns: repeat(2, minmax(0,1fr)); }
       .f1ti-tuner__field { display: grid; gap: 5px; min-width: 0; color: #949dac; font-size: 10px; font-weight: 800; }
@@ -414,11 +441,13 @@
       });
     </script>
     <script src="./yas-marina-baseline-data.js?v=65-bund-hackathon-livery-gui-146"></script>
-    <script src="./track-calibration-snapshot-177.js?v=65-current-data-snapshot-177"></script>
-    <script src="./barcelona-baseline-data.js?v=65-current-data-snapshot-177"></script>
-    <script src="./track-selector.js?v=65-current-data-snapshot-177"></script>
-    <script src="./track-tuner.js?v=65-current-data-snapshot-177"></script>
-    <script type="module" crossorigin src="./assets/index-BlSzAKoK.js?v=65-current-data-snapshot-177"></script>
+    <script src="./track-calibration-snapshot-177.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script src="./barcelona-baseline-data.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script src="./marina-bay-baseline-data.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script src="./red-bull-ring-baseline-data.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script src="./track-selector.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script src="./track-tuner.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
+    <script type="module" crossorigin src="./assets/index-BlSzAKoK.js?v=65-red-bull-ring-turn2-full-normal-199"></script>
   </head>
   <body>
     <div id="app"></div>

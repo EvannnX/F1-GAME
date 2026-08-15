@@ -6,8 +6,21 @@
   var YAS_ROUTE_OVERRIDE_KEY = 'f1ti_yas_route_xz_override_v1';
   var YAS_VISUAL_GUIDE_KEY = 'f1ti_yas_visual_guide_v1';
   var BARCELONA_ROUTE_OVERRIDE_KEY = 'f1ti_barcelona_route_xz_override_v1';
+  var MARINA_BAY_ROUTE_OVERRIDE_KEY = 'f1ti_marina_bay_route_xz_override_v1';
   var YAS_BASELINE = globalThis.__F1TI_YAS_BASELINE__ || null;
   var BARCELONA_BASELINE = globalThis.__F1TI_BARCELONA_BASELINE__ || null;
+  var MARINA_BAY_BASELINE = globalThis.__F1TI_MARINA_BAY_BASELINE__ || null;
+  var RED_BULL_RING_BASELINE = globalThis.__F1TI_RED_BULL_RING_BASELINE__ || null;
+  var MARINA_BAY_GRID_REVISION = 'marina-bay-grid-179';
+  // User-saved Marina Bay placements (2026-08-14). Y is sampled from the GLB
+  // road at runtime; do not regenerate or translate these X/Z positions.
+  var MARINA_BAY_GRID = [
+    { id: 'player', x: -348.580, z: 49.880, headingDeg: 7.3 },
+    { id: 'redbull', x: -345.950, z: 45.770, headingDeg: 7.3 },
+    { id: 'ferrari', x: -349.5757913937547, z: 41.943759698599926, headingDeg: 7.3 },
+    { id: 'creator', x: -347.0312281605573, z: 37.703625445140645, headingDeg: 7.3 },
+    { id: 'mercedes', x: -350.680, z: 33.660, headingDeg: 7.3 }
+  ];
   var TRACK_CALIBRATION_SNAPSHOT = globalThis.__F1TI_TRACK_CALIBRATION_SNAPSHOT__ || null;
   // Fixed 2023 Grand Prix topology fitted to the Barcelona GLB asphalt surface.
   // The GLB is used only for placement/height, never for branch discovery. This
@@ -488,6 +501,84 @@
     };
   }
 
+  function makeMarinaBayRoute(savedStart) {
+    // A route saved in the drag editor is already ordered, oriented and
+    // anchored to the user's current grid.  Load it verbatim before falling
+    // back to the generated GLB baseline; re-anchoring it here would move the
+    // edited start and make the formal game differ from the editor.
+    try {
+      var override = JSON.parse(localStorage.getItem(MARINA_BAY_ROUTE_OVERRIDE_KEY) || 'null');
+      if (Array.isArray(override) && override.length >= 16 && override.every(function (point) {
+        return Array.isArray(point) && point.length >= 2 && Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1]));
+      })) {
+        return routeFromLocalPoints(override.map(function (point) {
+          return [Number(point[0]), Number(MARINA_BAY_BASELINE?.surfaceY) || 23.55, Number(point[1])];
+        }), null);
+      }
+    } catch (routeOverrideError) {
+      console.warn('[F1TI] ignored invalid Marina Bay route override', routeOverrideError);
+    }
+    var points = Array.isArray(MARINA_BAY_BASELINE?.routeXZ)
+      ? MARINA_BAY_BASELINE.routeXZ.map(function (point) {
+          return [Number(point[0]), Number(MARINA_BAY_BASELINE.surfaceY) || 23.55, Number(point[1])];
+        })
+      : [];
+    var route = routeFromLocalPoints(points, null);
+    if (!route.length) return route;
+    var anchor = savedStart || (Array.isArray(MARINA_BAY_BASELINE?.grid) ? MARINA_BAY_BASELINE.grid[0] : null);
+    if (!anchor) return route;
+    var startIndex = 0;
+    var bestDistance = Infinity;
+    for (var i = 0; i < route.length; i += 1) {
+      var distance = Math.hypot(route[i][0] - Number(anchor.x), route[i][2] - Number(anchor.z));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        startIndex = i;
+      }
+    }
+    route = route.slice(startIndex).concat(route.slice(0, startIndex));
+    var heading = Number(anchor.headingDeg) * Math.PI / 180;
+    if (Number.isFinite(heading) && route.length > 2) {
+      var forwardX = Math.sin(heading);
+      var forwardZ = Math.cos(heading);
+      var nextScore = (route[1][0] - route[0][0]) * forwardX + (route[1][2] - route[0][2]) * forwardZ;
+      var previous = route[route.length - 1];
+      var previousScore = (previous[0] - route[0][0]) * forwardX + (previous[2] - route[0][2]) * forwardZ;
+      if (previousScore > nextScore) route = [route[0]].concat(route.slice(1).reverse());
+    }
+    return route;
+  }
+
+  function makeRedBullRingRoute(savedStart) {
+    var points = Array.isArray(RED_BULL_RING_BASELINE?.routeXZ)
+      ? RED_BULL_RING_BASELINE.routeXZ.map(function (point) {
+          return [Number(point[0]), Number(RED_BULL_RING_BASELINE.surfaceY) || 50, Number(point[1])];
+        })
+      : [];
+    var route = routeFromLocalPoints(points, null);
+    if (!route.length) return route;
+    var anchor = savedStart;
+    if (!anchor) return route;
+    var startIndex = 0;
+    var bestDistance = Infinity;
+    for (var index = 0; index < route.length; index += 1) {
+      var distance = Math.hypot(route[index][0] - Number(anchor.x), route[index][2] - Number(anchor.z));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        startIndex = index;
+      }
+    }
+    var ordered = route.slice(startIndex).concat(route.slice(0, startIndex));
+    // Keep the saved player grid as the exact finish-line origin. The GLB
+    // skeleton already defines the entire centreline and is not recalculated
+    // from pit/service roads at runtime.
+    ordered[0][0] = Number(anchor.x);
+    ordered[0][2] = Number(anchor.z);
+    return routeFromLocalPoints(ordered.map(function (point) {
+      return [point[0], point[1], point[2]];
+    }), null);
+  }
+
   function makeSpaRoute() {
     var raw = atob(SPA_ROUTE_DATA);
     var bytes = new Uint8Array(raw.length);
@@ -744,6 +835,9 @@
         return SUZUKA_GRID.map(function (item) { return Object.assign({}, item); });
       }
     }
+    if (track.id === 'marina-bay' && calibration?.gridRevision !== MARINA_BAY_GRID_REVISION) {
+      return MARINA_BAY_GRID.map(function (item) { return Object.assign({}, item); });
+    }
     if (Array.isArray(calibration?.placements) && calibration.placements.length) {
       return calibration.placements.map(function (item) {
         return {
@@ -762,6 +856,9 @@
     }
     if (track.id === 'barcelona') {
       return BARCELONA_GRID.map(function (item) { return Object.assign({}, item); });
+    }
+    if (track.id === 'marina-bay') {
+      return MARINA_BAY_GRID.map(function (item) { return Object.assign({}, item); });
     }
     if (!route && !calibration?.start) return null;
     if (track.id === 'shanghai' && !calibration?.start) return null;
@@ -795,8 +892,10 @@
     var calibration = readCalibration(track.id);
     var placement = calibration?.placement || track.placement || null;
     var savedStart = Array.isArray(calibration?.placements) ? calibration.placements.find(function (item) { return item.id === 'player'; }) : null;
+    if (track.id === 'marina-bay' && calibration?.gridRevision !== MARINA_BAY_GRID_REVISION) savedStart = null;
     if (!savedStart && track.id === 'yas-marina') savedStart = YAS_MARINA_GRID[0];
-    var route = track.id === 'spa' ? makeSpaRoute() : track.id === 'suzuka' ? makeSuzukaRoute(placement, savedStart) : track.id === 'bahrain' ? makeBahrainRoute(savedStart) : track.id === 'yas-marina' ? makeYasMarinaRoute(savedStart) : track.id === 'barcelona' ? makeBarcelonaRoute(savedStart) : makeRoute(track);
+    if (!savedStart && track.id === 'marina-bay') savedStart = MARINA_BAY_GRID[0];
+    var route = track.id === 'spa' ? makeSpaRoute() : track.id === 'suzuka' ? makeSuzukaRoute(placement, savedStart) : track.id === 'bahrain' ? makeBahrainRoute(savedStart) : track.id === 'yas-marina' ? makeYasMarinaRoute(savedStart) : track.id === 'barcelona' ? makeBarcelonaRoute(savedStart) : track.id === 'marina-bay' ? makeMarinaBayRoute(savedStart) : track.id === 'red-bull-ring' ? makeRedBullRingRoute(savedStart) : makeRoute(track);
     var savedVisualGuide = null;
     if (track.id === 'yas-marina' || track.id === 'barcelona') {
       try {
@@ -823,11 +922,11 @@
       asset: track.asset,
       url: new URL(track.asset, document.baseURI).href,
       route: route,
-      guideRoute: track.id === 'yas-marina' || track.id === 'barcelona' ? route.map(function (point) { return point.slice(); }) : null,
-      manualGuideRoute: track.id === 'barcelona' && (Boolean(localStorage.getItem(BARCELONA_ROUTE_OVERRIDE_KEY)) || Array.isArray(BARCELONA_BASELINE?.routeXZ)),
-      routeOverrideKey: track.id === 'barcelona' ? BARCELONA_ROUTE_OVERRIDE_KEY : track.id === 'yas-marina' ? YAS_ROUTE_OVERRIDE_KEY : null,
+      guideRoute: track.id === 'yas-marina' || track.id === 'barcelona' || track.id === 'marina-bay' || track.id === 'red-bull-ring' ? route.map(function (point) { return point.slice(); }) : null,
+      manualGuideRoute: track.id === 'barcelona' && (Boolean(localStorage.getItem(BARCELONA_ROUTE_OVERRIDE_KEY)) || Array.isArray(BARCELONA_BASELINE?.routeXZ)) || track.id === 'marina-bay' && Boolean(localStorage.getItem(MARINA_BAY_ROUTE_OVERRIDE_KEY)),
+      routeOverrideKey: track.id === 'barcelona' ? BARCELONA_ROUTE_OVERRIDE_KEY : track.id === 'yas-marina' ? YAS_ROUTE_OVERRIDE_KEY : track.id === 'marina-bay' ? MARINA_BAY_ROUTE_OVERRIDE_KEY : null,
       visualGuideRoute: savedVisualGuide,
-      finishLine: track.id === 'yas-marina' || track.id === 'barcelona' ? makeFinishLine(route) : null,
+      finishLine: track.id === 'yas-marina' || track.id === 'barcelona' || track.id === 'marina-bay' || track.id === 'red-bull-ring' ? makeFinishLine(route) : null,
       grid: makeGrid(track, route, calibration),
       placement: placement,
       calibration: calibration,
