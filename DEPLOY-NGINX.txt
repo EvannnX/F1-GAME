@@ -1,0 +1,11 @@
+# Add these directives inside the evan-xiao.com server block, then reload Nginx:
+gzip_static on;
+gzip_vary on;
+
+# Long cache is safe because build205 track filenames are versioned:
+location ~* ^/f1/assets/.*\\.(glb|hdr|webp|png|jpg|jpeg|mp3|mp4)$ {
+    gzip_static on;
+    expires 30d;
+    add_header Cache-Control "public, max-age=2592000, immutable";
+    try_files $uri =404;
+}
